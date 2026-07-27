@@ -1,15 +1,15 @@
 import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { logger, untilAborted } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import { formatCurrentTime, formatMemories } from "../hindsight/content";
 import recallDescription from "../prompts/tools/recall.md" with { type: "text" };
 import type { ToolSession } from ".";
 
-const memoryRecallSchema = type({
-	query: type("string").describe("natural language search query"),
+const memoryRecallSchema = z.object({
+	query: z.string().describe("natural language search query"),
 });
 
-export type MemoryRecallParams = typeof memoryRecallSchema.infer;
+export type MemoryRecallParams = z.infer<typeof memoryRecallSchema>;
 
 export class MemoryRecallTool implements AgentTool<typeof memoryRecallSchema> {
 	readonly name = "recall";

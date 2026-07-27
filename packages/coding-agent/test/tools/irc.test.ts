@@ -8,6 +8,8 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { acquireReviveAdmissionSlot } from "@oh-my-pi/pi-coding-agent/task";
+import { Semaphore } from "@oh-my-pi/pi-coding-agent/task/parallel";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { IrcTool } from "@oh-my-pi/pi-coding-agent/tools/irc";
 
@@ -159,6 +161,18 @@ describe("IRC", () => {
 			expect(aborted.outcome).toBe("failed");
 		});
 
+		it("bounds delivery history and never exposes message bodies", async () => {
+			for (let index = 0; index < 201; index++) {
+				await bus.send({ from: "0-Main", to: `0-Ghost-${index}`, body: `secret-${index}` });
+			}
+
+			const deliveries = bus.recentDeliveries({ limit: 1_000 });
+			expect(deliveries).toHaveLength(200);
+			expect(deliveries[0]?.recipientId).toBe("0-Ghost-200");
+			expect(deliveries[199]?.recipientId).toBe("0-Ghost-1");
+			expect(JSON.stringify(deliveries)).not.toContain("secret-");
+		});
+
 		it("send surfaces recipient delivery errors as failed", async () => {
 			const sub = makeFakeSession();
 			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session });
@@ -181,6 +195,190 @@ describe("IRC", () => {
 			expect(receipt.outcome).toBe("revived");
 			expect(sub.delivered.map(msg => msg.body)).toEqual(["wake up"]);
 			expect(registry.get("0-Parked")?.status).toBe("idle");
+			const [delivery] = bus.recentDeliveries({ peerId: "0-Parked" });
+			expect(delivery).toMatchObject({
+				senderId: "0-Main",
+				recipientId: "0-Parked",
+				origin: "agent",
+				preview: "[message body hidden]",
+				state: "read",
+				delivery: "revived",
+			});
+			expect(delivery?.queuedAt).toBeLessThanOrEqual(delivery?.deliveredAt ?? 0);
+			expect(delivery?.deliveredAt).toBeLessThanOrEqual(delivery?.readAt ?? 0);
+			expect(bus.peerDeliverySummary("0-Parked")).toMatchObject({ pendingCount: 0, undeliveredCount: 0 });
+		});
+
+		it("defers a saturated revival, then delivers its reserved message after a slot frees", async () => {
+			const admission = new Semaphore(1);
+			await admission.acquire();
+			const sub = makeFakeSession();
+			sub.setOutcome("woken");
+			registry.register({ id: "0-Deferred", displayName: "task", kind: "sub", session: null, status: "parked" });
+			AgentLifecycleManager.global().adopt("0-Deferred", {
+				idleTtlMs: 0,
+				acquireReviveSlot: agentId => acquireReviveAdmissionSlot(admission, agentId, 1_000),
+				revive: async () => sub.session,
+			});
+
+			const sending = bus.send({ from: "0-Holder", to: "0-Deferred", body: "reserved while waiting" });
+			await Promise.resolve();
+			expect(sub.delivered).toEqual([]);
+			expect(bus.unreadCount("0-Deferred")).toBe(1);
+
+			admission.release();
+			expect(await sending).toEqual({ to: "0-Deferred", outcome: "revived" });
+			expect(sub.delivered.map(message => message.body)).toEqual(["reserved while waiting"]);
+		});
+
+		it("bounds circular revival admission so a slot-holder waiting on the recipient cannot wedge", async () => {
+			const admission = new Semaphore(1);
+			await admission.acquire();
+			const sub = makeFakeSession();
+			sub.setOutcome("woken");
+			registry.register({ id: "0-Circular", displayName: "task", kind: "sub", session: null, status: "parked" });
+			AgentLifecycleManager.global().adopt("0-Circular", {
+				idleTtlMs: 0,
+				acquireReviveSlot: agentId => acquireReviveAdmissionSlot(admission, agentId, 10),
+				revive: async () => sub.session,
+			});
+
+			// 0-Holder owns the only slot and waits for this delivery. The
+			// bounded admission falls back to bypass, allowing the reply path.
+			const receipt = await bus.send({ from: "0-Holder", to: "0-Circular", body: "please reply" });
+
+			expect(receipt).toEqual({ to: "0-Circular", outcome: "revived" });
+			expect(sub.delivered.map(message => message.body)).toEqual(["please reply"]);
+			admission.release();
+		});
+
+		it("reserves a send racing park and delivers exactly once after revival", async () => {
+			const flush = Promise.withResolvers<void>();
+			const revived = makeFakeSession();
+			revived.setOutcome("woken");
+			const dyingDeliveries: IrcMessage[] = [];
+			const dying = {
+				sessionManager: {
+					appendCustomEntry: () => {},
+					getEntries: () => [],
+					getSessionId: () => "parking-race",
+					flush: () => flush.promise,
+				},
+				deliverIrcMessage: async (message: IrcMessage) => {
+					dyingDeliveries.push(message);
+					return "woken" as const;
+				},
+				dispose: async () => {},
+			} as unknown as AgentSession;
+			registry.register({
+				id: "0-Parking",
+				displayName: "task",
+				kind: "sub",
+				session: dying,
+				sessionFile: "/tmp/0-Parking.jsonl",
+				status: "idle",
+			});
+			const lifecycle = AgentLifecycleManager.global();
+			lifecycle.adopt("0-Parking", {
+				idleTtlMs: 0,
+				revive: async () => revived.session,
+			});
+
+			const parking = lifecycle.park("0-Parking");
+			expect(registry.get("0-Parking")?.status).toBe("parked");
+			const sending = bus.send({ from: "0-Main", to: "0-Parking", body: "race-safe" });
+			flush.resolve();
+
+			await parking;
+			const receipt = await sending;
+			expect(receipt).toEqual({ to: "0-Parking", outcome: "revived" });
+			expect(dyingDeliveries).toEqual([]);
+			expect(revived.delivered.map(message => message.body)).toEqual(["race-safe"]);
+			expect(bus.unreadCount("0-Parking")).toBe(0);
+		});
+
+		it("send survives a parked revive being replaced and delivers exactly once", async () => {
+			const replacement = makeFakeSession();
+			replacement.setOutcome("woken");
+			const revivalStarted = Promise.withResolvers<void>();
+			const finishRevival = Promise.withResolvers<void>();
+			const superseded = {
+				deliverIrcMessage: async () => "woken" as const,
+				dispose: async () => undefined,
+			} as unknown as AgentSession;
+			registry.register({
+				id: "0-Raced",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				status: "parked",
+			});
+			AgentLifecycleManager.global().adopt("0-Raced", {
+				idleTtlMs: 0,
+				revive: async () => {
+					revivalStarted.resolve();
+					await finishRevival.promise;
+					return superseded;
+				},
+			});
+
+			const sending = bus.send({ from: "0-Main", to: "0-Raced", body: "survive replacement" });
+			await revivalStarted.promise;
+			registry.register({
+				id: "0-Raced",
+				displayName: "replacement",
+				kind: "sub",
+				session: replacement.session,
+				status: "idle",
+			});
+			finishRevival.resolve();
+
+			const receipt = await sending;
+			expect(receipt).toEqual({ to: "0-Raced", outcome: "revived" });
+			expect(replacement.delivered.map(message => message.body)).toEqual(["survive replacement"]);
+			expect(bus.unreadCount("0-Raced")).toBe(0);
+		});
+
+		it("requeues a failed parked handoff when the revive reservation was evicted", async () => {
+			const revivalStarted = Promise.withResolvers<void>();
+			const finishRevival = Promise.withResolvers<void>();
+			const delivered: string[] = [];
+			const revived = {
+				deliverIrcMessage: async (message: IrcMessage) => {
+					if (message.body === "must survive") throw new Error("handoff failed");
+					delivered.push(message.body);
+					return "woken" as const;
+				},
+			} as unknown as AgentSession;
+			registry.register({
+				id: "0-Capped",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				status: "parked",
+			});
+			AgentLifecycleManager.global().adopt("0-Capped", {
+				idleTtlMs: 0,
+				revive: async () => {
+					revivalStarted.resolve();
+					await finishRevival.promise;
+					return revived;
+				},
+			});
+
+			const primary = bus.send({ from: "0-Main", to: "0-Capped", body: "must survive" });
+			await revivalStarted.promise;
+			const fillers = Array.from({ length: 100 }, (_, index) =>
+				bus.send({ from: "0-Main", to: "0-Capped", body: `filler ${index}` }),
+			);
+			expect(bus.unreadCount("0-Capped")).toBe(100);
+			finishRevival.resolve();
+
+			const [primaryReceipt, fillerReceipts] = await Promise.all([primary, Promise.all(fillers)]);
+			expect(primaryReceipt).toEqual({ to: "0-Capped", outcome: "failed", error: "handoff failed" });
+			expect(fillerReceipts.every(receipt => receipt.outcome === "revived")).toBe(true);
+			expect(delivered).toHaveLength(100);
+			expect(bus.inbox("0-Capped").map(message => message.body)).toEqual(["must survive"]);
 		});
 
 		it("send fails cleanly when a parked recipient has no reviver", async () => {
@@ -345,8 +543,44 @@ describe("IRC", () => {
 
 			const receipt = await bus.send({ from: "0-Main", to: "0-Parked", body: "wake up" });
 			expect(receipt).toEqual({ to: "0-Parked", outcome: "failed", error: "revive exploded" });
-			// Failed revival never enqueues: the message is lost, not buffered.
-			expect(bus.unreadCount("0-Parked")).toBe(0);
+			// The pre-revive reservation remains available for later recovery.
+			expect(bus.unreadCount("0-Parked")).toBe(1);
+			const [delivery] = bus.recentDeliveries({ peerId: "0-Parked" });
+			expect(delivery).toMatchObject({
+				state: "failed",
+				failureReason: "revive exploded",
+				preview: "[message body hidden]",
+			});
+			expect(delivery?.failedAt).toBeGreaterThanOrEqual(delivery?.queuedAt ?? Number.POSITIVE_INFINITY);
+			expect(bus.peerDeliverySummary("0-Parked")).toMatchObject({ pendingCount: 0, undeliveredCount: 1 });
+		});
+
+		it("keeps the reserved message when revival admission itself fails", async () => {
+			let reviverRuns = 0;
+			registry.register({
+				id: "0-AdmissionFailed",
+				displayName: "task",
+				kind: "sub",
+				session: null,
+				status: "parked",
+			});
+			AgentLifecycleManager.global().adopt("0-AdmissionFailed", {
+				idleTtlMs: 0,
+				acquireReviveSlot: async () => {
+					throw new Error("admission cancelled");
+				},
+				revive: async () => {
+					reviverRuns++;
+					return makeFakeSession().session;
+				},
+			});
+
+			const receipt = await bus.send({ from: "0-Main", to: "0-AdmissionFailed", body: "keep me" });
+
+			expect(receipt).toEqual({ to: "0-AdmissionFailed", outcome: "failed", error: "admission cancelled" });
+			expect(registry.get("0-AdmissionFailed")).toMatchObject({ status: "parked", session: null });
+			expect(bus.inbox("0-AdmissionFailed", { peek: true }).map(message => message.body)).toEqual(["keep me"]);
+			expect(reviverRuns).toBe(0);
 		});
 	});
 
@@ -366,7 +600,7 @@ describe("IRC", () => {
 			expect(IrcTool.createIf(session)).toBeNull();
 		});
 
-		it("createIf enables interruptible irc while the task tool is available", () => {
+		it("createIf enables irc while the task tool is available", () => {
 			const session: ToolSession = {
 				cwd: "/tmp",
 				hasUI: false,
@@ -378,9 +612,7 @@ describe("IRC", () => {
 			};
 			// Default task.maxRecursionDepth (2) at depth 0: task can spawn, and a
 			// finished subagent must stay reachable.
-			const tool = IrcTool.createIf(session);
-			expect(tool).toBeInstanceOf(IrcTool);
-			expect(tool?.interruptible).toBe(true);
+			expect(IrcTool.createIf(session)).toBeInstanceOf(IrcTool);
 		});
 
 		it("createIf enables irc for a subagent even at the recursion-depth cap", () => {
@@ -410,7 +642,7 @@ describe("IRC", () => {
 			expect(IrcTool.createIf(session)).toBeNull();
 		});
 
-		it("op=list includes parked peers, unread counts, and parent ids", async () => {
+		it("op=list omits parked history by default and exposes it on request", async () => {
 			const sub = makeFakeSession();
 			registry.register({
 				id: "0-AuthLoader",
@@ -425,40 +657,29 @@ describe("IRC", () => {
 			sub.setError(new Error("temporarily unavailable"));
 			await bus.send({ from: "0-Main", to: "0-AuthLoader", body: "unread one" });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
-			const result = await tool.execute("call-1", { op: "list" });
-			expect(result.details?.op).toBe("list");
-			expect(result.details?.peers).toMatchObject([
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
+			const defaultResult = await tool.execute("call-1", { op: "list" });
+			expect(defaultResult.details?.peers).toMatchObject([
+				{ id: "0-AuthLoader", status: "running", parentId: "0-Main", unread: 1 },
+			]);
+			const defaultText = defaultResult.content[0]?.type === "text" ? defaultResult.content[0].text : "";
+			expect(defaultText).toContain("1 parked historical child omitted");
+			expect(defaultText).not.toContain("[task · sub · parked]");
+
+			const fullResult = await tool.execute("call-2", { op: "list", includeParked: true });
+			expect(fullResult.details?.peers).toMatchObject([
 				{ id: "0-AuthLoader", status: "running", parentId: "0-Main", unread: 1 },
 				{ id: "0-Parked", status: "parked", unread: 0 },
 			]);
-			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			expect(text).toContain("Parked agents are revived automatically");
-		});
-
-		it("op=list hides advisor-kind refs from the peer roster", async () => {
-			const sub = makeFakeSession();
-			registry.register({ id: "0-Worker", displayName: "task", kind: "sub", session: sub.session });
-			registry.register({
-				id: "0-Main/advisor",
-				displayName: "advisor",
-				kind: "advisor",
-				session: null,
-				status: "parked",
-			});
-
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
-			const result = await tool.execute("call-1", { op: "list" });
-			const peerIds = result.details?.peers?.map(peer => peer.id) ?? [];
-			expect(peerIds).toContain("0-Worker");
-			expect(peerIds).not.toContain("0-Main/advisor");
+			const fullText = fullResult.content[0]?.type === "text" ? fullResult.content[0].text : "";
+			expect(fullText).toContain("Parked agents are revived automatically");
 		});
 
 		it("op=send returns receipts immediately without waiting for a reply", async () => {
 			const sub = makeFakeSession();
 			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "0-Sub", message: "ping" });
 			expect(result.isError).toBeFalsy();
 			expect(result.details?.receipts).toEqual([{ to: "0-Sub", outcome: "injected" }]);
@@ -474,7 +695,7 @@ describe("IRC", () => {
 			registry.register({ id: "0-B", displayName: "task", kind: "sub", session: b.session });
 			registry.register({ id: "0-Parked", displayName: "task", kind: "sub", session: null, status: "parked" });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "all", message: "anyone there?" });
 			// Broadcast skips parked agents; one failure does not block the other delivery.
 			expect(result.details?.receipts).toEqual([
@@ -482,24 +703,6 @@ describe("IRC", () => {
 				{ to: "0-B", outcome: "failed", error: "kaput" },
 			]);
 			expect(a.delivered.map(msg => msg.body)).toEqual(["anyone there?"]);
-		});
-
-		it("op=send to=all does not relay sibling legs when the broadcast also reaches main", async () => {
-			const main = makeFakeSession();
-			registry.register({ id: "Main", displayName: "main", kind: "main", session: main.session });
-			const b = makeFakeSession();
-			registry.register({ id: "0-B", displayName: "task", kind: "sub", session: b.session });
-			registry.register({ id: "0-A", displayName: "task", kind: "sub", session: makeFakeSession().session });
-
-			const tool = new IrcTool(makeToolSession(registry, "0-A"));
-			await tool.execute("call-1", { op: "send", to: "all", message: "anyone there?" });
-
-			// Main receives the broadcast directly (its own incoming card) ...
-			expect(main.delivered.map(msg => msg.body)).toEqual(["anyone there?"]);
-			// ... so the 0-A → 0-B sibling leg must NOT also be relayed to main: it
-			// would render the identical body a second time.
-			expect(main.relayed).toEqual([]);
-			expect(b.delivered.map(msg => msg.body)).toEqual(["anyone there?"]);
 		});
 
 		it("op=send await=true round-trips the recipient's reply", async () => {
@@ -514,7 +717,7 @@ describe("IRC", () => {
 				void bus.send({ from: "0-Sub", to: msg.from, body: "pong", replyTo: msg.id });
 			});
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "0-Sub", message: "ping", await: true });
 			expect(result.details?.waited?.body).toBe("pong");
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
@@ -532,7 +735,7 @@ describe("IRC", () => {
 				void bus.send({ from: "0-Sub", to: msg.from, body: "fresh reply", replyTo: msg.id });
 			});
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "0-Sub", message: "ping", await: true });
 
 			expect(result.details?.waited?.body).toBe("fresh reply");
@@ -543,7 +746,7 @@ describe("IRC", () => {
 			const sub = makeFakeSession();
 			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", {
 				op: "send",
 				to: "0-Sub",
@@ -558,37 +761,8 @@ describe("IRC", () => {
 			expect(text).toContain("No reply from 0-Sub");
 		});
 
-		it("op=send await=true preserves the delivery receipt when the wait is interrupted", async () => {
-			// Regression: the tool is marked interruptible so `job poll` / `irc wait` return
-			// early on incoming messages, but `send await:true` also runs the reply wait under
-			// the same signal. If the abort lands after the message was delivered, the tool
-			// must surface a successful receipt so the agent loop keeps the tool as "sent"
-			// and does not report it as skipped — which would prompt a duplicate resend.
-			const sub = makeFakeSession();
-			registry.register({ id: "0-Sub", displayName: "task", kind: "sub", session: sub.session });
-
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
-			const controller = new AbortController();
-			// Abort once delivery reaches the peer, mimicking a steering / IRC interrupt
-			// landing between the send resolving and the reply arriving.
-			sub.onDeliver(() => controller.abort(new Error("mock interrupt")));
-
-			const result = await tool.execute(
-				"call-1",
-				{ op: "send", to: "0-Sub", message: "ping", await: true, timeoutMs: 30_000 },
-				controller.signal,
-			);
-
-			expect(result.isError).toBeFalsy();
-			expect(sub.delivered.map(msg => msg.body)).toEqual(["ping"]);
-			expect(result.details?.receipts?.[0]?.outcome).toBe("injected");
-			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			expect(text).toContain("Send delivered");
-			expect(text).toContain("interrupted");
-		});
-
 		it("op=send rejects await with to=all and self-sends", async () => {
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const broadcast = await tool.execute("call-1", { op: "send", to: "all", message: "x", await: true });
 			expect(broadcast.isError).toBe(true);
 			const self = await tool.execute("call-2", { op: "send", to: "0-Main", message: "x" });
@@ -596,103 +770,19 @@ describe("IRC", () => {
 		});
 
 		it("op=send returns a failed receipt for unknown targets", async () => {
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "send", to: "0-Ghost", message: "ping" });
 			expect(result.isError).toBe(true);
 			expect(result.details?.receipts?.[0]?.outcome).toBe("failed");
 		});
 
 		it("op=wait returns a clean non-error timeout result", async () => {
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const result = await tool.execute("call-1", { op: "wait", timeoutMs: 5 });
 			expect(result.isError).toBeFalsy();
 			expect(result.details?.waited).toBeNull();
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			expect(text).toContain("No message");
-		});
-
-		it("op=wait consumes a pending IRC aside before honoring a queued interrupt abort", async () => {
-			const { session } = createRealSession();
-			sessions.push(session);
-			Object.defineProperty(session, "isStreaming", { value: true, configurable: true });
-			registry.register({ id: "0-Running", displayName: "task", kind: "sub", session });
-
-			const delivery = await session.deliverIrcMessage({
-				id: "msg-wait-pending",
-				from: "0-Main",
-				to: "0-Running",
-				body: "queued interrupt note",
-				ts: Date.now(),
-			});
-			expect(delivery).toBe("injected");
-
-			const tool = new IrcTool(makeToolSession(registry, "0-Running"));
-			const controller = new AbortController();
-			controller.abort(new Error("queued IRC interrupt"));
-
-			const result = await tool.execute("call-1", { op: "wait", timeoutMs: 30_000 }, controller.signal);
-
-			expect(result.isError).toBeFalsy();
-			expect(result.details?.waited).toMatchObject({
-				id: "msg-wait-pending",
-				from: "0-Main",
-				to: "0-Running",
-				body: "queued interrupt note",
-			});
-			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			expect(text).toContain("queued interrupt note");
-
-			const empty = await tool.execute("call-2", { op: "inbox" });
-			expect(empty.details?.inbox).toEqual([]);
-		});
-
-		it("op=inbox drains IRC asides that arrived while the caller was running", async () => {
-			const { session } = createRealSession();
-			sessions.push(session);
-			Object.defineProperty(session, "isStreaming", { value: true, configurable: true });
-			registry.register({ id: "0-Running", displayName: "task", kind: "sub", session });
-
-			const delivery = await session.deliverIrcMessage({
-				id: "msg-running",
-				from: "0-Main",
-				to: "0-Running",
-				body: "parallel note",
-				ts: Date.now(),
-			});
-			expect(delivery).toBe("injected");
-
-			const tool = new IrcTool(makeToolSession(registry, "0-Running"));
-			const result = await tool.execute("call-1", { op: "inbox" });
-
-			expect(result.details?.inbox?.map(msg => msg.body)).toEqual(["parallel note"]);
-			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			expect(text).toContain("parallel note");
-		});
-
-		it("op=inbox peek surfaces a pending IRC aside and prevents it auto-injecting", async () => {
-			const { session } = createRealSession();
-			sessions.push(session);
-			Object.defineProperty(session, "isStreaming", { value: true, configurable: true });
-			registry.register({ id: "0-Running", displayName: "task", kind: "sub", session });
-
-			await session.deliverIrcMessage({
-				id: "msg-peek",
-				from: "0-Main",
-				to: "0-Running",
-				body: "peeked note",
-				ts: Date.now(),
-			});
-
-			const tool = new IrcTool(makeToolSession(registry, "0-Running"));
-			const peeked = await tool.execute("call-1", { op: "inbox", peek: true });
-			expect(peeked.details?.inbox?.map(msg => msg.body)).toEqual(["peeked note"]);
-
-			// The peek surfaced the body via the tool result, so the aside-channel
-			// copy must NOT also be auto-injected at the next step: a second drain
-			// returns nothing (the pending aside was consumed out of the
-			// auto-inject queue when peek surfaced it).
-			const second = await tool.execute("call-2", { op: "inbox" });
-			expect(second.details?.inbox).toEqual([]);
 		});
 
 		it("op=inbox drains the caller's mailbox", async () => {
@@ -703,7 +793,7 @@ describe("IRC", () => {
 			main.setError(new Error("temporarily unavailable"));
 			await bus.send({ from: "0-Sub", to: "0-Main", body: "fyi" });
 
-			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"), null);
 			const peeked = await tool.execute("call-1", { op: "inbox", peek: true });
 			expect(peeked.details?.inbox?.map(msg => msg.body)).toEqual(["fyi"]);
 			const drained = await tool.execute("call-2", { op: "inbox" });
@@ -730,20 +820,24 @@ describe("IRC", () => {
 				to: "0-Me",
 				body: "wake up",
 				ts: Date.now(),
+				origin: "agent",
 			});
 			expect(outcome).toBe("woken");
 			expect(promptSpy).toHaveBeenCalledTimes(1);
-			// The idle wake routes through #wakeForIrc, which batches records into one prompt —
-			// even a lone incoming message is delivered as a one-element array.
-			const prompted = (promptSpy.mock.calls[0]?.[0] as unknown as CustomMessage[])[0];
-			expect(prompted).toMatchObject({ role: "custom", customType: "irc:incoming" });
-			expect(prompted.details).toMatchObject({ id: "msg-1", from: "0-Peer", message: "wake up" });
+			const prompted = promptSpy.mock.calls[0]?.[0] as unknown as CustomMessage;
+			expect(prompted).toMatchObject({ role: "custom", customType: "irc:incoming", attribution: "agent" });
+			expect(prompted.details).toMatchObject({
+				id: "msg-1",
+				from: "0-Peer",
+				message: "wake up",
+				origin: "agent",
+			});
 
 			const event = await ircEvent;
 			expect(event.type).toBe("irc_message");
 		});
 
-		it("queues peer IRC as an interrupt while a turn is streaming", async () => {
+		it("queues a non-interrupting aside when a turn is streaming", async () => {
 			const { session } = createRealSession();
 			sessions.push(session);
 			const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
@@ -755,35 +849,10 @@ describe("IRC", () => {
 				to: "0-Me",
 				body: "mid-turn note",
 				ts: Date.now(),
+				origin: "agent",
 			});
 			expect(outcome).toBe("injected");
 			expect(promptSpy).not.toHaveBeenCalled();
-			expect(await session.agent.hasIrcInterrupts?.()).toBe(true);
-		});
-
-		it("queues parent IRC as steering while a subagent turn is streaming", async () => {
-			const { session } = createRealSession();
-			sessions.push(session);
-			const promptSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
-			Object.defineProperty(session, "isStreaming", { value: true, configurable: true });
-			registry.register({ id: "0-Child", displayName: "task", kind: "sub", parentId: "Main", session });
-
-			const outcome = await session.deliverIrcMessage({
-				id: "msg-parent",
-				from: "Main",
-				to: "0-Child",
-				body: "change approach",
-				ts: Date.now(),
-			});
-			const queued = session.agent.peekSteeringQueue();
-			expect(outcome).toBe("injected");
-			expect(promptSpy).not.toHaveBeenCalled();
-			expect(session.agent.hasIrcInterrupts?.()).toBe(false);
-			expect(queued).toHaveLength(1);
-			const parentSteer = queued[0];
-			expect(parentSteer?.role).toBe("user");
-			if (parentSteer?.role !== "user") throw new Error("expected queued parent IRC steer");
-			expect(parentSteer.content).toContain("change approach");
 		});
 
 		it("auto-replies via an ephemeral side turn when the sender awaits and async execution is disabled", async () => {

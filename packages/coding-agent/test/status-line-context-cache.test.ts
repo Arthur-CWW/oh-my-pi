@@ -7,11 +7,10 @@
  * matches the provider and the `/context` panel instead of an independent
  * estimate that drifted past 100%.
  *
- * `getTopBorder()` runs on every agent event (event-controller.ts), so the
- * breakdown is memoized: it re-queries `getContextUsage()` only when an input
- * it depends on changes (a new/grown message, a replaced message array, or the
- * model's context window). A stable conversation must not re-query on every
- * redraw — that per-event recompute is what previously froze large sessions.
+ * Border reads are cached, and the breakdown itself is memoized: it re-queries
+ * `getContextUsage()` only when an input it depends on changes (a new/grown
+ * message, a replaced message array, or the model's context window). A stable
+ * conversation must not re-query on repeated redraws.
  */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -36,15 +35,12 @@ interface Fake {
 	usageCalls: () => number;
 	/** Swap the value the next `getContextUsage()` query returns. */
 	setUsage: (usage: ContextUsage | undefined) => void;
-	/** Bump the in-flight pending revision the next `getCachedContextBreakdown()` reads. */
-	setRevision: (n: number) => void;
 }
 
 function makeSession(opts: { messages: unknown[]; contextWindow?: number; usage?: ContextUsage | undefined }): Fake {
 	const contextWindow = opts.contextWindow ?? 200_000;
 	let usage: ContextUsage | undefined = "usage" in opts ? opts.usage : { tokens: 1234, contextWindow, percent: 0.6 };
 	let calls = 0;
-	let revision = 0;
 	const session = {
 		messages: opts.messages,
 		systemPrompt: ["You are a helpful assistant."],
@@ -58,10 +54,6 @@ function makeSession(opts: { messages: unknown[]; contextWindow?: number; usage?
 				output: 0,
 				cacheRead: 0,
 				cacheWrite: 0,
-				totalTokens: 0,
-				orchestrationInput: 0,
-				orchestrationOutput: 0,
-				orchestrationCacheRead: 0,
 				premiumRequests: 0,
 				cost: 0,
 			}),
@@ -72,18 +64,12 @@ function makeSession(opts: { messages: unknown[]; contextWindow?: number; usage?
 			calls++;
 			return usage;
 		},
-		get contextUsageRevision() {
-			return revision;
-		},
 	} as unknown as AgentSession;
 	return {
 		session,
 		usageCalls: () => calls,
 		setUsage: next => {
 			usage = next;
-		},
-		setRevision: (n: number) => {
-			revision = n;
 		},
 	};
 }
@@ -168,38 +154,20 @@ describe("StatusLineComponent context breakdown", () => {
 		expect(usageCalls()).toBe(2);
 	});
 
-	it("re-queries when only the in-flight pending revision changes (no message change)", () => {
-		const fake = makeSession({
-			messages: [userMessage("hi")],
-			usage: { tokens: 190_000, contextWindow: 272_000, percent: 69.9 },
-		});
-		const comp = new StatusLineComponent(fake.session);
-		expect(comp.getCachedContextBreakdown().usedTokens).toBe(190_000);
-
-		// Turn ends/aborts: the message list and last-message fingerprint are
-		// unchanged, but clearing the pending snapshot recalibrates usage to the
-		// real provider anchor. The memo must not keep serving the stale estimate.
-		fake.setUsage({ tokens: 117_000, contextWindow: 272_000, percent: 43.0 });
-		fake.setRevision(1);
-
-		expect(comp.getCachedContextBreakdown().usedTokens).toBe(117_000);
-		expect(fake.usageCalls()).toBe(2);
-	});
-
-	it("propagates a speculative/numeric token count, e.g. right after compaction", () => {
+	it("propagates an unknown (null) token count, e.g. right after compaction", () => {
 		const { session } = makeSession({
 			messages: [userMessage("compaction summary")],
-			usage: { tokens: 1234, contextWindow: 272_000, percent: 0.45 },
+			usage: { tokens: null, contextWindow: 272_000, percent: null },
 		});
 		const breakdown = new StatusLineComponent(session).getCachedContextBreakdown();
-		expect(breakdown.usedTokens).toBe(1234);
+		expect(breakdown.usedTokens).toBeNull();
 		expect(breakdown.contextWindow).toBe(272_000);
 	});
 
-	it("falls back to the model window with 0 tokens when usage is unavailable", () => {
+	it("falls back to the model window with null tokens when usage is unavailable", () => {
 		const { session } = makeSession({ messages: [userMessage("hi")], usage: undefined, contextWindow: 128_000 });
 		const breakdown = new StatusLineComponent(session).getCachedContextBreakdown();
-		expect(breakdown.usedTokens).toBe(0);
+		expect(breakdown.usedTokens).toBeNull();
 		expect(breakdown.contextWindow).toBe(128_000);
 	});
 
@@ -236,10 +204,10 @@ describe("StatusLineComponent context breakdown", () => {
 		expect(plain).toContain("1.8%/272K");
 	});
 
-	it("renders speculative percent instead of ? after compaction", () => {
+	it("renders ? for the percent while the token count is unknown (post-compaction)", () => {
 		const { session } = makeSession({
 			messages: [userMessage("compaction summary")],
-			usage: { tokens: 1234, contextWindow: 272_000, percent: 0.45 },
+			usage: { tokens: null, contextWindow: 272_000, percent: null },
 		});
 		const comp = new StatusLineComponent(session);
 		comp.updateSettings({
@@ -250,14 +218,17 @@ describe("StatusLineComponent context breakdown", () => {
 		});
 
 		const plain = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
-		expect(plain).toContain("0.5%/272K");
+		expect(plain).toContain("?/272K");
 	});
 
-	it("renders token usage with an unknown marker when the model window is unavailable", () => {
+	it("renders the provider-anchored 62.8% even when the transcript estimate would balloon past it", () => {
+		const contextWindow = 272_000;
+		const providerTokens = 170_816; // 62.8% of the window
 		const { session } = makeSession({
-			messages: [userMessage("hi")],
-			contextWindow: 0,
-			usage: { tokens: 5000, contextWindow: 0, percent: 0 },
+			// A large transcript whose independent cl100k estimate would dwarf real usage.
+			messages: Array.from({ length: 200 }, (_, i) => userMessage(`turn ${i} `.repeat(64))),
+			usage: { tokens: providerTokens, contextWindow, percent: (providerTokens / contextWindow) * 100 },
+			contextWindow,
 		});
 		const comp = new StatusLineComponent(session);
 		comp.updateSettings({
@@ -267,8 +238,9 @@ describe("StatusLineComponent context breakdown", () => {
 			separator: "powerline-thin",
 		});
 
+		// The status line surfaces the provider count verbatim, never the transcript estimate.
+		expect(comp.getCachedContextBreakdown().usedTokens).toBe(providerTokens);
 		const plain = comp.getTopBorder(80).content.replaceAll(/\x1b\[[0-9;]*m/g, "");
-		expect(plain).toContain("5K/?");
-		expect(plain).not.toContain("0.0%/0");
+		expect(plain).toContain("62.8%/272K");
 	});
 });

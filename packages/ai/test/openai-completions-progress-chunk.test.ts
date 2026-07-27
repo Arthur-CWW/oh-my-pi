@@ -11,7 +11,6 @@ const openAICompletionsModel = {
 	...(getBundledModel("openai", "gpt-4o-mini") as Model<"openai-completions">),
 	api: "openai-completions",
 } satisfies Model<"openai-completions">;
-const openAIResponsesModel = getBundledModel("openai", "gpt-5-mini") as Model<"openai-responses">;
 
 function baseContext(): Context {
 	return {
@@ -106,19 +105,6 @@ describe("resolveOpenAICompat stream idle timeout", () => {
 		expect(model.compat.streamIdleTimeoutMs).toBe(600_000);
 	});
 
-	it("widens namespaced custom Z.AI OpenAI-compatible GLM 5.2 endpoints", () => {
-		const model = buildModel({
-			...openAICompletionsModel,
-			id: "zai-org/GLM-5.2",
-			name: "GLM-5.2",
-			provider: "openai",
-			baseUrl: "https://api.z.ai/api/coding/paas/v4",
-			compat: openAICompletionsModel.compatConfig,
-		} as ModelSpec<"openai-completions">);
-
-		expect(model.compat.streamIdleTimeoutMs).toBe(600_000);
-	});
-
 	it("widens DeepSeek V4 reasoning streams on the official DeepSeek API", () => {
 		const model = buildModel({
 			...openAICompletionsModel,
@@ -189,65 +175,6 @@ describe("resolveOpenAICompat stream idle timeout", () => {
 
 	it("keeps ordinary OpenAI-compatible models on the global timeout", () => {
 		expect(openAICompletionsModel.compat.streamIdleTimeoutMs).toBeUndefined();
-	});
-
-	it("widens local OpenAI-compatible stream watchdogs", () => {
-		const completions = buildModel({
-			...openAICompletionsModel,
-			id: "qwen3-local",
-			name: "Qwen3 Local",
-			provider: "llama.cpp",
-			baseUrl: "http://localhost:8080/v1",
-			compat: openAICompletionsModel.compatConfig,
-		} as ModelSpec<"openai-completions">);
-		const responses = buildModel({
-			...openAIResponsesModel,
-			id: "qwen3-local",
-			name: "Qwen3 Local",
-			provider: "llama.cpp",
-			baseUrl: "http://localhost:8080/v1",
-			compat: openAIResponsesModel.compatConfig,
-		} as ModelSpec<"openai-responses">);
-
-		expect(completions.compat.streamIdleTimeoutMs).toBe(300_000);
-		expect(responses.compat.streamIdleTimeoutMs).toBe(300_000);
-	});
-
-	it("widens custom loopback OpenAI-compatible responses stream watchdogs", () => {
-		const model = buildModel({
-			...openAIResponsesModel,
-			id: "local-model",
-			name: "Local Model",
-			provider: "custom-local",
-			baseUrl: "http://127.0.0.1:8080/v1",
-			compat: openAIResponsesModel.compatConfig,
-		} as ModelSpec<"openai-responses">);
-
-		expect(model.compat.streamIdleTimeoutMs).toBe(300_000);
-	});
-
-	it("widens Xiaomi MiMo Pro stream watchdog (issue #1770)", () => {
-		const model = buildModel({
-			...openAICompletionsModel,
-			id: "mimo-v2.5-pro",
-			name: "MiMo v2.5 Pro",
-			provider: "xiaomi",
-			baseUrl: "https://api.xiaomimimo.com/v1",
-		} as ModelSpec<"openai-completions">);
-
-		expect(model.compat.streamIdleTimeoutMs).toBe(300_000);
-	});
-
-	it("widens Alibaba Coding Plan stream watchdog (issue #1770)", () => {
-		const model = buildModel({
-			...openAICompletionsModel,
-			id: "qwen3.7-plus",
-			name: "Qwen3.7 Plus",
-			provider: "alibaba-coding-plan",
-			baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
-		} as ModelSpec<"openai-completions">);
-
-		expect(model.compat.streamIdleTimeoutMs).toBe(600_000);
 	});
 });
 

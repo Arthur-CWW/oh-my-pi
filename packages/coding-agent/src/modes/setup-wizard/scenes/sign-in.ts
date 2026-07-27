@@ -1,76 +1,28 @@
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
 import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
-import {
-	type Component,
-	type Focusable,
-	Input,
-	matchesKey,
-	type SgrMouseEvent,
-	wrapTextWithAnsi,
-} from "@oh-my-pi/pi-tui";
+import { Input, matchesKey, type SgrMouseEvent, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath } from "@oh-my-pi/pi-utils";
-import { copyToClipboard } from "../../../utils/clipboard";
+import { keyHint } from "../../components/keybinding-hints";
 import { OAuthSelectorComponent } from "../../components/oauth-selector";
 import { theme } from "../../theme/theme";
+import { matchesUiDismiss } from "../../utils/keybinding-matchers";
 import type { SetupSceneHost, SetupTab } from "./types";
 
 function loginUrlLink(url: string): string {
 	return `\x1b]8;;${url}\x07Open login URL\x1b]8;;\x07`;
 }
 
-function loginCopyHint(): string {
-	return theme.fg("dim", "(clipboard copy attempted; Alt+C retries)");
-}
-
-class CopyablePromptInput implements Component, Focusable {
-	#input: Input;
-	#onCopy: () => void;
-
-	constructor(input: Input, onCopy: () => void) {
-		this.#input = input;
-		this.#onCopy = onCopy;
-	}
-
-	get focused(): boolean {
-		return this.#input.focused;
-	}
-
-	set focused(value: boolean) {
-		this.#input.focused = value;
-	}
-
-	setUseTerminalCursor(useTerminalCursor: boolean): void {
-		this.#input.setUseTerminalCursor(useTerminalCursor);
-	}
-
-	render(width: number): readonly string[] {
-		return this.#input.render(width);
-	}
-
-	handleInput(data: string): void {
-		if (matchesKey(data, "alt+c")) {
-			this.#onCopy();
-			return;
-		}
-		this.#input.handleInput(data);
-	}
-
-	invalidate(): void {
-		this.#input.invalidate();
-	}
-}
-
 interface PromptState {
 	message: string;
 	placeholder?: string;
-	input: CopyablePromptInput;
+	input: Input;
 }
 
 /**
  * "Sign in" panel: lets the user authenticate one or more model providers via
  * OAuth. Unlike a standalone scene it never auto-advances the wizard — the user
- * may sign in to several providers and then continue with Esc.
+ * may sign in to several providers and then continue with the configured dismissal binding.
  */
 export class SignInTab implements SetupTab {
 	readonly id = "sign-in";
@@ -80,7 +32,6 @@ export class SignInTab implements SetupTab {
 	#selector: OAuthSelectorComponent;
 	#statusLines: string[] = [];
 	#authUrl: string | undefined;
-	#authLaunchUrl: string | undefined;
 	#prompt: PromptState | undefined;
 	#promptResolve: ((value: string) => void) | undefined;
 	#loginAbort: AbortController | undefined;
@@ -113,13 +64,12 @@ export class SignInTab implements SetupTab {
 
 	handleInput(data: string): void {
 		if (this.#loggingInProvider) {
-			if (this.#authUrl && (matchesKey(data, "alt+c") || (data === "c" && !this.#prompt))) {
-				void this.#copyAuthUrl();
+			if (matchesUiDismiss(data) || matchesKey(data, "ctrl+c")) {
+				this.#loginAbort?.abort();
+				this.#resolvePrompt("");
 				return;
 			}
-			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
-				this.#loginAbort?.abort();
-			}
+			this.#prompt?.input.handleInput(data);
 			return;
 		}
 		this.#selector.handleInput(data);
@@ -143,13 +93,7 @@ export class SignInTab implements SetupTab {
 
 		const urlLines = this.#authUrl ? wrapTextWithAnsi(theme.fg("dim", this.#authUrl), width) : [];
 		if (this.#authUrl) {
-			lines.push(
-				theme.fg("accent", `Browser login: ${loginUrlLink(this.#authUrl)} ${loginCopyHint()}`),
-				...urlLines.slice(0, 2),
-			);
-			if (this.#authLaunchUrl) {
-				lines.push(theme.fg("dim", `Local shortcut (this machine only): ${this.#authLaunchUrl}`));
-			}
+			lines.push(theme.fg("accent", `Browser login: ${loginUrlLink(this.#authUrl)}`), ...urlLines.slice(0, 2));
 		}
 		if (this.#prompt) {
 			lines.push(theme.fg("warning", this.#prompt.message));
@@ -186,7 +130,6 @@ export class SignInTab implements SetupTab {
 		this.#loggingInProvider = providerId;
 		this.#statusLines = [theme.fg("dim", "Starting OAuth flow…")];
 		this.#authUrl = undefined;
-		this.#authLaunchUrl = undefined;
 		this.#loginAbort = new AbortController();
 		this.host.restoreFocus();
 		this.host.requestRender();
@@ -194,17 +137,7 @@ export class SignInTab implements SetupTab {
 			await this.#authStorage.login(providerId as OAuthProvider, {
 				signal: this.#loginAbort.signal,
 				onAuth: info => {
-					// Store the full authorization URL as the primary copy/display
-					// target: it works from any machine, including SSH boxes where
-					// the OMP-hosted `launchUrl` would resolve against the user's
-					// local browser and fail. The wizard render uses
-					// `wrapTextWithAnsi`, so long URLs wrap across lines rather
-					// than getting truncated — the RFC 7636 §4.3 PKCE-downgrade
-					// bug that motivated `launchUrl` is unreachable through this
-					// surface. `launchUrl` is still surfaced as an optional local
-					// shortcut for wide-terminal local users.
 					this.#authUrl = info.url;
-					this.#authLaunchUrl = info.launchUrl && info.launchUrl !== info.url ? info.launchUrl : undefined;
 					this.#statusLines = [];
 					if (info.instructions) {
 						this.#statusLines.push(theme.fg("warning", info.instructions));
@@ -212,7 +145,6 @@ export class SignInTab implements SetupTab {
 					if (useManualInput) {
 						this.#statusLines.push(theme.fg("dim", "Paste the returned code or redirect URL when prompted."));
 					}
-					void this.#copyAuthUrl();
 					this.host.ctx.openInBrowser(info.url);
 					this.host.requestRender();
 				},
@@ -231,7 +163,6 @@ export class SignInTab implements SetupTab {
 				theme.fg("dim", `Credentials saved to ${getAgentDbPath()}`),
 			];
 			this.#authUrl = undefined;
-			this.#authLaunchUrl = undefined;
 			this.#loggingInProvider = undefined;
 			this.#loginAbort = undefined;
 			this.#selector.stopValidation();
@@ -243,15 +174,13 @@ export class SignInTab implements SetupTab {
 			if (this.#loginAbort?.signal.aborted) {
 				this.#statusLines = [theme.fg("dim", "Login cancelled.")];
 				this.#authUrl = undefined;
-				this.#authLaunchUrl = undefined;
 			} else {
 				const message = error instanceof Error ? error.message : String(error);
 				this.#statusLines = [
 					theme.fg("error", `Login failed: ${message}`),
-					theme.fg("dim", "Choose another provider or press Esc to continue."),
+					theme.fg("dim", "Choose another provider or ") + keyHint("ui.dismiss", "to continue."),
 				];
 				this.#authUrl = undefined;
-				this.#authLaunchUrl = undefined;
 			}
 			this.#loggingInProvider = undefined;
 			this.#loginAbort = undefined;
@@ -260,34 +189,17 @@ export class SignInTab implements SetupTab {
 		}
 	}
 
-	async #copyAuthUrl(): Promise<void> {
-		const url = this.#authUrl;
-		if (!url) return;
-		try {
-			await copyToClipboard(url);
-		} catch {
-			// Clipboard integration is best-effort; the full URL remains rendered below.
-		}
-		this.host.requestRender();
-	}
-
 	#showPrompt(prompt: { message: string; placeholder?: string }): Promise<string> {
 		this.#resolvePrompt("");
 		const input = new Input();
-		const focusInput = new CopyablePromptInput(input, () => {
-			void this.#copyAuthUrl();
-		});
 		const pending = Promise.withResolvers<string>();
 		this.#promptResolve = pending.resolve;
-		this.#prompt = { message: prompt.message, placeholder: prompt.placeholder, input: focusInput };
+		this.#prompt = { message: prompt.message, placeholder: prompt.placeholder, input };
 		input.onSubmit = value => {
 			this.#resolvePrompt(value);
 		};
-		input.onEscape = () => {
-			this.#loginAbort?.abort();
-			this.#resolvePrompt("");
-		};
-		this.host.setFocus(focusInput);
+		// Keep the scene focused so ui.dismiss is intercepted before the Input widget.
+		this.host.restoreFocus();
 		this.host.requestRender();
 		return pending.promise;
 	}

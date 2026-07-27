@@ -226,15 +226,9 @@ describe("SDK raw SSE capture", () => {
 		}).result();
 
 		expect(result.stopReason).toBe("stop");
-		// Observers receive every raw wire frame as it arrives (types.ts
-		// `onSseEvent` contract), including the terminal `[DONE]` sentinel,
-		// which carries no resolvable event name.
-		expect(observed.map(event => event.event)).toEqual(["chat.completion.chunk", "chat.completion.chunk", null]);
+		expect(observed.map(event => event.event)).toEqual(["chat.completion.chunk", "chat.completion.chunk"]);
 		expect(JSON.parse(observed[0]!.data)).toEqual(chunks[0]);
 		expect(observed[0]!.raw).toEqual(["event: chat.completion.chunk", `data: ${JSON.stringify(chunks[0])}`]);
-		const sentinel = observed.at(-1);
-		expect(sentinel?.data).toBe("[DONE]");
-		expect(sentinel?.raw).toEqual(["data: [DONE]"]);
 	});
 
 	it("records Azure OpenAI Responses SDK events from the decoded stream", async () => {

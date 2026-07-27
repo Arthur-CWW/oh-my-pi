@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -7,8 +7,11 @@ import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { formatResultOutputFallback } from "@oh-my-pi/pi-coding-agent/task";
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
+import { subprocessToolRegistry } from "@oh-my-pi/pi-coding-agent/task/subprocess-tool-registry";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { logger } from "@oh-my-pi/pi-utils";
+import "@oh-my-pi/pi-coding-agent/tools/yield";
 
 /**
  * Contract: runaway-subagent guards.
@@ -27,12 +30,17 @@ interface SteerCall {
 	content: string;
 	options?: { deliverAs?: "steer" | "followUp" };
 }
-
 interface FakeSessionConfig {
 	/** Events pushed to the executor's subscriber on the next microtask. */
 	events?: AgentSessionEvent[];
 	/** When true, prompt/waitForIdle hang until abort() is called. */
 	hang?: boolean;
+	/** When true, prompt returns immediately and waitForIdle hangs until releaseIdle() or abort() is called. */
+	holdIdle?: boolean;
+	/** When true, events are pushed synchronously in subscribe() instead of on a microtask. */
+	syncEvents?: boolean;
+	/** Called when getLastAssistantMessage is read. */
+	onLastAssistantMessage?: () => void;
 	/** Returned from getLastAssistantMessage (salvage source). */
 	lastAssistantMessage?: unknown;
 }
@@ -41,6 +49,9 @@ interface FakeSessionHandle {
 	session: AgentSession;
 	steerCalls: SteerCall[];
 	abortCalls: () => number;
+	releaseIdle?: () => void;
+	promptStarted: Promise<void>;
+	waitForIdleStarted: Promise<void>;
 }
 
 function assistantMessageEnd(text: string, usage?: Record<string, number>): AgentSessionEvent {
@@ -64,14 +75,18 @@ function yieldToolEnd(): AgentSessionEvent {
 			details: { status: "success", data: { ok: true } },
 		},
 		isError: false,
-	} as AgentSessionEvent;
+	} as unknown as AgentSessionEvent;
 }
 
 function createFakeSession(config: FakeSessionConfig = {}): FakeSessionHandle {
 	let abortCount = 0;
 	const steerCalls: SteerCall[] = [];
 	const { promise: hang, resolve: releaseHang } = Promise.withResolvers<void>();
+	const { promise: idleHang, resolve: releaseIdleHang } = Promise.withResolvers<void>();
+	const { promise: promptStarted, resolve: resolvePromptStarted } = Promise.withResolvers<void>();
+	const { promise: waitForIdleStarted, resolve: resolveWaitForIdleStarted } = Promise.withResolvers<void>();
 	if (!config.hang) releaseHang();
+	if (!config.holdIdle) releaseIdleHang();
 
 	const session: Partial<AgentSession> = {
 		state: { messages: [] } as never,
@@ -83,26 +98,37 @@ function createFakeSession(config: FakeSessionConfig = {}): FakeSessionHandle {
 		subscribe: (listener: (event: AgentSessionEvent) => void) => {
 			if (config.events?.length) {
 				const events = config.events;
-				queueMicrotask(() => {
+				if (config.syncEvents) {
 					for (const event of events) listener(event);
-				});
+				} else {
+					queueMicrotask(() => {
+						for (const event of events) listener(event);
+					});
+				}
 			}
 			return () => {};
 		},
 		prompt: async () => {
+			resolvePromptStarted();
 			await hang;
 			return true;
 		},
 		waitForIdle: async () => {
+			resolveWaitForIdleStarted();
 			await hang;
+			await idleHang;
 		},
 		sendUserMessage: async (content, options) => {
 			steerCalls.push({ content: String(content), options });
 		},
-		getLastAssistantMessage: () => (config.lastAssistantMessage ?? undefined) as never,
+		getLastAssistantMessage: () => {
+			config.onLastAssistantMessage?.();
+			return (config.lastAssistantMessage ?? undefined) as never;
+		},
 		abort: async () => {
 			abortCount += 1;
 			releaseHang();
+			releaseIdleHang();
 		},
 		dispose: async () => {},
 	};
@@ -110,6 +136,9 @@ function createFakeSession(config: FakeSessionConfig = {}): FakeSessionHandle {
 		session: session as AgentSession,
 		steerCalls,
 		abortCalls: () => abortCount,
+		releaseIdle: releaseIdleHang,
+		promptStarted,
+		waitForIdleStarted,
 	};
 }
 
@@ -140,6 +169,12 @@ const baseOptions = {
 };
 
 describe("runSubprocess request guards", () => {
+	beforeEach(() => {
+		vi.spyOn(logger, "warn").mockImplementation(() => {});
+		vi.spyOn(logger, "debug").mockImplementation(() => {});
+		vi.spyOn(logger, "error").mockImplementation(() => {});
+	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
 	});
@@ -167,11 +202,7 @@ describe("runSubprocess request guards", () => {
 	it("injects exactly one steering notice when the soft budget is crossed", async () => {
 		// Budget 4: steer fires at request 4 and must not repeat at request 5
 		// (still below the 1.5x hard stop of 6).
-		const settings = Settings.isolated({
-			"task.maxRuntimeMs": 0,
-			"task.softRequestBudget": 4,
-			"task.softRequestBudgetNotice": true,
-		});
+		const settings = Settings.isolated({ "task.maxRuntimeMs": 0, "task.softRequestBudget": 4 });
 		const handle = createFakeSession({
 			events: [
 				assistantMessageEnd("1"),
@@ -194,67 +225,10 @@ describe("runSubprocess request guards", () => {
 		expect(handle.steerCalls[0].options?.deliverAs).toBe("steer");
 	});
 
-	it("does not inject a steering notice by default when the soft request budget is crossed", async () => {
-		// Budget 4 is crossed at request 4, but notices default off; the run is
-		// still below the 1.5x hard stop of 6 and should complete without steer.
-		const settings = Settings.isolated({
-			"task.maxRuntimeMs": 0,
-			"task.softRequestBudget": 4,
-		});
-		const handle = createFakeSession({
-			events: [
-				assistantMessageEnd("1"),
-				assistantMessageEnd("2"),
-				assistantMessageEnd("3"),
-				assistantMessageEnd("4"),
-				assistantMessageEnd("5"),
-				yieldToolEnd(),
-			],
-		});
-		mockCreateAgentSession(handle.session);
-
-		const result = await runSubprocess({ ...baseOptions, id: "subagent-steer-disabled", settings });
-
-		expect(result.requests).toBe(5);
-		expect(result.aborted).toBe(false);
-		expect(handle.steerCalls).toEqual([]);
-	});
-
-	it("still aborts at 1.5x the soft budget when budget notices are disabled", async () => {
-		// Budget 2: notice would normally fire at 2, but the hard stop at 3 must
-		// remain active even with the notice disabled.
-		const settings = Settings.isolated({
-			"task.maxRuntimeMs": 0,
-			"task.softRequestBudget": 2,
-			"task.softRequestBudgetNotice": false,
-		});
-		const handle = createFakeSession({
-			hang: true,
-			events: [
-				assistantMessageEnd("", { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 }),
-				assistantMessageEnd("", { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 }),
-				assistantMessageEnd("", { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 }),
-			],
-		});
-		mockCreateAgentSession(handle.session);
-
-		const result = await runSubprocess({ ...baseOptions, id: "subagent-hard-stop-notice-disabled", settings });
-
-		expect(result.aborted).toBe(true);
-		expect(result.exitCode).toBe(1);
-		expect(result.abortReason).toContain("request budget exceeded");
-		expect(handle.abortCalls()).toBeGreaterThanOrEqual(1);
-		expect(handle.steerCalls).toEqual([]);
-	});
-
-	it("aborts the run gracefully at 1.5x the soft budget with notices enabled", async () => {
-		// Budget 2: with notices enabled, steer at 2 and hard stop at 3. The
-		// session hangs so only the budget abort can release it.
-		const settings = Settings.isolated({
-			"task.maxRuntimeMs": 0,
-			"task.softRequestBudget": 2,
-			"task.softRequestBudgetNotice": true,
-		});
+	it("aborts the run gracefully at 1.5x the soft budget", async () => {
+		// Budget 2: steer at 2, hard stop at 3. The session hangs so only the
+		// budget abort can release it.
+		const settings = Settings.isolated({ "task.maxRuntimeMs": 0, "task.softRequestBudget": 2 });
 		const handle = createFakeSession({
 			hang: true,
 			events: [
@@ -318,11 +292,77 @@ describe("runSubprocess request guards", () => {
 
 		const result = await runSubprocess({ ...baseOptions, id: "subagent-salvage-clip", settings });
 
-		expect(result.aborted).toBe(true);
 		expect(result.output).toContain("start-marker");
 		expect(result.output).toContain("…");
 		expect(result.output).not.toContain(longText);
 		expect(result.output.length).toBeLessThan(700);
+	});
+
+	it("keeps a successful yield as completed when abort arrives after terminal idle", async () => {
+		// Deterministic held-idle race: the yield payload has already been captured
+		// and the session reached idle, then the parent signal aborts before
+		// finalization. The terminal winner must be the completed yield.
+		const settings = Settings.isolated({ "task.maxRuntimeMs": 0 });
+		const abortController = new AbortController();
+		const realYieldHandler = subprocessToolRegistry.getHandler("yield");
+		if (!realYieldHandler?.extractData) throw new Error("yield subprocess handler is not registered");
+		subprocessToolRegistry.register("yield", { extractData: realYieldHandler.extractData });
+		try {
+			const handle = createFakeSession({
+				holdIdle: true,
+				syncEvents: true,
+				events: [yieldToolEnd()],
+				lastAssistantMessage: { role: "assistant", stopReason: "end_turn", content: [] },
+				onLastAssistantMessage: () => abortController.abort(),
+			});
+			mockCreateAgentSession(handle.session);
+
+			const resultPromise = runSubprocess({
+				...baseOptions,
+				id: "subagent-post-terminal-abort",
+				settings,
+				signal: abortController.signal,
+			});
+
+			await handle.waitForIdleStarted;
+			handle.releaseIdle?.();
+
+			const result = await resultPromise;
+
+			expect(result.exitCode).toBe(0);
+			expect(result.aborted).toBe(false);
+			expect(result.abortReason).toBeUndefined();
+			expect(result.error).toBeUndefined();
+			expect(result.output).toBe('{\n  "ok": true\n}');
+		} finally {
+			subprocessToolRegistry.register("yield", realYieldHandler);
+		}
+	});
+
+	it("fails with a reason when abort arrives before terminal completion", async () => {
+		const settings = Settings.isolated({ "task.maxRuntimeMs": 0 });
+		const handle = createFakeSession({
+			hang: true,
+			events: [assistantMessageEnd("still thinking")],
+		});
+		mockCreateAgentSession(handle.session);
+
+		const abortController = new AbortController();
+		const resultPromise = runSubprocess({
+			...baseOptions,
+			id: "subagent-pre-terminal-abort",
+			settings,
+			signal: abortController.signal,
+		});
+
+		await handle.promptStarted;
+		abortController.abort();
+
+		const result = await resultPromise;
+
+		expect(result.exitCode).toBe(1);
+		expect(result.aborted).toBe(true);
+		expect(result.abortReason).toBeTruthy();
 	});
 
 	it("formats the (no output) fallback with the request count", () => {

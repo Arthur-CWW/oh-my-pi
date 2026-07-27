@@ -2,16 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
+import { type AuthBrokerServerHandle, AuthStorage, SqliteAuthCredentialStore, startAuthBroker } from "@oh-my-pi/pi-ai";
+import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
 import {
-	type AuthBrokerServerHandle,
 	readAuthBrokerSnapshotCache,
 	type SnapshotResponse,
-	startAuthBroker,
 	writeAuthBrokerSnapshotCache,
-} from "@oh-my-pi/pi-ai/auth-broker";
-import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+} from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 
 const ENV_KEYS = [
 	"OMP_AUTH_BROKER_URL",
@@ -69,7 +66,7 @@ describe("discoverAuthStorage auth-broker snapshot cache", () => {
 			if (savedEnv[key] === undefined) delete process.env[key];
 			else process.env[key] = savedEnv[key];
 		}
-		await removeWithRetries(tempDir);
+		await fs.rm(tempDir, { recursive: true, force: true });
 	});
 
 	test("boots from a fresh encrypted cache when the broker is down", async () => {

@@ -14,7 +14,8 @@ Create exactly **1 reviewer task**. Its assignment MUST include the custom instr
 Reviewer MUST:
 1. Follow the custom instructions below
 2. Read the referenced files or workspace context needed to evaluate them
-3. Use incremental `yield` sections for findings and verdict fields; do NOT call a separate finding tool
+3. Call `report_finding` per issue
+4. Call `yield` with verdict when done
 
 ### Custom Instructions
 

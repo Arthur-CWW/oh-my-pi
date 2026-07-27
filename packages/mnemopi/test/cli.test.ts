@@ -167,4 +167,44 @@ describe("CLI command handlers", () => {
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
+
+	it("routes command aliases to the same handlers as their canonical commands", async () => {
+		const root = tempRoot();
+		try {
+			// scratchpad ↔ sp
+			const spWrite = capture();
+			expect(await runCli(["sp", "write", "aliased note"], spWrite.context(root))).toBe(0);
+			expect(spWrite.stdout).toContain("Scratchpad stored:");
+			const spRead = capture();
+			expect(await runCli(["sp", "read"], spRead.context(root))).toBe(0);
+			expect(spRead.stdout).toContain("aliased note");
+
+			// recall ↔ search (usage path avoids loading the embedding model)
+			const search = capture();
+			expect(await runCli(["search"], search.context(root))).toBe(2);
+			expect(search.stderr).toContain("Usage: mnemopi recall <query> [top_k]");
+
+			// update ↔ edit
+			const edit = capture();
+			expect(await runCli(["edit", "missing-id", "new content"], edit.context(root))).toBe(1);
+			expect(edit.stderr).toContain("Memory not found: missing-id");
+
+			// delete ↔ forget
+			const forget = capture();
+			expect(await runCli(["forget", "missing-id"], forget.context(root))).toBe(1);
+			expect(forget.stderr).toContain("Memory not found: missing-id");
+
+			// diagnose ↔ doctor
+			const doctor = capture();
+			expect(await runCli(["doctor"], doctor.context(root))).toBe(0);
+			expect(doctor.stdout).toContain("Mnemopi Diagnostics");
+
+			// sleep ↔ consolidate
+			const consolidate = capture();
+			expect(await runCli(["consolidate"], consolidate.context(root))).toBe(0);
+			expect(consolidate.stdout).toContain("Consolidation complete");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
 });

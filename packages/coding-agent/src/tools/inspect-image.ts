@@ -1,17 +1,16 @@
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
-import { type Api, completeSimple, type ImageContent, type Model, type ToolExample } from "@oh-my-pi/pi-ai";
+import { completeSimple, type ToolExample } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import { extractTextContent } from "../commit/utils";
 
-import { expandRoleAlias, getModelMatchPreferences, resolveModelFromString } from "../config/model-resolver";
+import { parseModelString } from "../config/model-resolver";
 import inspectImageDescription from "../prompts/tools/inspect-image.md" with { type: "text" };
 import inspectImageSystemPromptTemplate from "../prompts/tools/inspect-image-system.md" with { type: "text" };
 import {
 	ImageInputTooLargeError,
 	type LoadedImageInput,
-	loadImageAttachmentInput,
 	loadImageInput,
 	MAX_IMAGE_INPUT_BYTES,
 	webpExclusionForModel,
@@ -19,62 +18,14 @@ import {
 import type { ToolSession } from "./index";
 import { ToolError } from "./tool-errors";
 
-const inspectImageSchema = type({
-	path: type("string").describe("image file path, Image #N label, or attachment://N URI"),
-	question: type("string").describe("question about image"),
-	"+": "reject",
-});
+const inspectImageSchema = z
+	.object({
+		path: z.string().describe("image path"),
+		question: z.string().describe("question about image"),
+	})
+	.strict();
 
-export type InspectImageParams = typeof inspectImageSchema.infer;
-
-interface ImageAttachmentReference {
-	index: number;
-}
-
-const IMAGE_ATTACHMENT_REFERENCE_REGEX =
-	/^\s*(?:\[?Image #([1-9]\d*)(?:,[^\]\n]*)?\]?|(?:attachment|image):\/\/([1-9]\d*))\s*$/i;
-
-function parseImageAttachmentReference(path: string): ImageAttachmentReference | null {
-	const match = IMAGE_ATTACHMENT_REFERENCE_REGEX.exec(path);
-	if (!match) return null;
-	const rawIndex = match[1] ?? match[2];
-	if (!rawIndex) return null;
-	return { index: Number(rawIndex) };
-}
-
-function formatAvailableImageAttachments(attachments: readonly { label: string; uri: string }[]): string {
-	if (attachments.length === 0) return "none";
-	return attachments.map(attachment => `${attachment.label} -> ${attachment.uri}`).join(", ");
-}
-
-async function loadAttachmentReferenceInput(options: {
-	path: string;
-	reference: ImageAttachmentReference;
-	attachments: readonly { label: string; uri: string; image: ImageContent }[];
-	autoResize: boolean;
-	excludeWebP: boolean | undefined;
-}): Promise<LoadedImageInput | null> {
-	const attachment = options.attachments[options.reference.index - 1];
-	if (!attachment) {
-		const available = formatAvailableImageAttachments(options.attachments);
-		if (options.attachments.length === 0) {
-			throw new ToolError(
-				`No image attachments are available in this turn. path="${options.path}" must be a readable file path or attachment URI.`,
-			);
-		}
-		throw new ToolError(
-			`Could not resolve image attachment '${options.path}'. Available image attachments: ${available}. Pass an attachment URI or a readable filesystem path.`,
-		);
-	}
-	return loadImageAttachmentInput({
-		image: attachment.image,
-		label: attachment.label,
-		uri: attachment.uri,
-		autoResize: options.autoResize,
-		maxBytes: MAX_IMAGE_INPUT_BYTES,
-		excludeWebP: options.excludeWebP,
-	});
-}
+export type InspectImageParams = z.infer<typeof inspectImageSchema>;
 
 export interface InspectImageToolDetails {
 	model: string;
@@ -92,7 +43,7 @@ export class InspectImageTool implements AgentTool<typeof inspectImageSchema, In
 	readonly parameters = inspectImageSchema;
 	readonly strict = false;
 
-	readonly examples: readonly ToolExample<typeof inspectImageSchema.infer>[] = [
+	readonly examples: readonly ToolExample<z.input<typeof inspectImageSchema>>[] = [
 		{
 			caption: "OCR with strict formatting",
 			call: {
@@ -143,26 +94,28 @@ export class InspectImageTool implements AgentTool<typeof inspectImageSchema, In
 			throw new ToolError("Model registry is unavailable for inspect_image.");
 		}
 
-		const availableModels = modelRegistry.getAvailable();
-		if (availableModels.length === 0) {
-			throw new ToolError("No models available for inspect_image.");
+		const visionSelector = this.session.settings.getModelRole("vision")?.trim();
+		if (!visionSelector) {
+			throw new ToolError(
+				"modelRoles.vision must configure a provider-qualified image-capable model for inspect_image.",
+			);
 		}
 
-		const matchPreferences = getModelMatchPreferences(this.session.settings);
-		const resolvePattern = (pattern: string | undefined): Model<Api> | undefined => {
-			if (!pattern) return undefined;
-			const expanded = expandRoleAlias(pattern, this.session.settings);
-			return resolveModelFromString(expanded, availableModels, matchPreferences);
-		};
+		const parsedVisionSelector = parseModelString(visionSelector);
+		if (!parsedVisionSelector || parsedVisionSelector.thinkingLevel) {
+			throw new ToolError(
+				`Configured modelRoles.vision selector "${visionSelector}" must be an exact provider/model selector without an effort suffix.`,
+			);
+		}
 
-		const activeModelPattern = this.session.getActiveModelString?.() ?? this.session.getModelString?.();
-		const model =
-			resolvePattern("pi/vision") ??
-			resolvePattern("pi/default") ??
-			resolvePattern(activeModelPattern) ??
-			availableModels[0];
+		const model = modelRegistry
+			.getAvailable()
+			.find(
+				candidate =>
+					candidate.provider === parsedVisionSelector.provider && candidate.id === parsedVisionSelector.id,
+			);
 		if (!model) {
-			throw new ToolError("Unable to resolve a model for inspect_image.");
+			throw new ToolError(`Configured vision model ${visionSelector} is unavailable.`);
 		}
 
 		if (!model.input.includes("image")) {
@@ -174,32 +127,19 @@ export class InspectImageTool implements AgentTool<typeof inspectImageSchema, In
 		const apiKey = await modelRegistry.getApiKey(model);
 		if (!apiKey) {
 			throw new ToolError(
-				`No API key available for ${model.provider}/${model.id}. Configure credentials for this provider or choose another vision-capable model.`,
+				`No API key available for configured vision model ${model.provider}/${model.id}. Configure credentials for this provider.`,
 			);
 		}
 
 		let imageInput: LoadedImageInput | null;
-		const autoResize = this.session.settings.get("images.autoResize");
-		const excludeWebP = webpExclusionForModel(model);
-		const attachmentReference = parseImageAttachmentReference(params.path);
 		try {
-			if (attachmentReference) {
-				imageInput = await loadAttachmentReferenceInput({
-					path: params.path,
-					reference: attachmentReference,
-					attachments: this.session.getImageAttachments?.() ?? [],
-					autoResize,
-					excludeWebP,
-				});
-			} else {
-				imageInput = await loadImageInput({
-					path: params.path,
-					cwd: this.session.cwd,
-					autoResize,
-					maxBytes: MAX_IMAGE_INPUT_BYTES,
-					excludeWebP,
-				});
-			}
+			imageInput = await loadImageInput({
+				path: params.path,
+				cwd: this.session.cwd,
+				autoResize: this.session.settings.get("images.autoResize"),
+				maxBytes: MAX_IMAGE_INPUT_BYTES,
+				excludeWebP: webpExclusionForModel(model),
+			});
 		} catch (error) {
 			if (error instanceof ImageInputTooLargeError) {
 				throw new ToolError(error.message);

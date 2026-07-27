@@ -6,9 +6,8 @@ import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { Snowflake } from "@oh-my-pi/pi-utils";
 
 const BASE_SETTINGS = {
 	"async.enabled": false,
@@ -35,7 +34,7 @@ describe("tools.approvalMode setting", () => {
 	// settings per assertion. This avoids paying createAgentSession's cost (model registry,
 	// auth-storage discovery, settings init) nine times over.
 	let tempDir: string;
-	let session: AgentSession;
+	let session: Awaited<ReturnType<typeof createAgentSession>>["session"];
 
 	beforeAll(async () => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-approval-mode-${Snowflake.next()}-`));
@@ -66,7 +65,7 @@ describe("tools.approvalMode setting", () => {
 		// Windows can briefly hold tempdir handles after session.dispose(); retry a few times.
 		for (let attempt = 0; attempt < 5; attempt++) {
 			try {
-				removeSyncWithRetries(tempDir);
+				fs.rmSync(tempDir, { recursive: true, force: true });
 				break;
 			} catch (err) {
 				const code = (err as NodeJS.ErrnoException).code;

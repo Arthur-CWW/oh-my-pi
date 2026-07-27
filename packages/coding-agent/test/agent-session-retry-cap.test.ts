@@ -4,7 +4,6 @@ import { scheduler } from "node:timers/promises";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { ApiKeyResolveContext, AssistantMessage, ToolCall } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import * as aiStream from "@oh-my-pi/pi-ai/stream";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -55,11 +54,8 @@ describe("AgentSession retry delay cap", () => {
 	beforeEach(async () => {
 		tempDir = TempDir.createSync("@pi-retry-cap-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		// A live env var now overrides a stored static api_key; these tests rotate stored Anthropic
-		// credentials, so neutralize env resolution (ignores every provider's ambient env key).
-		vi.spyOn(aiStream, "getEnvApiKey").mockReturnValue(undefined);
 		authStorage.setRuntimeApiKey("anthropic", "anthropic-test-key");
-		modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		modelRegistry = new ModelRegistry(authStorage);
 	});
 
 	afterEach(async () => {
@@ -85,7 +81,7 @@ describe("AgentSession retry delay cap", () => {
 		const mock = createMockModel({ handler: () => ({ throw: rateLimitError }) });
 		const requestedModels: string[] = [];
 		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
+			getApiKey: provider => `${provider}-test-key`,
 			initialState: {
 				model,
 				systemPrompt: ["Test"],
@@ -145,66 +141,6 @@ describe("AgentSession retry delay cap", () => {
 		expect(session.isRetrying).toBe(false);
 	});
 
-	it("auto-retries OpenAI Responses stream_read_error instead of stopping the conversation", async () => {
-		const model = getBundledModel("openai", "gpt-5");
-		if (!model) {
-			throw new Error("Expected bundled OpenAI test model to exist");
-		}
-		authStorage.setRuntimeApiKey("openai", "openai-test-key");
-
-		const mock = createMockModel({
-			responses: [
-				{ throw: "Error Code stream_read_error: stream_read_error" },
-				{ content: ["recovered after stream read retry"], stopReason: "stop" },
-			],
-		});
-		const agent = new Agent({
-			getApiKey: requestedModel => `${requestedModel.provider}-test-key`,
-			initialState: {
-				model,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: (requestedModel, context, options) => mock.stream(requestedModel, context, options),
-		});
-
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			"retry.baseDelayMs": 5,
-			"retry.maxDelayMs": 5_000,
-			"retry.maxRetries": 1,
-			"retry.modelFallback": false,
-		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
-
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-		});
-
-		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		const retryStartEvents: AutoRetryStartEvent[] = [];
-		const retryEndEvents: AutoRetryEndEvent[] = [];
-		session.subscribe(event => {
-			if (event.type === "auto_retry_start") retryStartEvents.push(event);
-			if (event.type === "auto_retry_end") retryEndEvents.push(event);
-		});
-
-		await session.prompt("Trigger stream read retry");
-		await session.waitForIdle();
-
-		expect(mock.calls).toHaveLength(2);
-		expect(retryStartEvents).toHaveLength(1);
-		expect(retryEndEvents).toHaveLength(1);
-		expect(retryEndEvents[0]).toMatchObject({ success: true });
-		const last = lastAssistant(session);
-		expect(last.stopReason).toBe("stop");
-		expect(last.content).toContainEqual({ type: "text", text: "recovered after stream read retry" });
-	});
-
 	it("switches credentials instead of failing the delay cap for account rate limits", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
@@ -223,7 +159,7 @@ describe("AgentSession retry delay cap", () => {
 		const requestedKeys: string[] = [];
 		let agent!: Agent;
 		agent = new Agent({
-			getApiKey: model => modelRegistry.resolver(model, agent.sessionId),
+			getApiKey: provider => modelRegistry.getApiKeyForProvider(provider, agent.sessionId),
 			initialState: {
 				model,
 				systemPrompt: ["Test"],
@@ -282,79 +218,6 @@ describe("AgentSession retry delay cap", () => {
 		expect(last.content).toContainEqual({ type: "text", text: "recovered after credential switch" });
 	});
 
-	it("switches same-provider credentials before model fallback on ChatGPT usage limits", async () => {
-		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
-		const fallbackModel = getBundledModel("openai", "gpt-5.5");
-		if (!primaryModel || !fallbackModel) {
-			throw new Error("Expected bundled primary and fallback test models to exist");
-		}
-
-		authStorage.removeRuntimeApiKey("anthropic");
-		authStorage.setRuntimeApiKey("openai", "openai-fallback-key");
-		await authStorage.set("anthropic", [
-			{ type: "api_key", key: "anthropic-key-1" },
-			{ type: "api_key", key: "anthropic-key-2" },
-		]);
-
-		const usageLimitError = "Error: You have hit your ChatGPT usage limit (k12 plan). Try again in ~231 min.";
-		const mock = createMockModel();
-		const requestedModels: string[] = [];
-		const requestedKeys: string[] = [];
-		let agent!: Agent;
-		agent = new Agent({
-			getApiKey: model => modelRegistry.resolver(model, agent.sessionId),
-			initialState: {
-				model: primaryModel,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: (requestedModel, context, options) => {
-				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
-				const apiKey = resolveInitialApiKey(options?.apiKey);
-				requestedKeys.push(apiKey);
-				if (requestedKeys.length === 1) {
-					mock.push({ throw: usageLimitError });
-				} else {
-					mock.push({ content: ["recovered after sibling account"] });
-				}
-				return mock.stream(requestedModel, context, options);
-			},
-		});
-
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			"retry.baseDelayMs": 5,
-			"retry.maxDelayMs": 100,
-			"retry.maxRetries": 1,
-			"retry.modelFallback": true,
-			"retry.fallbackChains": {
-				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
-			},
-		});
-		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
-
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-		});
-
-		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		await session.prompt("Trigger k12 usage limit");
-		await session.waitForIdle();
-
-		expect(requestedModels).toEqual([
-			`${primaryModel.provider}/${primaryModel.id}`,
-			`${primaryModel.provider}/${primaryModel.id}`,
-		]);
-		expect([...requestedKeys].sort()).toEqual(["anthropic-key-1", "anthropic-key-2"]);
-		const last = lastAssistant(session);
-		expect(last.stopReason).toBe("stop");
-		expect(last.content).toContainEqual({ type: "text", text: "recovered after sibling account" });
-	});
-
 	it("waits for the earliest sibling unblock instead of failing the delay cap", async () => {
 		// Regression: with every sibling credential momentarily blocked (e.g. a
 		// short post-401 or usage-probe block), a usage-limit 429 with a
@@ -385,7 +248,7 @@ describe("AgentSession retry delay cap", () => {
 		let attempts = 0;
 		let agent!: Agent;
 		agent = new Agent({
-			getApiKey: model => modelRegistry.resolver(model, agent.sessionId),
+			getApiKey: provider => modelRegistry.getApiKeyForProvider(provider, agent.sessionId),
 			initialState: {
 				model,
 				systemPrompt: ["Test"],
@@ -456,7 +319,7 @@ describe("AgentSession retry delay cap", () => {
 			],
 		});
 		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
+			getApiKey: provider => `${provider}-test-key`,
 			initialState: {
 				model,
 				systemPrompt: ["Test"],
@@ -500,7 +363,72 @@ describe("AgentSession retry delay cap", () => {
 		expect(last.stopReason).toBe("stop");
 	});
 
-	it("does not auto-retry a timeout after streaming a complete write tool call", async () => {
+	it("retries a provider abort without a fired caller signal in the network window", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) {
+			throw new Error("Expected bundled Anthropic test model to exist");
+		}
+
+		const mock = createMockModel({
+			responses: [{ throw: "Request was aborted" }, { content: ["recovered on the same lane"] }],
+		});
+		const requestedModels: string[] = [];
+		const requestSignalStates: boolean[] = [];
+		const agent = new Agent({
+			getApiKey: provider => `${provider}-test-key`,
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (requestedModel, context, options) => {
+				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
+				requestSignalStates.push(options?.signal?.aborted === true);
+				return mock.stream(requestedModel, context, options);
+			},
+		});
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.maxRetries": 0,
+			"retry.networkHoldMs": 180_000,
+		});
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+
+		const waitSpy = vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		const retryStartEvents: AutoRetryStartEvent[] = [];
+		const retryEndEvents: AutoRetryEndEvent[] = [];
+		session.subscribe(event => {
+			if (event.type === "auto_retry_start") retryStartEvents.push(event);
+			if (event.type === "auto_retry_end") retryEndEvents.push(event);
+		});
+
+		await session.prompt("Trigger an upstream transport abort");
+		await session.waitForIdle();
+
+		expect(requestedModels).toEqual([
+			`${model.provider}/${model.id}`,
+			`${model.provider}/${model.id}`,
+		]);
+		expect(requestSignalStates).toEqual([false, false]);
+		expect(retryStartEvents).toHaveLength(1);
+		expect(retryStartEvents[0]).toMatchObject({ cause: "network", attempt: 1 });
+		expect(retryEndEvents).toEqual([expect.objectContaining({ success: true, attempt: 1 })]);
+		expect(waitSpy).toHaveBeenCalled();
+		const last = lastAssistant(session);
+		expect(last.stopReason).toBe("stop");
+		expect(last.content).toContainEqual({ type: "text", text: "recovered on the same lane" });
+	});
+
+	it("does not auto-retry a timeout after streaming a write tool call", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
 			throw new Error("Expected bundled Anthropic test model to exist");
@@ -508,7 +436,7 @@ describe("AgentSession retry delay cap", () => {
 
 		let streamCalls = 0;
 		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
+			getApiKey: provider => `${provider}-test-key`,
 			initialState: {
 				model,
 				systemPrompt: ["Test"],
@@ -551,7 +479,6 @@ describe("AgentSession retry delay cap", () => {
 						delta: JSON.stringify(toolCall.arguments),
 						partial,
 					});
-					stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial });
 					stream.push({
 						type: "error",
 						reason: "error",
@@ -594,141 +521,9 @@ describe("AgentSession retry delay cap", () => {
 		expect(streamCalls).toBe(1);
 		expect(retryStartEvents).toHaveLength(0);
 		expect(retryEndEvents).toHaveLength(0);
-		expect(session.agent.state.messages.at(-1)?.role).toBe("toolResult");
-		const lastError = [...session.agent.state.messages]
-			.reverse()
-			.find((message): message is AssistantMessage => message.role === "assistant");
-		expect(lastError?.stopReason).toBe("error");
-		expect(lastError?.errorMessage).toBe("The operation timed out.");
-	});
-
-	it("retries a transient socket close after partial text and thinking", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
-		}
-
-		let streamCalls = 0;
-		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
-			initialState: {
-				model,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: requestedModel => {
-				streamCalls += 1;
-				const stream = new AssistantMessageEventStream();
-				queueMicrotask(() => {
-					const partial: AssistantMessage = {
-						role: "assistant",
-						content: [],
-						api: requestedModel.api,
-						provider: requestedModel.provider,
-						model: requestedModel.id,
-						usage: {
-							input: 0,
-							output: 0,
-							cacheRead: 0,
-							cacheWrite: 0,
-							totalTokens: 0,
-							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-						},
-						stopReason: "stop",
-						timestamp: Date.now(),
-					};
-
-					if (streamCalls === 1) {
-						const thinking = { type: "thinking" as const, thinking: "partial thought" };
-						const text = { type: "text" as const, text: "partial text" };
-						const toolCall: ToolCall = {
-							type: "toolCall",
-							id: "tc-incomplete",
-							name: "bash",
-							arguments: { command: "bun probe-archive3.ts" },
-						};
-						partial.content.push(thinking, text, toolCall);
-						stream.push({ type: "start", partial });
-						stream.push({ type: "thinking_start", contentIndex: 0, partial });
-						stream.push({ type: "thinking_delta", contentIndex: 0, delta: thinking.thinking, partial });
-						stream.push({ type: "thinking_end", contentIndex: 0, content: thinking.thinking, partial });
-						stream.push({ type: "text_start", contentIndex: 1, partial });
-						stream.push({ type: "text_delta", contentIndex: 1, delta: text.text, partial });
-						stream.push({ type: "text_end", contentIndex: 1, content: text.text, partial });
-						stream.push({ type: "toolcall_start", contentIndex: 2, partial });
-						stream.push({
-							type: "toolcall_delta",
-							contentIndex: 2,
-							delta: JSON.stringify(toolCall.arguments),
-							partial,
-						});
-						stream.push({
-							type: "error",
-							reason: "error",
-							error: {
-								...partial,
-								stopReason: "error",
-								errorMessage:
-									"The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()",
-								duration: 1000,
-							},
-						});
-						return;
-					}
-
-					const recovered = { type: "text" as const, text: "recovered after partial socket close" };
-					partial.content.push(recovered);
-					stream.push({ type: "start", partial });
-					stream.push({ type: "text_start", contentIndex: 0, partial });
-					stream.push({ type: "text_delta", contentIndex: 0, delta: recovered.text, partial });
-					stream.push({ type: "text_end", contentIndex: 0, content: recovered.text, partial });
-					stream.push({
-						type: "done",
-						reason: "stop",
-						message: {
-							...partial,
-							stopReason: "stop",
-							duration: 1000,
-						},
-					});
-				});
-				return stream;
-			},
-		});
-
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			"retry.baseDelayMs": 5,
-			"retry.maxDelayMs": 5_000,
-		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
-
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-		});
-
-		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		const retryStartEvents: AutoRetryStartEvent[] = [];
-		const retryEndEvents: AutoRetryEndEvent[] = [];
-		session.subscribe(event => {
-			if (event.type === "auto_retry_start") retryStartEvents.push(event);
-			if (event.type === "auto_retry_end") retryEndEvents.push(event);
-		});
-
-		await session.prompt("Trigger partial socket close");
-		await session.waitForIdle();
-
-		expect(streamCalls).toBe(2);
-		expect(retryStartEvents).toHaveLength(1);
-		expect(retryEndEvents).toHaveLength(1);
-		expect(retryEndEvents[0]).toMatchObject({ success: true });
 		const last = lastAssistant(session);
-		expect(last.stopReason).toBe("stop");
-		expect(last.content).toContainEqual({ type: "text", text: "recovered after partial socket close" });
+		expect(last.stopReason).toBe("error");
+		expect(last.errorMessage).toBe("The operation timed out.");
 	});
 
 	it("retries on Bun HTTP/2 stream reset errors", async () => {
@@ -751,7 +546,7 @@ describe("AgentSession retry delay cap", () => {
 			],
 		});
 		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
+			getApiKey: provider => `${provider}-test-key`,
 			initialState: {
 				model,
 				systemPrompt: ["Test"],
@@ -805,7 +600,7 @@ describe("AgentSession retry delay cap", () => {
 			],
 		});
 		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
+			getApiKey: provider => `${provider}-test-key`,
 			initialState: {
 				model,
 				systemPrompt: ["Test"],
@@ -849,178 +644,6 @@ describe("AgentSession retry delay cap", () => {
 		expect(last.content).toContainEqual({ type: "text", text: "recovered after generic gateway upstream error" });
 	});
 
-	it("retries empty reasonless aborted turns", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
-		}
-
-		const mock = createMockModel({
-			responses: [
-				{ stopReason: "aborted", errorMessage: "Request was aborted" },
-				{ content: ["recovered after empty reasonless abort"] },
-			],
-		});
-		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
-			initialState: {
-				model,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: mock.stream,
-		});
-
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			"retry.baseDelayMs": 5,
-			"retry.maxDelayMs": 5_000,
-			"retry.maxRetries": 1,
-			"retry.modelFallback": true,
-		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
-
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-		});
-
-		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		const retryStartEvents: AutoRetryStartEvent[] = [];
-		const retryEndEvents: AutoRetryEndEvent[] = [];
-		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
-		session.subscribe(event => {
-			if (event.type === "auto_retry_start") retryStartEvents.push(event);
-			if (event.type === "auto_retry_end") retryEndEvents.push(event);
-			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
-		});
-
-		await session.prompt("Trigger empty aborted turn");
-		await session.waitForIdle();
-
-		expect(retryStartEvents).toHaveLength(1);
-		expect(retryEndEvents).toHaveLength(1);
-		expect(retryEndEvents[0]).toMatchObject({ success: true, attempt: 1 });
-		expect(fallbackEvents).toHaveLength(0);
-		const last = lastAssistant(session);
-		expect(last.stopReason).toBe("stop");
-		expect(last.content).toContainEqual({ type: "text", text: "recovered after empty reasonless abort" });
-	});
-
-	it("does not retry reasonless aborted turns that have partial content", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
-		}
-
-		const mock = createMockModel({
-			responses: [{ content: ["partial"], stopReason: "aborted", errorMessage: "Request was aborted" }],
-		});
-		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
-			initialState: {
-				model,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: mock.stream,
-		});
-
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			"retry.baseDelayMs": 5,
-			"retry.maxDelayMs": 5_000,
-			"retry.maxRetries": 1,
-		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
-
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-		});
-
-		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		const retryStartEvents: AutoRetryStartEvent[] = [];
-		session.subscribe(event => {
-			if (event.type === "auto_retry_start") retryStartEvents.push(event);
-		});
-
-		await session.prompt("Trigger partial aborted turn");
-		await session.waitForIdle();
-
-		expect(retryStartEvents).toHaveLength(0);
-		const last = lastAssistant(session);
-		expect(last.stopReason).toBe("aborted");
-		expect(last.content).toContainEqual({ type: "text", text: "partial" });
-	});
-
-	it("does not auto-retry empty reasonless aborts once the session is disposing", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
-		}
-
-		// A dispose-driven abort produces the same empty/reason-less shape as a
-		// transient provider abort. It MUST settle the turn instead of entering
-		// auto-retry: a retry here schedules a continuation that the disposed guard
-		// skips without resolving #retryPromise, hanging prompt() during shutdown.
-		const mock = createMockModel({
-			responses: [
-				{ stopReason: "aborted", errorMessage: "Request was aborted" },
-				{ content: ["should not be reached after dispose"] },
-			],
-		});
-		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
-			initialState: {
-				model,
-				systemPrompt: ["Test"],
-				tools: [],
-				messages: [],
-			},
-			streamFn: mock.stream,
-		});
-
-		const settings = Settings.isolated({
-			"compaction.enabled": false,
-			"retry.baseDelayMs": 5,
-			"retry.maxDelayMs": 5_000,
-			"retry.maxRetries": 1,
-		});
-		settings.setModelRole("default", `${model.provider}/${model.id}`);
-
-		session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			settings,
-			modelRegistry,
-		});
-
-		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
-		const retryStartEvents: AutoRetryStartEvent[] = [];
-		session.subscribe(event => {
-			if (event.type === "auto_retry_start") retryStartEvents.push(event);
-		});
-
-		// Enter the disposing window before the empty abort lands. Without the
-		// #isDisposed guard this prompt would hang on an orphaned retry promise.
-		session.beginDispose();
-		await session.prompt("Trigger empty aborted turn while disposing");
-		await session.waitForIdle();
-
-		expect(retryStartEvents).toHaveLength(0);
-		// No retry continuation fired, so the second scripted response is untouched.
-		expect(mock.calls).toHaveLength(1);
-		const last = lastAssistant(session);
-		expect(last.stopReason).toBe("aborted");
-	});
-
 	it("defaults 502 auto-retry to ten capped backoff attempts", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
@@ -1030,7 +653,7 @@ describe("AgentSession retry delay cap", () => {
 		const mock = createMockModel();
 		let attempts = 0;
 		const agent = new Agent({
-			getApiKey: model => `${model.provider}-test-key`,
+			getApiKey: provider => `${provider}-test-key`,
 			initialState: {
 				model,
 				systemPrompt: ["Test"],

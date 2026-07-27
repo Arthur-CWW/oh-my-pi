@@ -7,8 +7,6 @@ It focuses on current implementation behavior, including fallback paths and cave
 ## Implementation files
 
 - [`../src/session/session-manager.ts`](../packages/coding-agent/src/session/session-manager.ts)
-- [`../src/session/session-listing.ts`](../packages/coding-agent/src/session/session-listing.ts)
-- [`../src/session/session-paths.ts`](../packages/coding-agent/src/session/session-paths.ts)
 - [`../src/session/agent-session.ts`](../packages/coding-agent/src/session/agent-session.ts)
 - [`../src/cli/session-picker.ts`](../packages/coding-agent/src/cli/session-picker.ts)
 - [`../src/modes/components/session-selector.ts`](../packages/coding-agent/src/modes/components/session-selector.ts)
@@ -35,7 +33,7 @@ There are two different listing pipelines:
 1. `getRecentSessions(sessionDir, limit)` (welcome/summary view)
    - Reads only a 4KB prefix (`readTextSlices(..., 4096, 0)[0]`) from each file.
    - Parses header + earliest user text preview.
-   - Returns lightweight `RecentSessionInfo` (`path`, `name`, `timeAgo`); `name` and `timeAgo` are computed eagerly (`sessionDisplayName` / `formatTimeAgo`), not lazy getters.
+   - Returns lightweight `RecentSessionInfo` with lazy `name` and `timeAgo` getters.
    - Sorts by file `mtime` descending.
 
 2. `SessionManager.list(...)` / `SessionManager.listAll()` (resume pickers and ID matching)
@@ -48,9 +46,9 @@ There are two different listing pipelines:
 
 For recent summaries (`RecentSessionInfo`):
 
-- display name preference (`sessionDisplayName`): `title` -> first user message -> an `Untitled · <time>` label (the raw `id` is intentionally never used)
-- the welcome screen truncates the rendered name to the available column width (no fixed length)
-- only the first line is kept and control characters are stripped from title/message-derived names (`sanitizeSessionName`)
+- display name preference: `header.title` -> first user prompt -> `header.id` -> filename
+- name is truncated to 40 chars for compact displays
+- control characters/newlines are stripped/sanitized from title-derived names
 
 For `SessionInfo` list entries:
 
@@ -69,7 +67,7 @@ For `SessionInfo` list entries:
 4. Otherwise, if the breadcrumb cwd matches the current cwd (resolved path compare), use the breadcrumb session; else fall back to newest file by mtime in the session dir (`findMostRecentSession`)
 5. If none found, create a new session
 
-Terminal ID derivation prefers TTY path and falls back to env-based identifiers (`ZELLIJ_PANE_ID`, `TMUX_PANE`, `CMUX_SURFACE_ID`, `KITTY_WINDOW_ID`, `WEZTERM_PANE`, `TERM_SESSION_ID`, `WT_SESSION`).
+Terminal ID derivation prefers TTY path and falls back to env-based identifiers (`TMUX_PANE`, `CMUX_SURFACE_ID`, `KITTY_WINDOW_ID`, `TERM_SESSION_ID`, `WT_SESSION`).
 
 Breadcrumb writes are best-effort and non-fatal.
 
@@ -179,7 +177,7 @@ Lifecycle/state transition:
 15. restore model via `getRestorableSessionModels(sessionContext.models, lastModelChangeRole)` — tries the recorded models in fallback order and uses the first one present in the model registry
 16. restore thinking level and service tier:
     - thinking uses persisted `thinking_level_change`, otherwise the configured default clamped to model capability
-    - service tier uses persisted `service_tier_change`, otherwise the configured per-family `tier.openai`/`tier.anthropic`/`tier.google` settings (`"none"` becomes unset)
+    - service tier uses persisted `service_tier_change`, otherwise the configured `serviceTier` setting (`"none"` becomes unset)
 17. reconnect agent listeners, run the registered session-switch reconciler if any (interactive mode re-enters persisted modes; errors logged, not fatal), and return `true`
 
 ## UI state rebuild after interactive switch

@@ -1,5 +1,5 @@
-import { parseJsonWithRepair } from "@oh-my-pi/pi-utils";
 import type { Message, ToolCall } from "../types";
+import { parseJsonWithRepair } from "../utils/json-parse";
 import dialectPrompt from "./anthropic.md" with { type: "text" };
 import { buildArgShapes, buildStringArgsResolver, mintToolCallId, type ToolArgShape } from "./coercion";
 import {
@@ -21,7 +21,7 @@ import type {
 const MAX_PARTIAL_TAG_LENGTH = 256;
 const MAX_PARAMETER_VALUE_LENGTH = 1_000_000;
 
-const WRAPPER_TAGS: Readonly<Record<string, true>> = { function_calls: true, tool_calls: true };
+const WRAPPER_TAGS: Record<string, true> = { function_calls: true, tool_calls: true };
 const THINKING_TAGS: Record<string, true> = { thinking: true, think: true, scratchpad: true };
 const BASE_TAG_PREFIXES = [
 	"<function_calls",
@@ -41,7 +41,7 @@ const BASE_TAG_PREFIXES = [
 	"<antml:parameter",
 	"</antml:parameter",
 ] as const;
-export const ANTHROPIC_THINKING_TAG_PREFIXES = [
+const THINKING_TAG_PREFIXES = [
 	"<thinking",
 	"</thinking",
 	"<think",
@@ -56,11 +56,6 @@ export const ANTHROPIC_THINKING_TAG_PREFIXES = [
 	"</antml:scratchpad",
 ] as const;
 
-export interface AnthropicInbandScannerConfig {
-	readonly wrapperTags?: Readonly<Record<string, true>>;
-	readonly baseTagPrefixes?: readonly string[];
-	readonly allTagPrefixes?: readonly string[];
-}
 type ScannerState = "outside" | "section" | "invoke" | "parameter" | "thinking";
 type ReturnState = "outside" | "section";
 
@@ -93,16 +88,10 @@ export class AnthropicInbandScanner implements InbandScanner {
 	#thinking = "";
 	#thinkingTag = "";
 	#thinkingClosePrefixes: readonly string[] = [];
-	readonly #wrapperTags: Readonly<Record<string, true>>;
-	readonly #baseTagPrefixes: readonly string[];
-	readonly #allTagPrefixes: readonly string[];
 	readonly #stringArgs: (toolName: string) => ReadonlySet<string>;
 	readonly #parseThinking: boolean;
 
-	constructor(options: InbandScannerOptions = {}, config: AnthropicInbandScannerConfig = {}) {
-		this.#wrapperTags = config.wrapperTags ?? WRAPPER_TAGS;
-		this.#baseTagPrefixes = config.baseTagPrefixes ?? BASE_TAG_PREFIXES;
-		this.#allTagPrefixes = config.allTagPrefixes ?? ALL_TAG_PREFIXES;
+	constructor(options: InbandScannerOptions = {}) {
 		this.#stringArgs = options.stringArgs ?? buildStringArgsResolver(options.tools);
 		this.#parseThinking = options.parseThinking === true;
 	}
@@ -132,7 +121,7 @@ export class AnthropicInbandScanner implements InbandScanner {
 					progressed = this.#consumeInvoke(final, events);
 					break;
 				case "parameter":
-					progressed = this.#consumeParameter(final, events);
+					progressed = this.#consumeParameter(final);
 					break;
 				case "thinking":
 					progressed = this.#consumeThinking(final, events);
@@ -165,7 +154,7 @@ export class AnthropicInbandScanner implements InbandScanner {
 			return true;
 		}
 
-		if (!tag.closing && this.#wrapperTags[tag.localName] === true) {
+		if (!tag.closing && WRAPPER_TAGS[tag.localName] === true) {
 			this.#buffer = this.#buffer.slice(tag.raw.length);
 			this.#state = "section";
 			return true;
@@ -180,7 +169,7 @@ export class AnthropicInbandScanner implements InbandScanner {
 			this.#startThinking(tag, "outside", events);
 			return true;
 		}
-		if (tag.closing && this.#wrapperTags[tag.localName] === true) {
+		if (tag.closing && WRAPPER_TAGS[tag.localName] === true) {
 			this.#buffer = this.#buffer.slice(tag.raw.length);
 			return true;
 		}
@@ -209,7 +198,7 @@ export class AnthropicInbandScanner implements InbandScanner {
 		}
 
 		this.#buffer = this.#buffer.slice(tag.raw.length);
-		if (tag.closing && this.#wrapperTags[tag.localName] === true) {
+		if (tag.closing && WRAPPER_TAGS[tag.localName] === true) {
 			this.#state = "outside";
 			return true;
 		}
@@ -272,7 +261,7 @@ export class AnthropicInbandScanner implements InbandScanner {
 		return true;
 	}
 
-	#consumeParameter(final: boolean, events: InbandScanEvent[]): boolean {
+	#consumeParameter(final: boolean): boolean {
 		const tagStart = this.#buffer.indexOf("<");
 		if (tagStart === -1) {
 			if (final) {
@@ -280,14 +269,14 @@ export class AnthropicInbandScanner implements InbandScanner {
 				this.#buffer = "";
 				return false;
 			}
-			this.#appendParameterValue(this.#buffer, events);
+			this.#appendParameterValue(this.#buffer);
 			this.#rawBlock += this.#buffer;
 			this.#buffer = "";
 			return false;
 		}
 		if (tagStart > 0) {
 			const consumed = this.#buffer.slice(0, tagStart);
-			this.#appendParameterValue(consumed, events);
+			this.#appendParameterValue(consumed);
 			this.#rawBlock += consumed;
 			this.#buffer = this.#buffer.slice(tagStart);
 			return true;
@@ -307,7 +296,7 @@ export class AnthropicInbandScanner implements InbandScanner {
 			return false;
 		}
 		const consumed = this.#buffer[0]!;
-		this.#appendParameterValue(consumed, events);
+		this.#appendParameterValue(consumed);
 		this.#rawBlock += consumed;
 		this.#buffer = this.#buffer.slice(1);
 		return true;
@@ -378,22 +367,10 @@ export class AnthropicInbandScanner implements InbandScanner {
 		this.#state = "parameter";
 	}
 
-	#appendParameterValue(delta: string, events: InbandScanEvent[]): void {
+	#appendParameterValue(delta: string): void {
 		if (delta.length === 0) return;
 		const remaining = MAX_PARAMETER_VALUE_LENGTH - this.#paramValue.length;
-		const accepted = remaining > 0 ? delta.slice(0, remaining) : "";
-		if (accepted.length > 0) {
-			this.#paramValue += accepted;
-			if (this.#started && this.#paramName.length > 0) {
-				events.push({
-					type: "toolArgDelta",
-					id: this.#id,
-					name: this.#name,
-					key: this.#paramName,
-					delta: accepted,
-				});
-			}
-		}
+		if (remaining > 0) this.#paramValue += delta.slice(0, remaining);
 		if (delta.length > remaining) this.#paramTruncated = true;
 	}
 
@@ -484,7 +461,7 @@ export class AnthropicInbandScanner implements InbandScanner {
 	}
 
 	#relevantPrefixes(): readonly string[] {
-		return this.#parseThinking ? this.#allTagPrefixes : this.#baseTagPrefixes;
+		return this.#parseThinking ? ALL_TAG_PREFIXES : BASE_TAG_PREFIXES;
 	}
 
 	#emitText(text: string, events: InbandScanEvent[]): void {
@@ -492,7 +469,7 @@ export class AnthropicInbandScanner implements InbandScanner {
 	}
 }
 
-const ALL_TAG_PREFIXES = [...BASE_TAG_PREFIXES, ...ANTHROPIC_THINKING_TAG_PREFIXES] as const;
+const ALL_TAG_PREFIXES = [...BASE_TAG_PREFIXES, ...THINKING_TAG_PREFIXES] as const;
 
 function parseTag(raw: string): ParsedTag | undefined {
 	const match = /^<\s*(\/?)\s*(?:(?<prefix>[A-Za-z_][\w.-]*):)?(?<localName>[A-Za-z_][\w.-]*)(?<attrs>[^>]*)>$/s.exec(

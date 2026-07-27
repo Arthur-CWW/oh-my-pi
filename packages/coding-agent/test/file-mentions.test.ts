@@ -2,14 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { extractFileMentions, generateFileMentionMessages } from "@oh-my-pi/pi-coding-agent/utils/file-mentions";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { generateFileMentionMessages } from "@oh-my-pi/pi-coding-agent/utils/file-mentions";
 
 const tempDirs: string[] = [];
 
 afterEach(async () => {
 	for (const dir of tempDirs.splice(0, tempDirs.length)) {
-		await removeWithRetries(dir);
+		await fs.rm(dir, { recursive: true, force: true });
 	}
 });
 
@@ -34,6 +33,45 @@ describe("generateFileMentionMessages path resolution", () => {
 		expect(message.files).toHaveLength(1);
 		expect(message.files[0]?.path).toBe("src/config.ts");
 		expect(message.files[0]?.content).toContain("export const x = 1;");
+	});
+
+	test("attaches supported video mentions in input order", async () => {
+		const cwd = await createTempDir();
+		const fixtures = [
+			["clip.mp4", "video/mp4"],
+			["clip.mov", "video/quicktime"],
+			["clip.m4v", "video/x-m4v"],
+			["clip.webm", "video/webm"],
+		] as const;
+		const data = Buffer.from([0, 1, 2, 3]).toBase64();
+		for (const [name] of fixtures) {
+			await Bun.write(path.join(cwd, name), Buffer.from([0, 1, 2, 3]));
+		}
+
+		const messages = await generateFileMentionMessages(
+			fixtures.map(([name]) => name),
+			cwd,
+			{ autoResizeImages: false },
+		);
+		expect(messages).toHaveLength(1);
+		const message = messages[0];
+		if (message?.role !== "fileMention") {
+			throw new Error("expected file mention message");
+		}
+		expect(message.files).toEqual(
+			fixtures.map(([name, mimeType]) => ({
+				path: name,
+				content: "",
+				attachment: { type: "video", mimeType, data },
+			})),
+		);
+	});
+
+	test("rejects empty video mentions before reading them", async () => {
+		const cwd = await createTempDir();
+		await Bun.write(path.join(cwd, "empty.mp4"), "");
+
+		await expect(generateFileMentionMessages(["empty.mp4"], cwd)).rejects.toThrow(/empty file/);
 	});
 
 	test("lists an exact directory path", async () => {
@@ -79,45 +117,5 @@ describe("generateFileMentionMessages path resolution", () => {
 		expect(message.files).toHaveLength(1);
 		expect(message.files[0]?.path).toBe("real.txt");
 		expect(message.files[0]?.content).toContain("present");
-	});
-
-	test("resolves quoted paths containing spaces", async () => {
-		const cwd = await createTempDir();
-		await fs.mkdir(path.join(cwd, "My Folder"), { recursive: true });
-		await Bun.write(path.join(cwd, "My Folder", "my file.png"), "image content");
-
-		const mentions = extractFileMentions("Please see @\"My Folder/my file.png\" and @'My Folder/my file.png'");
-		expect(mentions).toEqual(["My Folder/my file.png"]);
-
-		const messages = await generateFileMentionMessages(mentions, cwd);
-		expect(messages).toHaveLength(1);
-		const message = messages[0];
-		if (message?.role !== "fileMention") {
-			throw new Error("expected file mention message");
-		}
-		expect(message.files).toHaveLength(1);
-		expect(message.files[0]?.path).toBe("My Folder/my file.png");
-	});
-
-	test("skips auto-reading a binary file instead of injecting raw bytes", async () => {
-		const cwd = await createTempDir();
-		// TTF header begins with a NUL run; auto-reading it as text would leak
-		// control bytes into the conversation (the reported bug).
-		await Bun.write(path.join(cwd, "Silver.ttf"), Buffer.from([0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x4f, 0x53]));
-		// A non-NUL invalid-UTF8 blob must be refused too, not just NUL-bearing files.
-		await Bun.write(path.join(cwd, "blob.bin"), Buffer.from([0x4d, 0x5a, 0xff, 0xfe, 0xc0, 0xc0]));
-
-		const messages = await generateFileMentionMessages(["Silver.ttf", "blob.bin"], cwd);
-		expect(messages).toHaveLength(1);
-		const message = messages[0];
-		if (message?.role !== "fileMention") {
-			throw new Error("expected file mention message");
-		}
-		expect(message.files).toHaveLength(2);
-		for (const file of message.files) {
-			expect(file.skippedReason).toBe("binary");
-			expect(file.content).toContain("binary file");
-			expect(file.content).not.toContain("\u0000");
-		}
 	});
 });

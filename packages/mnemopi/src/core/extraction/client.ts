@@ -1,5 +1,4 @@
 import { type ApiKey, type FetchImpl, withAuth } from "@oh-my-pi/pi-ai";
-import * as AIError from "@oh-my-pi/pi-ai/error";
 
 import { getDiagnostics } from "./diagnostics";
 import { EXTRACTION_SYSTEM_PROMPT, EXTRACTION_USER_TEMPLATE } from "./prompts";
@@ -82,8 +81,8 @@ export class ExtractionClient {
 						try {
 							return await this.callApi(model, messages, temperature, maxTokens, key);
 						} catch (exc) {
-							const flags = AIError.classify(exc);
-							if (AIError.is(flags, AIError.Flag.UsageLimit) || AIError.is(flags, AIError.Flag.Transient)) {
+							const msg = String(exc).toLowerCase();
+							if (msg.includes("429") || msg.includes("rate")) {
 								rateLimitError = exc;
 								await sleep(Math.min(RATE_LIMIT_BACKOFF_MAX_MS, RATE_LIMIT_BACKOFF_BASE_MS * 2 ** attempt));
 								continue;

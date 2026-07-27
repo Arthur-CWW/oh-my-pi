@@ -8,7 +8,6 @@
  * login opens plan management so users copy the regional `tp-...` key.
  */
 
-import * as AIError from "../../error";
 import type { FetchImpl } from "../../types";
 import type { OAuthController } from "./types";
 
@@ -18,7 +17,7 @@ const STANDARD_AUTH_URL = "https://platform.xiaomimimo.com/#/console/api-keys";
 const TOKEN_PLAN_AUTH_URL = "https://platform.xiaomimimo.com/console/plan-manage";
 const STANDARD_API_BASE_URL = "https://api.xiaomimimo.com/v1";
 const TOKEN_PLAN_KEY_PREFIX = "tp-";
-const STANDARD_VALIDATION_MODEL = "mimo-v2.5";
+const STANDARD_VALIDATION_MODEL = "mimo-v2-flash";
 const TOKEN_PLAN_VALIDATION_MODEL = "mimo-v2.5";
 const TOKEN_PLAN_SGP_API_BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1";
 const TOKEN_PLAN_AMS_API_BASE_URL = "https://token-plan-ams.xiaomimimo.com/v1";
@@ -104,11 +103,10 @@ async function validateXiaomiApiKey(
 				} catch {
 					// ignore body parse errors, status is enough
 				}
-				lastError = new AIError.OAuthError(
+				lastError = new Error(
 					details
 						? `${PROVIDER_NAME} API key validation failed (${response.status}): ${details}`
 						: `${PROVIDER_NAME} API key validation failed (${response.status})`,
-					{ kind: "validation", provider: PROVIDER_ID, status: response.status },
 				);
 				continue;
 			}
@@ -123,11 +121,7 @@ async function validateXiaomiApiKey(
 			const message = details
 				? `${PROVIDER_NAME} API key validation failed (${response.status}): ${details}`
 				: `${PROVIDER_NAME} API key validation failed (${response.status})`;
-			throw new AIError.OAuthError(message, {
-				kind: "validation",
-				provider: PROVIDER_ID,
-				status: response.status,
-			});
+			throw new Error(message);
 		} catch (e) {
 			// Only re-throw AbortError when the caller explicitly cancelled.
 			// Timeout aborts (from AbortSignal.timeout) should fall through to
@@ -138,13 +132,7 @@ async function validateXiaomiApiKey(
 			lastError = e instanceof Error ? e : new Error(String(e));
 		}
 	}
-	throw (
-		lastError ??
-		new AIError.OAuthError(`${PROVIDER_NAME} API key validation failed`, {
-			kind: "validation",
-			provider: PROVIDER_ID,
-		})
-	);
+	throw lastError ?? new Error(`${PROVIDER_NAME} API key validation failed`);
 }
 
 /**
@@ -156,7 +144,7 @@ async function validateXiaomiApiKey(
 export async function loginXiaomi(options: OAuthController): Promise<string> {
 	const fetchImpl = options.fetch ?? fetch;
 	if (!options.onPrompt) {
-		throw new AIError.OnPromptRequiredError(PROVIDER_NAME);
+		throw new Error(`${PROVIDER_NAME} login requires onPrompt callback`);
 	}
 	options.onAuth?.({
 		url: STANDARD_AUTH_URL,
@@ -167,11 +155,11 @@ export async function loginXiaomi(options: OAuthController): Promise<string> {
 		placeholder: "sk-... or tp-...",
 	});
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 	const trimmed = apiKey.trim();
 	if (!trimmed) {
-		throw new AIError.ApiKeyRequiredError();
+		throw new Error("API key is required");
 	}
 
 	options.onProgress?.(`Validating ${PROVIDER_ID} API key...`);
@@ -187,7 +175,7 @@ export async function loginXiaomi(options: OAuthController): Promise<string> {
 export async function loginXiaomiTokenPlan(options: OAuthController, region: XiaomiTokenPlanRegion): Promise<string> {
 	const fetchImpl = options.fetch ?? fetch;
 	if (!options.onPrompt) {
-		throw new AIError.OnPromptRequiredError(`Xiaomi Token Plan (${TOKEN_PLAN_REGION_NAMES[region]})`);
+		throw new Error(`Xiaomi Token Plan (${TOKEN_PLAN_REGION_NAMES[region]}) login requires onPrompt callback`);
 	}
 	options.onAuth?.({
 		url: TOKEN_PLAN_AUTH_URL,
@@ -198,11 +186,11 @@ export async function loginXiaomiTokenPlan(options: OAuthController, region: Xia
 		placeholder: "tp-...",
 	});
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 	const trimmed = apiKey.trim();
 	if (!trimmed) {
-		throw new AIError.ApiKeyRequiredError();
+		throw new Error("API key is required");
 	}
 
 	options.onProgress?.(`Validating Xiaomi Token Plan (${TOKEN_PLAN_REGION_NAMES[region]}) API key...`);

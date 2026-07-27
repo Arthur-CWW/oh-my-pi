@@ -8,37 +8,23 @@ import type {
 	Context,
 	Effort,
 	Model,
-	ProviderSessionState,
-	ServiceTier,
-	ServiceTierByFamily,
+	ReasoningEffort,
 	SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
-import { resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
-import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
+import { streamSimple } from "@oh-my-pi/pi-ai";
+import type { CanonicalModelVariant } from "@oh-my-pi/pi-catalog/identity";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import type { ApiKeyResolverModel } from "../config/api-key-resolver";
-import { ModelRegistry } from "../config/model-registry";
-import {
-	formatModelSelectorValue,
-	formatModelString,
-	getModelMatchPreferences,
-	resolveCliModel,
-} from "../config/model-resolver";
-import { buildServiceTierByFamily, serviceTierForAllFamilies, serviceTierSettingToTier } from "../config/service-tier";
+import { type CanonicalModelQueryOptions, ModelRegistry } from "../config/model-registry";
+import { formatModelString, getModelMatchPreferences, resolveCliModel } from "../config/model-resolver";
 import { Settings } from "../config/settings";
 import benchPrompt from "../prompts/bench.md" with { type: "text" };
-import { discoverAuthStorage, loadCliExtensionProviders } from "../sdk";
-import {
-	concreteThinkingLevel,
-	resolveThinkingLevelForModel,
-	shouldDisableReasoning,
-	toReasoningEffort,
-} from "../thinking";
+import { discoverAuthStorage } from "../sdk";
+import { resolveThinkingLevelForModel, shouldDisableReasoning, toReasoningEffort } from "../thinking";
 
-const DEFAULT_RUNS = 10;
-const DEFAULT_PAR = 4;
+const DEFAULT_RUNS = 1;
 const DEFAULT_MAX_TOKENS = 512;
 const ERROR_WIDTH = 110;
 const BENCH_PROMPT = benchPrompt.trim();
@@ -49,10 +35,7 @@ export interface BenchCommandArgs {
 		runs?: number;
 		maxTokens?: number;
 		prompt?: string;
-		/** Service-tier setting value (`none` omits); overrides the configured `serviceTier` setting. */
-		serviceTier?: string;
 		json?: boolean;
-		par?: number;
 	};
 }
 
@@ -60,7 +43,9 @@ export interface BenchModelRegistry {
 	getAll(): Model<Api>[];
 	getApiKey(model: Model<Api>, sessionId?: string): Promise<string | undefined>;
 	resolver(model: ApiKeyResolverModel, sessionId?: string): ApiKeyResolver;
-	hasConfiguredAuth?(model: Model<Api>): boolean;
+	resolveCanonicalModel?(canonicalId: string, options?: CanonicalModelQueryOptions): Model<Api> | undefined;
+	getCanonicalVariants?(canonicalId: string, options?: CanonicalModelQueryOptions): CanonicalModelVariant[];
+	getCanonicalId?(model: Model<Api>): string | undefined;
 }
 
 export interface BenchRuntime {
@@ -109,8 +94,6 @@ export interface BenchSummary {
 	maxTokens: number;
 	models: BenchModelReport[];
 	failures: number;
-	/** Requested per-family service tiers, resolved per model before reaching the wire. */
-	serviceTierByFamily?: ServiceTierByFamily;
 }
 
 type BenchStreamSimple = (
@@ -143,13 +126,6 @@ function normalizePositiveInteger(name: string, value: number | undefined, fallb
 	return value;
 }
 
-function closeProviderSessionStates(providerSessionState: Map<string, ProviderSessionState>): void {
-	for (const state of providerSessionState.values()) {
-		state.close();
-	}
-	providerSessionState.clear();
-}
-
 function isFirstTokenEvent(event: AssistantMessageEvent): boolean {
 	switch (event.type) {
 		case "text_delta":
@@ -164,37 +140,14 @@ function isFirstTokenEvent(event: AssistantMessageEvent): boolean {
 	}
 }
 
-/** Final message carries visible output — non-empty text/thinking or a tool call. */
-function hasVisibleFinalContent(message: AssistantMessage): boolean {
-	return message.content.some(block => {
-		switch (block.type) {
-			case "text":
-				return block.text.length > 0;
-			case "thinking":
-				return block.thinking.length > 0;
-			case "redactedThinking":
-			case "toolCall":
-				return true;
-			default:
-				return false;
-		}
-	});
-}
-
 /**
  * Tokens/s over the generation window (duration minus TTFT) so queue/prefill
  * latency does not dilute throughput. Falls back to total duration when the
  * response arrived as a single chunk (TTFT ~ duration).
  */
-export function computeTokensPerSecond(
-	outputTokens: number,
-	durationMs: number,
-	ttftMs: number,
-	deltaChunkCount: number,
-): number {
+function computeTokensPerSecond(outputTokens: number, durationMs: number, ttftMs: number): number {
 	const decodeMs = durationMs - ttftMs;
-	// Fall back to total duration when the response arrived as a single chunk/non-streaming.
-	const windowMs = decodeMs > 0 && deltaChunkCount >= 2 ? decodeMs : durationMs;
+	const windowMs = decodeMs > 0 ? decodeMs : durationMs;
 	return windowMs > 0 ? (outputTokens * 1000) / windowMs : 0;
 }
 
@@ -203,12 +156,10 @@ interface BenchRequestOptions {
 	sessionId: string;
 	prompt: string;
 	maxTokens: number;
-	/** Explicit effort from a `:level` selector suffix; absent = provider default. */
-	reasoning?: Effort;
+	/** Exact validated effort from a `:level` selector suffix; absent = provider default. */
+	reasoning?: ReasoningEffort;
 	/** Only set for an explicit `:off` suffix — some endpoints reject disablement. */
 	disableReasoning?: boolean;
-	/** Requested service tier passed to `streamSimple`; absent omits the option. The provider layer applies scope/support gating before it reaches the wire. */
-	serviceTier?: ServiceTier;
 }
 
 async function runBenchRequest(
@@ -219,7 +170,6 @@ async function runBenchRequest(
 ): Promise<BenchRunResult> {
 	const startedAt = now();
 	let firstTokenAt: number | undefined;
-	const providerSessionState = new Map<string, ProviderSessionState>();
 	try {
 		const context: Context = {
 			// Codex's Responses endpoint 400s with "Instructions are required" when no
@@ -236,9 +186,6 @@ async function runBenchRequest(
 					: options.maxTokens,
 			reasoning: options.reasoning,
 			disableReasoning: options.disableReasoning,
-			serviceTier: options.serviceTier,
-			providerSessionState,
-			preferWebsockets: true,
 			// pi-ai opts every OpenRouter request into response caching (1h TTL).
 			// Bench sends a byte-identical request each run, so within the TTL
 			// OpenRouter replays the cached generation with zeroed usage — the run
@@ -247,16 +194,9 @@ async function runBenchRequest(
 			headers: model.provider === "openrouter" ? { "X-OpenRouter-Cache": "false" } : undefined,
 		});
 		let message: AssistantMessage | undefined;
-		let deltaChunkCount = 0;
 		for await (const event of stream) {
 			if (firstTokenAt === undefined && isFirstTokenEvent(event)) {
 				firstTokenAt = now();
-			}
-			if (
-				(event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") &&
-				event.delta.length > 0
-			) {
-				deltaChunkCount++;
 			}
 			if (event.type === "error") {
 				return { ok: false, error: event.error.errorMessage ?? "request failed" };
@@ -274,29 +214,15 @@ async function runBenchRequest(
 		const rawTtft = message.ttft ?? (firstTokenAt === undefined ? durationMs : firstTokenAt - startedAt);
 		const ttftMs = Number.isFinite(rawTtft) && rawTtft > 0 ? rawTtft : 0;
 		const outputTokens = Number.isFinite(message.usage.output) && message.usage.output > 0 ? message.usage.output : 0;
-		// A run that streamed no content (no delta/end event set firstTokenAt),
-		// carries no visible final content, and measured no output tokens
-		// benchmarked nothing — a genuinely empty stream (e.g. a gateway that 200s
-		// with an empty body). Surface it as a failure instead of a misleading
-		// 0-token "✓". Streaming and buffered providers that produce content keep
-		// passing even when usage is omitted.
-		if (firstTokenAt === undefined && outputTokens === 0 && !hasVisibleFinalContent(message)) {
-			return {
-				ok: false,
-				error: `provider returned no output (0 tokens, empty stream; stop reason: ${message.stopReason ?? "unknown"})`,
-			};
-		}
 		return {
 			ok: true,
 			ttftMs,
 			durationMs,
 			outputTokens,
-			tokensPerSecond: computeTokensPerSecond(outputTokens, durationMs, ttftMs, deltaChunkCount),
+			tokensPerSecond: computeTokensPerSecond(outputTokens, durationMs, ttftMs),
 		};
 	} catch (error) {
 		return { ok: false, error: getErrorMessage(error) };
-	} finally {
-		closeProviderSessionStates(providerSessionState);
 	}
 }
 
@@ -319,10 +245,6 @@ function buildModelReport(
 	return { selector, model: formatModelString(model), thinking, results, average };
 }
 
-function formatBenchModelLabel(report: BenchModelReport): string {
-	return formatModelSelectorValue(report.model, report.thinking);
-}
-
 function formatMs(ms: number): string {
 	return formatDuration(Math.max(0, Math.round(ms)));
 }
@@ -343,7 +265,7 @@ export function formatBenchTable(summary: BenchSummary): string {
 		return b.average.tokensPerSecond - a.average.tokensPerSecond;
 	});
 	const rows = ranked.map(report => ({
-		model: formatBenchModelLabel(report),
+		model: report.model,
 		ttft: report.average ? formatMs(report.average.ttftMs) : "-",
 		tps: report.average ? `${report.average.tokensPerSecond.toFixed(1)}/s` : "-",
 		tokens: report.average ? String(Math.round(report.average.outputTokens)) : "-",
@@ -384,10 +306,8 @@ export function formatBenchTable(summary: BenchSummary): string {
 async function createDefaultRuntime(): Promise<BenchRuntime> {
 	const authStorage = await discoverAuthStorage();
 	try {
-		const cwd = getProjectDir();
-		const settings = await Settings.init({ cwd });
+		const settings = await Settings.init({ cwd: getProjectDir() });
 		const modelRegistry = new ModelRegistry(authStorage);
-		await loadCliExtensionProviders(modelRegistry, settings, cwd);
 		return {
 			modelRegistry,
 			settings,
@@ -403,50 +323,6 @@ interface BenchTarget {
 	selector: string;
 	model: Model<Api>;
 	thinking: ResolvedThinkingLevel | undefined;
-}
-
-/** Highest-priority provider variant: native/OAuth transports outrank mirrors. */
-function pickHighestPriorityProvider(models: Model<Api>[], providerOrder?: readonly string[]): Model<Api> | undefined {
-	if (models.length <= 1) return models[0];
-	const priority = buildModelProviderPriorityRank(providerOrder);
-	return [...models].sort((a, b) => {
-		const aRank = priority.get(a.provider.toLowerCase()) ?? Number.POSITIVE_INFINITY;
-		const bRank = priority.get(b.provider.toLowerCase()) ?? Number.POSITIVE_INFINITY;
-		return aRank - bRank;
-	})[0];
-}
-
-/**
- * Bench resolves selectors against the entire catalog (credentials are ignored),
- * so an ambiguous id shared by several providers can land on one the user never
- * authenticated. For non-pinned selectors, redirect to an equivalent model under
- * a provider with configured auth. An explicit `provider/id` selector is honored
- * verbatim — even unauthenticated — so forced benchmarking keeps working.
- */
-function resolveAuthenticatedAlternative(
-	selector: string,
-	model: Model<Api>,
-	modelRegistry: BenchModelRegistry,
-	providerOrder?: readonly string[],
-): Model<Api> | undefined {
-	if (!modelRegistry.hasConfiguredAuth) return undefined;
-	// A pinned `provider/...` selector is authoritative; never redirect off it.
-	if (selector.trim().toLowerCase().startsWith(`${model.provider.toLowerCase()}/`)) return undefined;
-	if (modelRegistry.hasConfiguredAuth(model)) return undefined;
-
-	const seen = new Set<string>();
-	const authenticated: Model<Api>[] = [];
-	const consider = (candidate: Model<Api>): void => {
-		const key = `${candidate.provider}/${candidate.id}`;
-		if (seen.has(key)) return;
-		seen.add(key);
-		if (modelRegistry.hasConfiguredAuth?.(candidate)) authenticated.push(candidate);
-	};
-	// Same-id fallback for equivalent entries under providers with configured auth.
-	for (const candidate of modelRegistry.getAll()) {
-		if (candidate.id === model.id) consider(candidate);
-	}
-	return pickHighestPriorityProvider(authenticated, providerOrder);
 }
 
 function resolveBenchModels(
@@ -469,20 +345,10 @@ function resolveBenchModels(
 			continue;
 		}
 		if (result.warning) writeStderr(`${chalk.yellow(`Warning: ${result.warning}`)}\n`);
-		let model = result.model;
-		const authenticated = resolveAuthenticatedAlternative(selector, model, modelRegistry, preferences.providerOrder);
-		if (authenticated) {
-			writeStderr(
-				`${chalk.yellow(
-					`Warning: no credentials for "${model.provider}"; benchmarking ${formatModelString(authenticated)} instead. Pin "${formatModelString(model)}" to force it.`,
-				)}\n`,
-			);
-			model = authenticated;
-		}
 		resolved.push({
 			selector,
-			model,
-			thinking: resolveThinkingLevelForModel(model, concreteThinkingLevel(result.thinkingLevel)),
+			model: result.model,
+			thinking: resolveThinkingLevelForModel(result.model, result.thinkingLevel),
 		});
 	}
 	if (errors.length > 0) {
@@ -490,11 +356,10 @@ function resolveBenchModels(
 	}
 	return resolved;
 }
+
 export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDependencies = {}): Promise<BenchSummary> {
 	const runs = normalizePositiveInteger("runs", command.flags.runs, DEFAULT_RUNS);
 	const maxTokens = normalizePositiveInteger("max-tokens", command.flags.maxTokens, DEFAULT_MAX_TOKENS);
-	const par =
-		command.flags.par !== undefined ? normalizePositiveInteger("par", command.flags.par, DEFAULT_PAR) : DEFAULT_PAR;
 	const prompt = command.flags.prompt?.trim() || BENCH_PROMPT;
 	const json = command.flags.json === true;
 	const randomSessionId = deps.randomSessionId ?? (() => Bun.randomUUIDv7());
@@ -515,49 +380,28 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 	const runtime = await (deps.createRuntime ?? createDefaultRuntime)();
 	try {
 		const targets = resolveBenchModels(command.models, runtime.modelRegistry, runtime.settings, writeStderr);
-		// Explicit `--service-tier` (a single value broadcast across families) wins;
-		// otherwise fall back to the configured per-family `tier.*` settings. Each
-		// model resolves its own family's tier below before reaching the wire.
-		const flagTier = command.flags.serviceTier ? serviceTierSettingToTier(command.flags.serviceTier) : undefined;
-		const serviceTierByFamily = command.flags.serviceTier
-			? serviceTierForAllFamilies(flagTier)
-			: buildServiceTierByFamily(
-					runtime.settings?.get("tier.openai") ?? "none",
-					runtime.settings?.get("tier.anthropic") ?? "none",
-					runtime.settings?.get("tier.google") ?? "none",
-				);
-		if (!json && flagTier) writeStdout(`${chalk.dim(`service tier: ${flagTier}`)}\n`);
 		const reports: BenchModelReport[] = [];
 		for (const { selector, model, thinking } of targets) {
 			if (!json) {
-				const resolvedModel = formatModelSelectorValue(formatModelString(model), thinking);
-				const resolvedNote = selector === resolvedModel ? "" : chalk.dim(` (${selector})`);
-				writeStdout(`${chalk.bold(resolvedModel)}${resolvedNote}\n`);
+				const resolvedNote = selector === formatModelString(model) ? "" : chalk.dim(` (${selector})`);
+				writeStdout(`${chalk.bold(formatModelString(model))}${resolvedNote}\n`);
 			}
 			const results: BenchRunResult[] = [];
-
-			// Preflight check: let's verify credentials before starting any runs.
-			// This matches the old sequential break behavior exactly and avoids launching/printing
-			// multiple failures.
-			const testSessionId = randomSessionId();
-			const preflightKey = await runtime.modelRegistry.getApiKey(model, testSessionId);
-			if (!preflightKey) {
-				const failure: BenchRunFailure = {
-					ok: false,
-					error: `No credentials for provider "${model.provider}". Run \`omp\` and use /login, or set the provider API key.`,
-				};
-				results.push(failure);
-				if (!json) writeStdout(`${formatRunLine(failure, 0, runs)}\n`);
-				reports.push(buildModelReport(selector, model, thinking, results));
-				continue;
-			}
-
-			// We will launch up to `par` workers/requests concurrently.
-			// To keep output clean, non-JSON output emits entries in correct index order.
-			let nextToPrint = 0;
-
-			const runWorker = async (index: number) => {
-				const sessionId = index === 0 ? testSessionId : randomSessionId();
+			for (let index = 0; index < runs; index++) {
+				const sessionId = randomSessionId();
+				const initialKey = await runtime.modelRegistry.getApiKey(model, sessionId);
+				if (!initialKey) {
+					const failure: BenchRunFailure = {
+						ok: false,
+						error: `No credentials for provider "${model.provider}". Run \`omp\` and use /login, or set the provider API key.`,
+					};
+					results.push(failure);
+					if (!json) writeStdout(`${formatRunLine(failure, index, runs)}\n`);
+					break; // remaining runs would fail identically
+				}
+				if (!json && interactive) {
+					writeStdout(chalk.dim(`  … run ${index + 1}/${runs} streaming`));
+				}
 				const result = await runBenchRequest(
 					model,
 					{
@@ -567,49 +411,20 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 						maxTokens,
 						reasoning: toReasoningEffort(thinking),
 						disableReasoning: shouldDisableReasoning(thinking) ? true : undefined,
-						serviceTier: resolveModelServiceTier(serviceTierByFamily, model),
 					},
 					streamFn,
 					now,
 				);
-				results[index] = result;
-			};
-
-			// Concurrency-limited running pool
-			const queue = Array.from({ length: runs }, (_, i) => i);
-			const activeWorkers: Promise<void>[] = [];
-
-			const processNext = async (): Promise<void> => {
-				if (queue.length === 0) return;
-				const index = queue.shift()!;
-
-				// Pre-print a status update if requested and interactive
-				if (!json && interactive) {
-					writeStdout(chalk.dim(`  … run ${index + 1}/${runs} streaming\n`));
-				}
-
-				await runWorker(index);
-
-				// Attempt to print completed results that are in-order
+				results.push(result);
 				if (!json) {
-					while (nextToPrint < runs && results[nextToPrint] !== undefined) {
-						const res = results[nextToPrint];
-						writeStdout(`${formatRunLine(res, nextToPrint, runs)}\n`);
-						nextToPrint++;
-					}
+					if (interactive) writeStdout("\r\x1b[2K");
+					writeStdout(`${formatRunLine(result, index, runs)}\n`);
 				}
-
-				await processNext();
-			};
-
-			for (let w = 0; w < Math.min(par, runs); w++) {
-				activeWorkers.push(processNext());
 			}
-			await Promise.all(activeWorkers);
 			reports.push(buildModelReport(selector, model, thinking, results));
 		}
 		const failures = reports.reduce((sum, report) => sum + report.results.filter(result => !result.ok).length, 0);
-		const summary: BenchSummary = { runs, maxTokens, models: reports, failures, serviceTierByFamily };
+		const summary: BenchSummary = { runs, maxTokens, models: reports, failures };
 		if (json) {
 			writeStdout(`${JSON.stringify(summary, null, 2)}\n`);
 		} else if (reports.length > 1 || runs > 1) {

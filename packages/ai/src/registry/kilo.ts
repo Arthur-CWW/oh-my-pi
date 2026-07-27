@@ -1,4 +1,3 @@
-import * as AIError from "../error";
 import type { OAuthController, OAuthCredentials } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
 
@@ -26,17 +25,9 @@ export async function loginKilo(callbacks: OAuthController): Promise<OAuthCreden
 
 	if (!initiateResponse.ok) {
 		if (initiateResponse.status === 429) {
-			throw new AIError.OAuthError("Too many pending authorization requests. Please try again later.", {
-				kind: "polling",
-				provider: "kilo",
-				status: initiateResponse.status,
-			});
+			throw new Error("Too many pending authorization requests. Please try again later.");
 		}
-		throw new AIError.OAuthError(`Failed to initiate device authorization: ${initiateResponse.status}`, {
-			kind: "device-auth",
-			provider: "kilo",
-			status: initiateResponse.status,
-		});
+		throw new Error(`Failed to initiate device authorization: ${initiateResponse.status}`);
 	}
 
 	const initiateData = (await initiateResponse.json()) as KiloDeviceAuthCodeResponse;
@@ -44,10 +35,7 @@ export async function loginKilo(callbacks: OAuthController): Promise<OAuthCreden
 	const verificationUrl = initiateData.verificationUrl;
 	const expiresInSeconds = initiateData.expiresIn;
 	if (!userCode || !verificationUrl || typeof expiresInSeconds !== "number" || expiresInSeconds <= 0) {
-		throw new AIError.OAuthError("Kilo device authorization response missing required fields", {
-			kind: "validation",
-			provider: "kilo",
-		});
+		throw new Error("Kilo device authorization response missing required fields");
 	}
 
 	callbacks.onAuth?.({
@@ -58,7 +46,7 @@ export async function loginKilo(callbacks: OAuthController): Promise<OAuthCreden
 	const deadline = Date.now() + expiresInSeconds * 1000;
 	while (Date.now() < deadline) {
 		if (callbacks.signal?.aborted) {
-			throw new AIError.LoginCancelledError();
+			throw new Error("Login cancelled");
 		}
 
 		const pollResponse = await fetchImpl(`${KILO_DEVICE_AUTH_BASE_URL}/codes/${encodeURIComponent(userCode)}`);
@@ -67,20 +55,13 @@ export async function loginKilo(callbacks: OAuthController): Promise<OAuthCreden
 			continue;
 		}
 		if (pollResponse.status === 403) {
-			throw new AIError.OAuthError("Authorization was denied", { kind: "device-auth", provider: "kilo" });
+			throw new Error("Authorization was denied");
 		}
 		if (pollResponse.status === 410) {
-			throw new AIError.OAuthError("Authorization code expired. Please try again.", {
-				kind: "device-auth",
-				provider: "kilo",
-			});
+			throw new Error("Authorization code expired. Please try again.");
 		}
 		if (!pollResponse.ok) {
-			throw new AIError.OAuthError(`Failed to poll device authorization: ${pollResponse.status}`, {
-				kind: "polling",
-				provider: "kilo",
-				status: pollResponse.status,
-			});
+			throw new Error(`Failed to poll device authorization: ${pollResponse.status}`);
 		}
 
 		const pollData = (await pollResponse.json()) as KiloDeviceAuthPollResponse;
@@ -92,19 +73,16 @@ export async function loginKilo(callbacks: OAuthController): Promise<OAuthCreden
 			};
 		}
 		if (pollData.status === "denied") {
-			throw new AIError.OAuthError("Authorization was denied", { kind: "device-auth", provider: "kilo" });
+			throw new Error("Authorization was denied");
 		}
 		if (pollData.status === "expired") {
-			throw new AIError.OAuthError("Authorization code expired. Please try again.", {
-				kind: "device-auth",
-				provider: "kilo",
-			});
+			throw new Error("Authorization code expired. Please try again.");
 		}
 
 		await Bun.sleep(POLL_INTERVAL_MS);
 	}
 
-	throw new AIError.OAuthError("Authentication timed out. Please try again.", { kind: "timeout", provider: "kilo" });
+	throw new Error("Authentication timed out. Please try again.");
 }
 
 export const kiloProvider = {

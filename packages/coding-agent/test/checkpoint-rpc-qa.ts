@@ -120,7 +120,7 @@ async function main() {
 
 		const hasCheckpoint = toolSequence.includes("checkpoint");
 		const hasRewind = toolSequence.includes("rewind");
-		const hasGlob = toolSequence.includes("glob");
+		const hasFind = toolSequence.includes("find");
 		const hasRead = toolSequence.includes("read");
 
 		const activeHasRewindReport = messages.some(
@@ -132,7 +132,7 @@ async function main() {
 			.map(message => message.toolName);
 
 		const activeHasRewindResult = activeToolResults.includes("rewind");
-		const activeHasGlobResult = activeToolResults.includes("glob");
+		const activeHasFindResult = activeToolResults.includes("find");
 		const activeHasReadResult = activeToolResults.includes("read");
 
 		const rewindReportEntries = customMessages.filter(entry => entry.customType === "rewind-report");
@@ -163,7 +163,7 @@ async function main() {
 		if (!hasCheckpoint || !hasRewind) {
 			throw new Error("Agent did not execute both checkpoint and rewind.");
 		}
-		if (!hasGlob || !hasRead) {
+		if (!hasFind || !hasRead) {
 			throw new Error("Agent did not perform requested exploratory find/read inside checkpoint.");
 		}
 		if (!activeHasRewindReport) {
@@ -172,7 +172,7 @@ async function main() {
 		if (activeHasRewindResult) {
 			throw new Error("Active context still contains rewind tool result; rewind did not prune it.");
 		}
-		if (activeHasGlobResult || activeHasReadResult) {
+		if (activeHasFindResult || activeHasReadResult) {
 			throw new Error("Active context still contains exploratory find/read tool results after rewind.");
 		}
 		if (rewindReportEntries.length === 0) {

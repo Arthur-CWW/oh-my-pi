@@ -1,4 +1,3 @@
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 /**
  * Large-paste menu: when a paste reaches the configured `paste.largeMenuThreshold` line count,
  * the editor's `onLargePaste` hook routes through `InputController.handleLargePaste`, which offers
@@ -14,19 +13,20 @@ import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/inp
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 
 function createContext(options?: { threshold?: number; choice?: string; artifactsDir?: string }) {
-	const insertPaste = vi.fn();
+	const applyPaste = vi.fn();
 	const insertText = vi.fn();
-	const pasteText = vi.fn();
 	const requestRender = vi.fn();
 	const showStatus = vi.fn();
 	const showError = vi.fn();
 	const showHookSelector = vi.fn(async (_title: string, _options: unknown, _dialog?: unknown) => options?.choice);
 	const ctx = {
-		editor: { insertPaste, insertText, pasteText } as unknown as InteractiveModeContext["editor"],
+		editor: { applyPaste, insertText } as unknown as InteractiveModeContext["editor"],
 		ui: { requestRender } as unknown as InteractiveModeContext["ui"],
 		settings: { get: () => options?.threshold ?? 100 } as unknown as InteractiveModeContext["settings"],
+		keybindings: {
+			getDisplayString: (action: string) => (action === "ui.dismiss" ? "escape" : ""),
+		} as unknown as InteractiveModeContext["keybindings"],
 		sessionManager: {
-			getCwd: () => process.cwd(),
 			getArtifactsDir: () => options?.artifactsDir ?? null,
 			getSessionId: () => "test-session",
 		} as unknown as InteractiveModeContext["sessionManager"],
@@ -35,10 +35,7 @@ function createContext(options?: { threshold?: number; choice?: string; artifact
 		showError,
 	} as unknown as InteractiveModeContext;
 	const controller = new InputController(ctx);
-	return {
-		controller,
-		spies: { insertPaste, insertText, pasteText, requestRender, showStatus, showError, showHookSelector },
-	};
+	return { controller, spies: { applyPaste, insertText, requestRender, showStatus, showError, showHookSelector } };
 }
 
 afterEach(() => {
@@ -83,6 +80,7 @@ describe("InputController.presentLargePasteMenu actions", () => {
 			"Attach as local file",
 			"Paste inline",
 		]);
+		expect(spies.showHookSelector.mock.calls[0][2]).toEqual({ helpText: "escape to paste inline" });
 	});
 
 	it("wraps the paste in attachment XML collapsed to a marker", async () => {
@@ -90,7 +88,7 @@ describe("InputController.presentLargePasteMenu actions", () => {
 
 		await controller.presentLargePasteMenu("payload", 1);
 
-		expect(spies.insertPaste).toHaveBeenCalledWith("<attachment>\npayload\n</attachment>");
+		expect(spies.applyPaste).toHaveBeenCalledWith("<attachment>\npayload\n</attachment>", { asMarker: true });
 	});
 
 	it("pastes inline when explicitly selected", async () => {
@@ -98,7 +96,7 @@ describe("InputController.presentLargePasteMenu actions", () => {
 
 		await controller.presentLargePasteMenu("payload", 1);
 
-		expect(spies.insertPaste).toHaveBeenCalledWith("payload");
+		expect(spies.applyPaste).toHaveBeenCalledWith("payload", { asMarker: true });
 	});
 
 	it("pastes inline when the menu is cancelled, so the content is not lost", async () => {
@@ -106,7 +104,7 @@ describe("InputController.presentLargePasteMenu actions", () => {
 
 		await controller.presentLargePasteMenu("payload", 1);
 
-		expect(spies.insertPaste).toHaveBeenCalledWith("payload");
+		expect(spies.applyPaste).toHaveBeenCalledWith("payload", { asMarker: true });
 	});
 
 	it("titles the menu with the paste's line count", async () => {
@@ -122,7 +120,7 @@ describe("InputController.presentLargePasteMenu file attachment", () => {
 	let dir: string | undefined;
 
 	afterEach(async () => {
-		if (dir) await removeWithRetries(dir);
+		if (dir) await fs.rm(dir, { recursive: true, force: true });
 		dir = undefined;
 	});
 
@@ -133,7 +131,7 @@ describe("InputController.presentLargePasteMenu file attachment", () => {
 		await controller.presentLargePasteMenu("line one\nline two", 2);
 
 		expect(spies.insertText).toHaveBeenCalledWith("local://attachment-1 ");
-		expect(spies.insertPaste).not.toHaveBeenCalled();
+		expect(spies.applyPaste).not.toHaveBeenCalled();
 		// resolveLocalRoot maps an artifacts dir to "<dir>/local"; the reference resolves there.
 		const saved = await Bun.file(path.join(dir, "local", "attachment-1")).text();
 		expect(saved).toBe("line one\nline two");

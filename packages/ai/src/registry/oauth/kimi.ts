@@ -9,7 +9,6 @@ import * as path from "node:path";
 import { scheduler } from "node:timers/promises";
 import { $env, getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
 import packageJson from "../../../package.json" with { type: "json" };
-import * as AIError from "../../error";
 import type { OAuthController, OAuthCredentials } from "./types";
 
 const CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098";
@@ -76,20 +75,15 @@ let getDeviceId = (): string => {
 	return deviceId;
 };
 
-function sanitizeHeaderValue(value: string, fallback = ""): string {
-	const sanitized = value.replace(/[^\x20-\x7E]/g, "").trim();
-	return sanitized || fallback;
-}
-
 export let getKimiCommonHeaders = () => {
 	const headers = Object.freeze({
 		"User-Agent": `KimiCLI/${packageJson.version}`,
 		"X-Msh-Platform": "kimi_cli",
 		"X-Msh-Version": packageJson.version,
-		"X-Msh-Device-Name": sanitizeHeaderValue(os.hostname(), "unknown"),
-		"X-Msh-Device-Model": sanitizeHeaderValue(getDeviceModel(), "unknown"),
-		"X-Msh-Os-Version": sanitizeHeaderValue(os.version(), "unknown"),
-		"X-Msh-Device-Id": sanitizeHeaderValue(getDeviceId(), "unknown"),
+		"X-Msh-Device-Name": os.hostname(),
+		"X-Msh-Device-Model": getDeviceModel(),
+		"X-Msh-Os-Version": os.version(),
+		"X-Msh-Device-Id": getDeviceId(),
 	});
 	getKimiCommonHeaders = () => headers;
 	return headers;
@@ -114,11 +108,7 @@ async function requestDeviceAuthorization(): Promise<{
 
 	if (!response.ok) {
 		const text = await response.text();
-		throw new AIError.OAuthError(`Kimi device authorization failed: ${response.status} ${text}`, {
-			kind: "device-auth",
-			provider: "kimi",
-			status: response.status,
-		});
+		throw new Error(`Kimi device authorization failed: ${response.status} ${text}`);
 	}
 
 	const payload = (await response.json()) as DeviceAuthorizationResponse;
@@ -128,10 +118,7 @@ async function requestDeviceAuthorization(): Promise<{
 	const verificationUriComplete = payload.verification_uri_complete;
 
 	if (!userCode || !deviceCode || !verificationUri) {
-		throw new AIError.OAuthError("Kimi device authorization response missing required fields", {
-			kind: "validation",
-			provider: "kimi",
-		});
+		throw new Error("Kimi device authorization response missing required fields");
 	}
 
 	const expiresInMs = typeof payload.expires_in === "number" ? payload.expires_in * 1000 : DEFAULT_DEVICE_FLOW_TTL_MS;
@@ -150,18 +137,12 @@ async function requestDeviceAuthorization(): Promise<{
 
 function parseTokenPayload(payload: TokenResponse, refreshTokenFallback?: string): OAuthCredentials {
 	if (!payload.access_token || typeof payload.expires_in !== "number") {
-		throw new AIError.OAuthError("Kimi token response missing required fields", {
-			kind: "validation",
-			provider: "kimi",
-		});
+		throw new Error("Kimi token response missing required fields");
 	}
 
 	const refresh = payload.refresh_token ?? refreshTokenFallback;
 	if (!refresh) {
-		throw new AIError.OAuthError("Kimi token response missing refresh token", {
-			kind: "validation",
-			provider: "kimi",
-		});
+		throw new Error("Kimi token response missing refresh token");
 	}
 
 	return {
@@ -182,7 +163,7 @@ async function pollForToken(
 
 	while (Date.now() < deadline) {
 		if (signal?.aborted) {
-			throw new AIError.LoginCancelledError();
+			throw new Error("Login cancelled");
 		}
 
 		const response = await fetch(`${resolveOAuthHost()}/api/oauth/token`, {
@@ -218,30 +199,18 @@ async function pollForToken(
 		}
 
 		if (error === "expired_token") {
-			throw new AIError.OAuthError("Kimi device authorization expired", {
-				kind: "validation",
-				provider: "kimi",
-			});
+			throw new Error("Kimi device authorization expired");
 		}
 
 		if (error === "access_denied") {
-			throw new AIError.OAuthError("Kimi device authorization denied", {
-				kind: "validation",
-				provider: "kimi",
-			});
+			throw new Error("Kimi device authorization denied");
 		}
 
 		const description = payload.error_description ? `: ${payload.error_description}` : "";
-		throw new AIError.OAuthError(`Kimi device flow failed: ${error ?? response.status}${description}`, {
-			kind: "polling",
-			provider: "kimi",
-		});
+		throw new Error(`Kimi device flow failed: ${error ?? response.status}${description}`);
 	}
 
-	throw new AIError.OAuthError("Kimi device flow timed out", {
-		kind: "timeout",
-		provider: "kimi",
-	});
+	throw new Error("Kimi device flow timed out");
 }
 
 /**
@@ -277,11 +246,7 @@ export async function refreshKimiToken(refreshToken: string): Promise<OAuthCrede
 	if (!response.ok) {
 		const payload = (await response.json().catch(() => undefined)) as TokenResponse | undefined;
 		const description = payload?.error_description ? `: ${payload.error_description}` : "";
-		throw new AIError.OAuthError(`Kimi token refresh failed: ${response.status}${description}`, {
-			kind: "token-refresh",
-			provider: "kimi",
-			status: response.status,
-		});
+		throw new Error(`Kimi token refresh failed: ${response.status}${description}`);
 	}
 
 	const payload = (await response.json()) as TokenResponse;

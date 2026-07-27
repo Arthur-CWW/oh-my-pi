@@ -13,7 +13,6 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { resetForTests as resetCacheForTests } from "@oh-my-pi/pi-coding-agent/tools/github-cache";
 import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 let tempDir: string;
 let originalEnv: string | undefined;
@@ -43,7 +42,7 @@ afterEach(async () => {
 		process.env.GH_TOKEN = originalGhToken;
 	}
 	vi.restoreAllMocks();
-	await removeWithRetries(tempDir);
+	await fs.rm(tempDir, { recursive: true, force: true });
 });
 
 function issuePayload(number: number, body: string, commentBodies: string[] = []) {

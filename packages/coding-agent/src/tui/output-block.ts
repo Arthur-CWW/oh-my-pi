@@ -1,8 +1,8 @@
 /**
- * Bordered output container with optional header and sections.
+ * Output container with an unframed heading and indented content sections.
  */
 import type { Component } from "@oh-my-pi/pi-tui";
-import { ImageProtocol, padding, TERMINAL, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
+import { ImageProtocol, padding, sliceWithWidth, TERMINAL, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import type { Theme, ThemeColor } from "../modes/theme/theme";
 import { getSixelLineMask } from "../utils/sixel";
 import type { State } from "./types";
@@ -17,8 +17,8 @@ export interface OutputBlockOptions {
 	width: number;
 	applyBg?: boolean;
 	contentPaddingLeft?: number;
-	/** Override the state-derived border color. Used for muted "legacy" tool
-	 * frames that should not visually compete with framed-output tools. */
+	/** Retained for caller compatibility. Output blocks are unframed, so this no
+	 * longer selects a border color and does not affect rendering. */
 	borderColor?: ThemeColor;
 }
 
@@ -36,8 +36,8 @@ export function isFramedBlockComponent(component: Component): boolean {
 }
 
 type BlockRow =
-	| { kind: "bar"; leftChar: string; rightChar: string; label?: string; meta?: string }
-	| { kind: "bottom"; leftChar: string; rightChar: string }
+	| { kind: "heading"; label: string }
+	| { kind: "blank" }
 	| { kind: "content"; inner: string }
 	| { kind: "sixel"; raw: string };
 
@@ -46,34 +46,38 @@ function normalizeContentPaddingLeft(value: number | undefined): number {
 	return Math.max(0, Math.floor(value));
 }
 
+const HEADING_ELLIPSIS = "…";
+
 /**
- * Inner content width that {@link renderOutputBlock} wraps its body to, for a
- * given outer `width`: both vertical borders (1 cell each) plus the left
- * content padding. Renderers that size a tail window MUST budget visual rows
- * against this, not the outer width — otherwise the block re-wraps their lines
- * into more rows than they counted and the box overflows its intended height.
+ * Fit a heading — a status prefix followed by a semantic identifier such as a
+ * file path — into `width`. When the label already fits it is returned
+ * untouched, so a wide terminal renders the identifier (e.g. a full file path)
+ * in full. When it overflows, the label is shortened from the MIDDLE via
+ * ANSI-safe head + tail slices joined by an ellipsis, so the leading
+ * status/prefix AND the trailing basename/suffix stay visible instead of the
+ * plain end-truncation that silently dropped the basename. The result is always
+ * bounded to `width` visible columns.
  */
-export function outputBlockContentWidth(width: number, contentPaddingLeft?: number): number {
-	return Math.max(1, width - 2 - normalizeContentPaddingLeft(contentPaddingLeft));
+function shortenHeadingToWidth(label: string, width: number): string {
+	if (width <= 0) return "";
+	const total = visibleWidth(label);
+	if (total <= width) return label;
+	// Too narrow to keep head + ellipsis + tail meaningfully apart: fall back to
+	// plain end-truncation (which still appends its own ellipsis).
+	if (width <= 2) return truncateToWidth(label, width);
+	const budget = width - 1; // reserve one column for the ellipsis glyph
+	// Split the budget evenly, giving any odd column to the tail so the
+	// basename/suffix side is never the shorter half.
+	const headWidth = Math.floor(budget / 2);
+	const tailWidth = budget - headWidth;
+	const head = sliceWithWidth(label, 0, headWidth, true).text;
+	const tail = sliceWithWidth(label, total - tailWidth, tailWidth, true).text;
+	return `${head}${HEADING_ELLIPSIS}${tail}`;
 }
 
 export function renderOutputBlock(options: OutputBlockOptions, theme: Theme): string[] {
 	const { header, headerMeta, state, sections = [], width, applyBg = true } = options;
-	const h = theme.boxRound.horizontal;
-	const v = theme.boxRound.vertical;
-	const cap = h.repeat(3);
 	const lineWidth = Math.max(0, width);
-	// Border colors: running/pending use accent, success uses dim (gray), error/warning keep their colors
-	const borderColor: ThemeColor =
-		options.borderColor ??
-		(state === "error"
-			? "error"
-			: state === "warning"
-				? "warning"
-				: state === "running" || state === "pending"
-					? "accent"
-					: "dim");
-	const border = (text: string) => theme.fg(borderColor, text);
 	const bgFn = (() => {
 		if (!state || !applyBg) return undefined;
 		const bgAnsi = theme.getBgAnsi(getStateBgColor(state));
@@ -88,38 +92,26 @@ export function renderOutputBlock(options: OutputBlockOptions, theme: Theme): st
 	})();
 
 	const contentPaddingLeft = normalizeContentPaddingLeft(options.contentPaddingLeft);
-	const contentWidth = Math.max(0, lineWidth - visibleWidth(v) - contentPaddingLeft - visibleWidth(v));
+	const contentWidth = Math.max(0, lineWidth - contentPaddingLeft);
 	const contentLeftPadding = contentPaddingLeft > 0 ? padding(contentPaddingLeft) : "";
 
-	// ── Layout pass: collect row descriptors before emitting the bordered lines. ──
+	// Layout pass: collect row descriptors before emitting the unframed lines.
 	const rows: BlockRow[] = [];
-	rows.push({
-		kind: "bar",
-		leftChar: theme.boxRound.topLeft,
-		rightChar: theme.boxRound.topRight,
-		label: header,
-		meta: headerMeta,
-	});
+	const headerLabel = [header, headerMeta].filter(Boolean).join(theme.sep.dot);
+	if (headerLabel) {
+		rows.push({ kind: "heading", label: headerLabel });
+	}
 
 	const normalizedSections = sections.length > 0 ? sections : [{ lines: [] as string[] }];
 	for (let sectionIndex = 0; sectionIndex < normalizedSections.length; sectionIndex++) {
 		const section = normalizedSections[sectionIndex]!;
-		// A labeled section always draws its titled separator bar. A label-less
-		// section can still request a plain divider via `separator`, but only
-		// between sections — leading with one would just double the header bar.
+		// A labeled section draws its heading. A label-less section can still
+		// request a blank divider via `separator`, but only between sections —
+		// leading with one would just pad the top.
 		if (section.label) {
-			rows.push({
-				kind: "bar",
-				leftChar: theme.boxRound.teeRight,
-				rightChar: theme.boxRound.teeLeft,
-				label: section.label,
-			});
+			rows.push({ kind: "heading", label: section.label });
 		} else if (section.separator && sectionIndex > 0) {
-			rows.push({
-				kind: "bar",
-				leftChar: theme.boxRound.teeRight,
-				rightChar: theme.boxRound.teeLeft,
-			});
+			rows.push({ kind: "blank" });
 		}
 		const allLines = section.lines.flatMap(l => l.split("\n"));
 		const sixelLineMask = TERMINAL.imageProtocol === ImageProtocol.Sixel ? getSixelLineMask(allLines) : undefined;
@@ -137,50 +129,17 @@ export function renderOutputBlock(options: OutputBlockOptions, theme: Theme): st
 		}
 	}
 
-	rows.push({ kind: "bottom", leftChar: theme.boxRound.bottomLeft, rightChar: theme.boxRound.bottomRight });
-
-	const H = rows.length;
-
-	const renderBar = (row: { leftChar: string; rightChar: string; label?: string; meta?: string }): string => {
-		const leftGlyphs = `${row.leftChar}${cap}`;
-		const rightGlyph = row.rightChar;
-		if (lineWidth <= 0) return border(leftGlyphs) + border(rightGlyph);
-		const labelText = [row.label, row.meta].filter(Boolean).join(theme.sep.dot);
-		if (!labelText) {
-			// No header: draw a clean, continuous top/separator bar (no 1-col gap).
-			const fillCount = Math.max(0, lineWidth - visibleWidth(leftGlyphs) - visibleWidth(rightGlyph));
-			return `${border(leftGlyphs)}${border(h.repeat(fillCount))}${border(rightGlyph)}`;
-		}
-		const rawLabel = ` ${labelText} `;
-		const leftWidth = visibleWidth(leftGlyphs);
-		const rightWidth = visibleWidth(rightGlyph);
-		const maxLabelWidth = Math.max(0, lineWidth - leftWidth - rightWidth);
-		const trimmedLabel = truncateToWidth(rawLabel, maxLabelWidth);
-		const labelWidth = visibleWidth(trimmedLabel);
-		const fillCount = Math.max(0, lineWidth - leftWidth - labelWidth - rightWidth);
-		const fillGlyphs = h.repeat(fillCount);
-		return `${border(leftGlyphs)}${trimmedLabel}${border(fillGlyphs)}${border(rightGlyph)}`;
-	};
-
-	const renderBottom = (row: { leftChar: string; rightChar: string }): string => {
-		const leftGlyphs = `${row.leftChar}${cap}`;
-		const rightGlyph = row.rightChar;
-		const fillCount = Math.max(0, lineWidth - visibleWidth(leftGlyphs) - visibleWidth(rightGlyph));
-		const fillGlyphs = h.repeat(fillCount);
-		return `${border(leftGlyphs)}${border(fillGlyphs)}${border(rightGlyph)}`;
-	};
-
-	const renderContent = (inner: string): string => `${border(v)}${contentLeftPadding}${inner}${border(v)}`;
+	const renderHeading = (label: string): string => shortenHeadingToWidth(label, lineWidth);
+	const renderContent = (inner: string): string => `${contentLeftPadding}${inner}`;
 
 	const lines: string[] = [];
-	for (let r = 0; r < H; r++) {
-		const row = rows[r]!;
+	for (const row of rows) {
 		if (row.kind === "sixel") {
 			lines.push(row.raw);
 			continue;
 		}
 		const line =
-			row.kind === "bar" ? renderBar(row) : row.kind === "bottom" ? renderBottom(row) : renderContent(row.inner);
+			row.kind === "heading" ? renderHeading(row.label) : row.kind === "blank" ? "" : renderContent(row.inner);
 		lines.push(padToWidth(line, lineWidth, bgFn));
 	}
 
@@ -236,8 +195,7 @@ export class CachedOutputBlock {
 /**
  * Build a self-framing tool component backed by a cached output block. The
  * `build` callback returns the block options for a given width; the cache
- * dedupes re-renders. Pass `borderColor: "borderMuted"` for the dim "legacy"
- * look that does not compete with the state-colored framed tools.
+ * dedupes re-renders.
  */
 export function framedBlock(theme: Theme, build: (width: number) => OutputBlockOptions): Component {
 	const block = new CachedOutputBlock();

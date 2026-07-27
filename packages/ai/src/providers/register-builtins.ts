@@ -10,8 +10,6 @@
  * wired into the main streaming path. It provides the infrastructure for lazy
  * loading that can be integrated when stream.ts is refactored.
  */
-
-import * as AIError from "../error";
 import type {
 	Api,
 	AssistantMessage,
@@ -23,6 +21,7 @@ import type {
 } from "../types";
 import { type AbortSourceTracker, createAbortSourceTracker } from "../utils/abort";
 import { AssistantMessageEventStream as EventStreamImpl } from "../utils/event-stream";
+import { classifyRequestFailure } from "../utils/network-error";
 import {
 	getOpenAIStreamFirstEventTimeoutMs,
 	getOpenAIStreamIdleTimeoutMs,
@@ -34,7 +33,6 @@ import type { BedrockOptions } from "./amazon-bedrock";
 import type { AnthropicOptions } from "./anthropic";
 import type { AzureOpenAIResponsesOptions } from "./azure-openai-responses";
 import type { CursorOptions } from "./cursor";
-import type { DevinOptions } from "./devin";
 import type { GoogleOptions } from "./google";
 import type { GoogleGeminiCliOptions } from "./google-gemini-cli";
 import type { GoogleVertexOptions } from "./google-vertex";
@@ -131,10 +129,6 @@ interface CursorProviderModule {
 	) => AssistantMessageEventStream;
 }
 
-interface DevinProviderModule {
-	streamDevin: (model: Model<"devin-agent">, context: Context, options: DevinOptions) => AssistantMessageEventStream;
-}
-
 interface BedrockProviderModule {
 	streamBedrock: (
 		model: Model<"bedrock-converse-stream">,
@@ -157,20 +151,12 @@ let openAICompletionsProviderModulePromise: Promise<LazyProviderModule<"openai-c
 let openAIResponsesProviderModulePromise: Promise<LazyProviderModule<"openai-responses">> | undefined;
 let ollamaProviderModulePromise: Promise<LazyProviderModule<"ollama-chat">> | undefined;
 let cursorProviderModulePromise: Promise<LazyProviderModule<"cursor-agent">> | undefined;
-let cursorProviderModuleOverride: LazyProviderModule<"cursor-agent"> | undefined;
-let devinProviderModulePromise: Promise<LazyProviderModule<"devin-agent">> | undefined;
 let bedrockProviderModuleOverride: LazyProviderModule<"bedrock-converse-stream"> | undefined;
 let bedrockProviderModulePromise: Promise<LazyProviderModule<"bedrock-converse-stream">> | undefined;
 
 export function setBedrockProviderModule(module: BedrockProviderModule): void {
 	bedrockProviderModuleOverride = {
 		stream: module.streamBedrock,
-	};
-}
-
-export function setCursorProviderModule(module: CursorProviderModule): void {
-	cursorProviderModuleOverride = {
-		stream: module.streamCursor,
 	};
 }
 
@@ -252,18 +238,13 @@ function forwardStream<TApi extends Api>(
 					(limits?.openAIIdleEnvFloorsFirstEvent
 						? getOpenAIStreamFirstEventTimeoutMs(idleTimeoutMs, limits.defaultFirstEventTimeoutMs)
 						: getStreamFirstEventTimeoutMs(idleTimeoutMs, limits?.defaultFirstEventTimeoutMs)));
-			// Providers with a server-driven local tool bridge (e.g. the Cursor
-			// exec channel) mark their stream busy while a local tool runs; the
-			// watchdog must not read that silence as a provider stall (#4593).
-			const localWorkSource = source instanceof EventStreamImpl ? source : undefined;
 			const watchedSource = iterateWithIdleTimeout(source, {
 				idleTimeoutMs,
 				firstItemTimeoutMs,
 				errorMessage: LAZY_STREAM_IDLE_TIMEOUT_ERROR,
 				firstItemErrorMessage: LAZY_STREAM_FIRST_EVENT_TIMEOUT_ERROR,
-				onIdle: () => abortTracker.abortLocally(new AIError.StreamTimeoutError(LAZY_STREAM_IDLE_TIMEOUT_ERROR)),
-				onFirstItemTimeout: () =>
-					abortTracker.abortLocally(new AIError.StreamTimeoutError(LAZY_STREAM_FIRST_EVENT_TIMEOUT_ERROR)),
+				onIdle: () => abortTracker.abortLocally(new Error(LAZY_STREAM_IDLE_TIMEOUT_ERROR)),
+				onFirstItemTimeout: () => abortTracker.abortLocally(new Error(LAZY_STREAM_FIRST_EVENT_TIMEOUT_ERROR)),
 				abortSignal: options.signal,
 				// The synthetic `start` event is yielded immediately by every provider before
 				// the upstream model has emitted any tokens. Treating it as the first "real"
@@ -271,7 +252,6 @@ function forwardStream<TApi extends Api>(
 				// `idleTimeoutMs` while we're still legitimately waiting on the model's
 				// first response (slow first-token from reasoning models, cold proxies, etc.).
 				isProgressItem: event => (event as AssistantMessageEvent).type !== "start",
-				hasPendingLocalWork: localWorkSource ? () => localWorkSource.hasPendingLocalWork : undefined,
 			});
 
 			for await (const event of watchedSource) {
@@ -283,7 +263,9 @@ function forwardStream<TApi extends Api>(
 				target.end();
 			}
 		} catch (error) {
-			const stopReason = abortTracker.wasCallerAbort() ? "aborted" : "error";
+			const failureCause = classifyRequestFailure(error instanceof Error ? error : String(error), options.signal);
+			const stopReason =
+				failureCause === "parent-cancel" || failureCause === "user-interrupt" ? "aborted" : "error";
 			const message = createLazyLoadErrorMessage(model, error, stopReason);
 			target.push({ type: "error", reason: stopReason, error: message });
 			target.end(message);
@@ -423,22 +405,11 @@ function loadOllamaProviderModule(): Promise<LazyProviderModule<"ollama-chat">> 
 }
 
 function loadCursorProviderModule(): Promise<LazyProviderModule<"cursor-agent">> {
-	if (cursorProviderModuleOverride) {
-		return Promise.resolve(cursorProviderModuleOverride);
-	}
 	cursorProviderModulePromise ||= import("./cursor").then(module => {
 		const provider = module as CursorProviderModule;
 		return { stream: provider.streamCursor };
 	});
 	return cursorProviderModulePromise;
-}
-
-function loadDevinProviderModule(): Promise<LazyProviderModule<"devin-agent">> {
-	devinProviderModulePromise ||= import("./devin").then(module => {
-		const provider = module as DevinProviderModule;
-		return { stream: provider.streamDevin };
-	});
-	return devinProviderModulePromise;
 }
 
 function loadBedrockProviderModule(): Promise<LazyProviderModule<"bedrock-converse-stream">> {
@@ -484,7 +455,6 @@ export const streamOpenAIResponses = createLazyStream(
 	PROVIDER_HANDLED_STREAM_TIMEOUTS,
 );
 export const streamCursor = createLazyStream(loadCursorProviderModule);
-export const streamDevin = createLazyStream(loadDevinProviderModule);
 export const streamOllama = createLazyStream(loadOllamaProviderModule, OPENAI_IDLE_FLOORED_LAZY_STREAM_LIMITS);
 
 export const streamBedrock = createLazyStream(loadBedrockProviderModule);

@@ -9,7 +9,6 @@ interface CapturedRequestBody {
 	model?: string;
 	request?: {
 		generationConfig?: {
-			maxOutputTokens?: number;
 			thinkingConfig?: {
 				includeThoughts?: boolean;
 				thinkingLevel?: string;
@@ -33,27 +32,21 @@ function collapsedFlashModel(): Model<"google-gemini-cli"> {
 		baseUrl: "https://daily-cloudcode-pa.googleapis.com",
 		reasoning: true,
 		thinking: {
-			mode: "budget",
+			mode: "google-level",
 			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
-			effortBudgets: {
-				[Effort.Minimal]: 1000,
-				[Effort.Low]: 1000,
-				[Effort.Medium]: 4000,
-				[Effort.High]: 10000,
-			},
 			effortRouting: {
 				off: "gemini-3.5-flash-extra-low",
-				[Effort.Minimal]: "gemini-3.5-flash-extra-low",
+				[Effort.Minimal]: "gemini-3-flash-agent",
 				[Effort.Low]: "gemini-3.5-flash-extra-low",
-				[Effort.Medium]: "gemini-3.5-flash-low",
-				[Effort.High]: "gemini-3-flash-agent",
+				[Effort.Medium]: "gemini-3.5-flash-extra-low",
+				[Effort.High]: "gemini-3.5-flash-low",
 			},
 			suppressWhenOff: true,
 		},
 		input: ["text", "image"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 1_048_576,
-		maxTokens: 65_536,
+		maxTokens: 65_535,
 	} satisfies ModelSpec<"google-gemini-cli">);
 }
 
@@ -120,31 +113,26 @@ async function captureRequest(
 }
 
 describe("google-gemini-cli effort-tier variant routing", () => {
-	it("routes each effort to its backing wire id with the per-tier budget and attributes usage to the logical id", async () => {
+	it("routes each effort to its backing wire id and attributes usage to the logical id", async () => {
 		const high = await captureRequest(collapsedFlashModel(), Effort.High);
-		expect(high.body.model).toBe("gemini-3-flash-agent");
+		expect(high.body.model).toBe("gemini-3.5-flash-low");
 		expect(high.body.request?.generationConfig?.thinkingConfig).toEqual({
 			includeThoughts: true,
-			thinkingBudget: 10000,
+			thinkingLevel: "HIGH",
 		});
-		expect(high.body.request?.generationConfig?.maxOutputTokens).toBe(65536);
 		expect(high.attributedModel).toBe("gemini-3.5-flash");
 
-		const medium = await captureRequest(collapsedFlashModel(), Effort.Medium);
-		expect(medium.body.model).toBe("gemini-3.5-flash-low");
-		expect(medium.body.request?.generationConfig?.thinkingConfig?.thinkingBudget).toBe(4000);
-
-		const low = await captureRequest(collapsedFlashModel(), Effort.Low);
-		expect(low.body.model).toBe("gemini-3.5-flash-extra-low");
-		expect(low.body.request?.generationConfig?.thinkingConfig?.thinkingBudget).toBe(1000);
+		const minimal = await captureRequest(collapsedFlashModel(), Effort.Minimal);
+		expect(minimal.body.model).toBe("gemini-3-flash-agent");
+		expect(minimal.body.request?.generationConfig?.thinkingConfig?.thinkingLevel).toBe("MINIMAL");
 	});
 
-	it("suppresses thinking with a zero budget on the wire when off and suppressWhenOff is set", async () => {
+	it("suppresses thinking explicitly on the wire when off and suppressWhenOff is set", async () => {
 		const off = await captureRequest(collapsedFlashModel(), undefined);
 		expect(off.body.model).toBe("gemini-3.5-flash-extra-low");
 		expect(off.body.request?.generationConfig?.thinkingConfig).toEqual({
 			includeThoughts: false,
-			thinkingBudget: 0,
+			thinkingLevel: "MINIMAL",
 		});
 	});
 

@@ -1,30 +1,40 @@
 /**
- * Regression: the agent hub row order must be stable while the hub is open.
- *
- * The hub is sorted by lastActivity on first open, but after that keyboard
- * selection must not jump around as agents heartbeat or update activity. New
- * agents that appear while the hub is open are appended at the end.
+ * Agent Hub keeps live rows in registration order, oldest first, regardless
+ * of activity or heartbeat updates.
  */
-import { afterEach, beforeAll, describe, expect, it, setSystemTime, vi } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import {
+	type AgentHubExternalPeer,
+	type AgentHubExternalPeerDataSource,
+	AgentHubOverlayComponent,
+} from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
+import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { CHILD_LIFECYCLE_CUSTOM_TYPE, type ChildLifecycleState } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
+import { TempDir } from "@oh-my-pi/pi-utils";
 
 interface GeometryStub {
 	setRows(n: number): void;
 	restore(): void;
 }
 
+function liveSession(): AgentSession {
+	const session: Pick<AgentSession, "subscribe"> = { subscribe: () => () => {} };
+	return session as AgentSession;
+}
+
 function stubStdoutGeometry(cols: number): GeometryStub {
 	const rowsDesc = Object.getOwnPropertyDescriptor(process.stdout, "rows");
 	const colsDesc = Object.getOwnPropertyDescriptor(process.stdout, "columns");
 	let rows = 24;
-	Object.defineProperty(process.stdout, "rows", { configurable: true, get: () => rows, set: () => {} });
-	Object.defineProperty(process.stdout, "columns", { configurable: true, get: () => cols, set: () => {} });
+	Object.defineProperty(process.stdout, "rows", { configurable: true, get: () => rows });
+	Object.defineProperty(process.stdout, "columns", { configurable: true, get: () => cols });
 	const restoreOne = (key: "rows" | "columns", desc: PropertyDescriptor | undefined) => {
 		if (desc) Object.defineProperty(process.stdout, key, desc);
 		else Object.defineProperty(process.stdout, key, { configurable: true, value: undefined, writable: true });
@@ -40,7 +50,14 @@ function stubStdoutGeometry(cols: number): GeometryStub {
 	};
 }
 
-function makeHub(agents: AgentRegistry) {
+function makeHub(
+	agents: AgentRegistry,
+	options: {
+		externalIrc?: AgentHubExternalPeerDataSource | null;
+		externalSessionId?: string;
+		sessionsDir?: string;
+	} = {},
+) {
 	return new AgentHubOverlayComponent({
 		observers: new SessionObserverRegistry(),
 		hubKeys: [],
@@ -49,19 +66,174 @@ function makeHub(agents: AgentRegistry) {
 		registry: agents,
 		irc: new IrcBus(agents),
 		focusAgent: async () => {},
+		externalIrc: options.externalIrc ?? null,
+		externalSessionId: options.externalSessionId,
+		sessionsDir: options.sessionsDir,
 	});
+}
+
+function renderedText(hub: AgentHubOverlayComponent): string {
+	return hub
+		.render(120)
+		.map(line => Bun.stripANSI(line))
+		.join("\n");
+}
+
+async function waitForRenderedText(hub: AgentHubOverlayComponent, text: string): Promise<void> {
+	const deadline = Date.now() + 1_000;
+	while (!renderedText(hub).includes(text)) {
+		if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${text}`);
+		await Bun.sleep(1);
+	}
+}
+
+async function writeDirectChildJournal(options: {
+	file: string;
+	parentFile: string;
+	agentId: string;
+	updatedAt: string;
+	state?: ChildLifecycleState;
+	modelId?: string;
+	thinkingLevel?: string;
+}): Promise<void> {
+	const entries = [
+		{
+			type: "session",
+			version: CURRENT_SESSION_VERSION,
+			id: options.agentId,
+			timestamp: options.updatedAt,
+			cwd: "/tmp",
+		},
+		{
+			type: "session_init",
+			id: "init",
+			parentId: null,
+			timestamp: options.updatedAt,
+			systemPrompt: "child",
+			task: "archive test",
+			tools: [],
+			subagent: {
+				agentId: options.agentId,
+				parentSessionFile: options.parentFile,
+				parentSessionId: "parent",
+				displayName: options.agentId,
+				model: options.modelId ?? "openai-codex/gpt-5.6-terra",
+				taskDepth: 1,
+				parentTaskPrefix: options.agentId,
+				isolated: false,
+			},
+		},
+		...(options.state
+			? [
+					{
+						type: "custom",
+						id: "lifecycle",
+						parentId: null,
+						timestamp: options.updatedAt,
+						customType: CHILD_LIFECYCLE_CUSTOM_TYPE,
+						data: {
+							version: 1,
+							agentId: options.agentId,
+							childSessionFile: options.file,
+							parentSessionFile: options.parentFile,
+							state: options.state,
+							updatedAt: options.updatedAt,
+							modelId: options.modelId ?? "openai-codex/gpt-5.6-terra",
+							thinkingLevel: options.thinkingLevel ?? "medium",
+						},
+					},
+				]
+			: []),
+	];
+	await Bun.write(options.file, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
+}
+
+async function writeDurableSubagentJournal(options: {
+	file: string;
+	agentId: string;
+	parentSessionFile: string;
+	model: string;
+	thinkingLevel: string;
+}): Promise<void> {
+	const timestamp = "2026-07-13T01:00:00.000Z";
+	const entries = [
+		{ type: "session", version: CURRENT_SESSION_VERSION, id: options.agentId, timestamp, cwd: "/tmp" },
+		{
+			type: "session_init",
+			id: "init",
+			parentId: null,
+			timestamp,
+			systemPrompt: "child",
+			task: "durable badge test",
+			tools: [],
+			subagent: {
+				agentId: options.agentId,
+				parentSessionFile: options.parentSessionFile,
+				parentSessionId: "parent",
+				displayName: options.agentId,
+				model: options.model,
+				thinkingLevel: options.thinkingLevel,
+				taskDepth: 1,
+				parentTaskPrefix: options.agentId,
+				isolated: false,
+			},
+		},
+	];
+	await Bun.write(options.file, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
 }
 
 function renderedAgentIds(hub: AgentHubOverlayComponent): string[] {
 	return hub
 		.render(120)
 		.map(line => Bun.stripANSI(line))
-		.map(line => line.split(" · "))
-		.filter(
-			parts =>
-				parts.length >= 4 && ["running", "idle", "parked", "aborted"].some(status => parts[0].endsWith(status)),
-		)
-		.map(parts => parts[1]!);
+		.filter(line => {
+			if (line.length <= 25) return false;
+			const prefix = line.slice(0, 3);
+			if (prefix !== " ❯ " && prefix !== "   ") return false;
+			const stateCol = line.slice(17, 23).trim();
+			return /[●○■×◌·✓~◐◓◑◒]/.test(stateCol);
+		})
+		.map(line => {
+			const namePart = line.slice(23).trim();
+			const cleanName = namePart.replace(/^[▸▾]\s*/, "");
+			return cleanName.split(/\s+/)[0];
+		})
+		.filter(Boolean) as string[];
+}
+
+function renderedExternalPeerNames(hub: AgentHubOverlayComponent): string[] {
+	return hub
+		.render(120)
+		.map(line => Bun.stripANSI(line))
+		.filter(line => {
+			if (line.length <= 25) return false;
+			const prefix = line.slice(0, 3);
+			if (prefix !== " ❯ " && prefix !== "   ") return false;
+			const stateCol = line.slice(17, 23).trim();
+			if (!/[●○■×◌·✓~◐◓◑◒]/.test(stateCol)) return false;
+			return line.slice(23).toLowerCase().includes("external");
+		})
+		.map(line => {
+			const namePart = line.slice(23).trim();
+			return namePart.split(/\s+/)[0];
+		})
+		.filter(Boolean) as string[];
+}
+
+function externalPeer(
+	sessionId: string,
+	name: string,
+	lastSeen: string,
+	state: AgentHubExternalPeer["state"],
+): AgentHubExternalPeer {
+	return {
+		sessionId,
+		name,
+		cwd: `/tmp/${name}`,
+		pid: 100,
+		lastSeen,
+		state,
+	};
 }
 
 describe("Agent hub row ordering", () => {
@@ -72,78 +244,337 @@ describe("Agent hub row ordering", () => {
 	});
 
 	afterEach(() => {
-		vi.useRealTimers();
-		setSystemTime();
 		vi.restoreAllMocks();
 		geometry?.restore();
 		geometry = undefined;
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("freezes the initial lastActivity order while the hub is open", () => {
-		vi.useFakeTimers();
-		let hub: AgentHubOverlayComponent | undefined;
-		try {
-			geometry = stubStdoutGeometry(120);
-			const agents = new AgentRegistry();
-			setSystemTime(1000);
-			const sessionA = {} as AgentSession;
-			agents.register({ id: "A", displayName: "Alpha", kind: "sub", session: sessionA });
+	it("keeps activity updates in place and appends sequential registrations", async () => {
+		geometry = stubStdoutGeometry(120);
+		const now = vi.spyOn(Date, "now");
+		const agents = new AgentRegistry();
 
-			setSystemTime(2000);
-			const sessionB = {} as AgentSession;
-			agents.register({ id: "B", displayName: "Beta", kind: "sub", session: sessionB });
+		now.mockReturnValue(1000);
+		agents.register({ id: "A", displayName: "Alpha", kind: "sub", session: liveSession() });
+		now.mockReturnValue(2000);
+		agents.register({ id: "B", displayName: "Beta", kind: "sub", session: liveSession() });
+		now.mockReturnValue(3000);
+		agents.register({ id: "C", displayName: "Gamma", kind: "sub", session: liveSession() });
 
-			setSystemTime(3000);
-			const sessionC = {} as AgentSession;
-			agents.register({ id: "C", displayName: "Gamma", kind: "sub", session: sessionC });
+		const hub = makeHub(agents);
+		expect(renderedAgentIds(hub)).toEqual(["A", "B", "C"]);
 
-			hub = makeHub(agents);
-			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
+		now.mockReturnValue(4000);
+		agents.setActivity("A", "updated");
+		expect(renderedAgentIds(hub)).toEqual(["A", "B", "C"]);
+		agents.setStatus("A", "idle");
+		await waitForRenderedText(hub, "○ IDLE A");
+		expect(renderedAgentIds(hub)).toEqual(["B", "C", "A"]);
+		expect(renderedText(hub)).toContain("○ IDLE A");
 
-			// Bump A's lastActivity far ahead of the others. The hub is already open,
-			// so the captured order must not change.
-			setSystemTime(4000);
-			agents.setActivity("A", "still running");
-
-			// Registering a new agent schedules a coalesced row refresh; the
-			// existing rows must stay put once the scheduled refresh runs.
-			setSystemTime(5000);
-			const sessionD = {} as AgentSession;
-			agents.register({ id: "D", displayName: "Delta", kind: "sub", session: sessionD });
-
-			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A"]);
-			vi.advanceTimersByTime(100);
-			expect(renderedAgentIds(hub)).toEqual(["C", "B", "A", "D"]);
-		} finally {
-			hub?.dispose();
-			vi.useRealTimers();
-			setSystemTime();
-		}
+		now.mockReturnValue(5000);
+		agents.register({ id: "D", displayName: "Delta", kind: "sub", session: liveSession() });
+		await waitForRenderedText(hub, "Delta");
+		expect(renderedAgentIds(hub)).toEqual(["B", "C", "D", "A"]);
+		hub.dispose();
 	});
 
-	it("truncates lines and sanitizes newlines to prevent terminal wrapping", () => {
-		geometry = stubStdoutGeometry(80);
+	it("breaks forced spawn-index ties by stable agent id", () => {
+		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
-		const sessionA = {} as AgentSession;
+		const zulu = agents.register({ id: "Zulu", displayName: "Zulu", kind: "sub", session: liveSession() });
+		const alpha = agents.register({ id: "Alpha", displayName: "Alpha", kind: "sub", session: liveSession() });
+		Object.defineProperty(zulu, "spawnIndex", { value: 42 });
+		Object.defineProperty(alpha, "spawnIndex", { value: 42 });
+		const hub = makeHub(agents);
+		expect(renderedAgentIds(hub)).toEqual(["Alpha", "Zulu"]);
+		hub.dispose();
+	});
+
+	it("keeps external peers in first-seen order and appends newcomers", async () => {
+		geometry = stubStdoutGeometry(120);
+		const now = vi.spyOn(Date, "now");
+		now.mockReturnValue(Date.parse("2026-07-03T00:00:00.000Z"));
+		const lastSeen = new Date(Date.now()).toISOString();
+		const agents = new AgentRegistry();
+		let peers = [
+			externalPeer("external:alpha", "alpha", lastSeen, "working"),
+			externalPeer("external:beta", "beta", lastSeen, "idle"),
+		];
+		const externalIrc: AgentHubExternalPeerDataSource = {
+			listPeers: () => peers,
+		};
+
+		const hub = makeHub(agents, { externalIrc, externalSessionId: "this-session" });
+		expect(renderedExternalPeerNames(hub)).toEqual(["alpha", "beta"]);
+		hub.handleInput("\r");
+		const siblingView = Bun.stripANSI(hub.render(120).join("\n"));
+		expect(siblingView).toContain("read-only");
+		expect(siblingView).toContain("cmd+p to navigate to its real TUI");
+		expect(siblingView).toContain("Sibling transcript path unavailable");
+		hub.handleInput("\x1b");
+
+		peers = [
+			externalPeer("external:beta", "beta", lastSeen, "idle"),
+			externalPeer("external:alpha", "alpha", lastSeen, "working"),
+			externalPeer("external:gamma", "gamma", lastSeen, "waiting_input"),
+		];
+		agents.register({ id: "refresh", displayName: "Refresh", kind: "sub", session: liveSession() });
+		await waitForRenderedText(hub, "gamma");
+
+		expect(renderedExternalPeerNames(hub)).toEqual(["alpha", "beta", "gamma"]);
+		hub.dispose();
+	});
+
+	it("forgets departed external peer identities across long polling sessions", async () => {
+		geometry = stubStdoutGeometry(120);
+		const now = vi.spyOn(Date, "now");
+		now.mockReturnValue(Date.parse("2026-07-03T00:00:00.000Z"));
+		const lastSeen = new Date(Date.now()).toISOString();
+		const agents = new AgentRegistry();
+		let peers = [externalPeer("external:0", "peer-0", lastSeen, "idle")];
+		const externalIrc: AgentHubExternalPeerDataSource = {
+			listPeers: () => peers,
+		};
+		const hub = makeHub(agents, { externalIrc });
+
+		for (let index = 1; index <= 2_000; index++) {
+			peers = [externalPeer(`external:${index}`, `peer-${index}`, lastSeen, "idle")];
+			agents.register({ id: `refresh-${index}`, displayName: "refresh", kind: "sub", session: liveSession() });
+			agents.unregister(`refresh-${index}`);
+		}
+		await waitForRenderedText(hub, "peer-2000");
+		expect(hub.getRetentionMetrics().externalOrderEntries).toBe(1);
+
+		expect(renderedText(hub)).toContain("peer-2000");
+		expect(renderedText(hub)).not.toMatch(/peer-0(?:\s|$)/);
+		hub.dispose();
+		expect(hub.getRetentionMetrics().externalOrderEntries).toBe(0);
+	});
+	it("shows unknown state when external peer state is absent", () => {
+		geometry = stubStdoutGeometry(120);
+		const now = vi.spyOn(Date, "now");
+		now.mockReturnValue(Date.parse("2026-07-03T00:00:00.000Z"));
+		const lastSeen = new Date(Date.now()).toISOString();
+		const agents = new AgentRegistry();
+		const externalIrc: AgentHubExternalPeerDataSource = {
+			listPeers: () => [externalPeer("external:nemo", "nemo", lastSeen, undefined)],
+		};
+
+		const hub = makeHub(agents, { externalIrc, externalSessionId: "this-session" });
+		const rendered = Bun.stripANSI(hub.render(120).join("\n"));
+
+		expect(rendered).toContain("nemo");
+		expect(rendered).toContain("UNKN");
+		hub.dispose();
+	});
+
+	it("hides external peers when the bus is absent", () => {
+		geometry = stubStdoutGeometry(120);
+		const agents = new AgentRegistry();
+		const externalIrc: AgentHubExternalPeerDataSource = {
+			listPeers: () => {
+				throw new Error("ENOENT: no IRC bus file");
+			},
+		};
+
+		const hub = makeHub(agents, { externalIrc, externalSessionId: "this-session" });
+		const rendered = Bun.stripANSI(hub.render(120).join("\n"));
+
+		expect(rendered).not.toContain("external peers");
+		expect(rendered).toContain("no subagents yet");
+		hub.dispose();
+	});
+
+	it("lists automation journals as tagged history and opens their persisted transcript", async () => {
+		geometry = stubStdoutGeometry(120);
+		using tempDir = TempDir.createSync("@omp-agent-hub-automation-");
+		const directory = path.join(tempDir.path(), "automation-nightly-check");
+		const sessionFile = path.join(directory, "nightly-check.jsonl");
+		await fs.mkdir(directory);
+		const timestamp = "2026-07-13T02:00:00.000Z";
+		const entries = [
+			{
+				type: "session",
+				version: CURRENT_SESSION_VERSION,
+				id: "automation-nightly-check",
+				title: "automation: Nightly Check",
+				titleSource: "user",
+				timestamp,
+				cwd: "/tmp",
+			},
+			{
+				type: "custom",
+				id: "automation",
+				parentId: null,
+				timestamp,
+				customType: "automation",
+				data: { name: "Nightly Check", schedule: "daily 02:00", lane: "default" },
+			},
+			{
+				type: "message",
+				id: "result",
+				parentId: "automation",
+				timestamp,
+				message: { role: "user", content: "automation transcript body", timestamp: Date.parse(timestamp) },
+			},
+		];
+		await Bun.write(sessionFile, `${entries.map(entry => JSON.stringify(entry)).join("\n")}\n`);
+		const hub = makeHub(new AgentRegistry(), { sessionsDir: tempDir.path() });
+
+		await waitForRenderedText(hub, "automation: Nightly Check");
+		expect(renderedText(hub)).toContain("automation · read-only");
+		hub.handleInput(".");
+		expect(renderedText(hub)).not.toContain("automation: Nightly Check");
+		expect(renderedText(hub)).toContain("1 hidden");
+		hub.handleInput(".");
+		await waitForRenderedText(hub, "automation: Nightly Check");
+		hub.handleInput("\r");
+		await waitForRenderedText(hub, "automation transcript body");
+		expect(renderedText(hub)).toContain("automation transcript body");
+		hub.dispose();
+	});
+
+	it("shows a parked child's model badge from durable session_init metadata", async () => {
+		geometry = stubStdoutGeometry(120);
+		using tempDir = TempDir.createSync("@omp-agent-hub-parked-model-");
+		const sessionFile = path.join(tempDir.path(), "Worker.jsonl");
+		await writeDurableSubagentJournal({
+			file: sessionFile,
+			agentId: "Worker",
+			parentSessionFile: path.join(tempDir.path(), "Main.jsonl"),
+			model: "openai-codex/gpt-5.6-terra",
+			thinkingLevel: "high",
+		});
+		const agents = new AgentRegistry();
 		agents.register({
-			id: "RevAgentStream",
-			displayName: "Agent runtime + compaction reviewer",
+			id: "Worker",
+			displayName: "Worker",
 			kind: "sub",
-			session: sessionA,
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			sessionFile,
+			status: "parked",
+		});
+		const hub = makeHub(agents);
+
+		await waitForRenderedText(hub, "5.6terra");
+		const row = renderedText(hub)
+			.split("\n")
+			.find(line => line.includes("Worker") && line.includes("5.6terra"));
+		expect(row).toContain("OX5.6terrah");
+		hub.dispose();
+	});
+
+	it("shows a grandchild model badge from its own durable journal", async () => {
+		geometry = stubStdoutGeometry(120);
+		using tempDir = TempDir.createSync("@omp-agent-hub-grandchild-model-");
+		const sessionFile = path.join(tempDir.path(), "Parent.Child.jsonl");
+		await writeDurableSubagentJournal({
+			file: sessionFile,
+			agentId: "Parent.Child",
+			parentSessionFile: path.join(tempDir.path(), "Parent.jsonl"),
+			model: "anthropic/claude-opus-4-5",
+			thinkingLevel: "medium",
+		});
+		const agents = new AgentRegistry();
+		agents.register({ id: "Parent", displayName: "Parent", kind: "sub", session: null, status: "running" });
+		agents.register({
+			id: "Parent.Child",
+			displayName: "Child",
+			kind: "sub",
+			parentId: "Parent",
+			session: null,
+			sessionFile,
+			status: "parked",
+		});
+		const hub = makeHub(agents);
+
+		await waitForRenderedText(hub, "4.5opus");
+		const row = renderedText(hub)
+			.split("\n")
+			.find(line => line.includes("Parent.Child") && line.includes("4.5opus"));
+		expect(row).toContain("AN4.5opusm");
+		hub.dispose();
+	});
+
+	it("shows archived terminal and legacy journals newest first by default", async () => {
+		geometry = stubStdoutGeometry(120);
+		using tempDir = TempDir.createSync("@omp-agent-hub-archive-order-");
+		const parentFile = `${tempDir.path()}/Main.jsonl`;
+		const childrenDir = `${tempDir.path()}/Main`;
+		await fs.mkdir(childrenDir);
+		await Bun.write(parentFile, "");
+		await writeDirectChildJournal({
+			file: `${childrenDir}/Newest.jsonl`,
+			parentFile,
+			agentId: "Newest",
+			updatedAt: "2026-07-10T03:00:00.000Z",
+			state: "completed",
+		});
+		await writeDirectChildJournal({
+			file: `${childrenDir}/Failure.jsonl`,
+			parentFile,
+			agentId: "Failure",
+			updatedAt: "2026-07-10T02:00:00.000Z",
+			state: "failed",
+		});
+		await writeDirectChildJournal({
+			file: `${childrenDir}/Legacy.jsonl`,
+			parentFile,
+			agentId: "Legacy",
+			updatedAt: "2026-07-10T01:00:00.000Z",
 		});
 
+		const agents = new AgentRegistry();
+		agents.register({
+			id: "Main",
+			displayName: "main",
+			kind: "main",
+			session: null,
+			sessionFile: parentFile,
+			status: "parked",
+		});
+		const hub = new AgentHubOverlayComponent({
+			observers: new SessionObserverRegistry(),
+			hubKeys: [],
+			onDone: () => {},
+			requestRender: () => {},
+			registry: agents,
+			irc: new IrcBus(agents),
+			focusAgent: async () => {},
+			externalIrc: null,
+		});
+
+		expect(agents.list().map(ref => ref.id)).toEqual(["Main"]);
+		await waitForRenderedText(hub, "Newest");
+
+		expect(renderedAgentIds(hub)).toEqual(["Newest", "Failure", "Legacy"]);
+		expect(renderedText(hub)).toContain("LEGC");
+		expect(agents.list().map(ref => ref.id)).toEqual(["Main"]);
+		hub.dispose();
+	});
+
+	it("asserts column widths, offsets, and semantic model aliases at different terminal widths", () => {
+		const agents = new AgentRegistry();
+		agents.register({ id: "Worker", displayName: "Worker", kind: "sub", session: liveSession() });
+
 		const observers = new SessionObserverRegistry();
-		vi.spyOn(observers, "getSessions").mockReturnValue([
+		const sessionsList: any[] = [
 			{
-				id: "RevAgentStream",
+				id: "Worker",
 				kind: "subagent",
-				label: "Subagent",
+				label: "Worker subagent",
 				status: "active",
-				description: "Complete the assignment below, thoroughly:\n- check performance\n- check leaks",
 				lastUpdate: Date.now(),
+				progress: {
+					id: "Worker",
+					resolvedModel: "openai-codex/gpt-5.6-terra:high",
+				},
 			},
-		]);
+		];
+		vi.spyOn(observers, "getSessions").mockReturnValue(sessionsList);
 
 		const hub = new AgentHubOverlayComponent({
 			observers,
@@ -153,16 +584,46 @@ describe("Agent hub row ordering", () => {
 			registry: agents,
 			irc: new IrcBus(agents),
 			focusAgent: async () => {},
+			externalIrc: null,
 		});
 
-		const lines = hub.render(80);
-		for (const line of lines) {
-			const cleanLine = Bun.stripANSI(line);
-			expect(cleanLine.includes("\n")).toBe(false);
-			expect(cleanLine.includes("\r")).toBe(false);
-			const width = visibleWidth(line);
-			expect(width).toBeLessThanOrEqual(78);
+		for (const w of [60, 80, 120, 160] as const) {
+			const rendered = hub.render(w);
+			const line = Bun.stripANSI(rendered.find(candidate => Bun.stripANSI(candidate).includes("OX5.6terra")) || "");
+
+			const modelWidth = w <= 80 ? 13 : w <= 120 ? 14 : 15;
+			const stateWidth = w <= 80 ? 6 : 7;
+			const nameIndex = modelWidth + stateWidth;
+			const expectedIndex = 3 + nameIndex;
+
+			expect(expectedIndex).toBeGreaterThanOrEqual(22);
+			expect(expectedIndex).toBeLessThanOrEqual(25);
+
+			const namePart = line.slice(expectedIndex).trim();
+			expect(namePart.startsWith("Worker")).toBe(true);
+
+			const modelCol = line.slice(3, 3 + modelWidth);
+			expect(modelCol.startsWith("OX")).toBe(true);
+			expect(modelCol.includes("5.6terra")).toBe(true);
+			expect(modelCol.includes("h")).toBe(true);
 		}
+
+		// Test adjacent variant distinction (claude-sonnet-4-5 vs claude-opus-4-5)
+		sessionsList[0].progress.resolvedModel = "anthropic/claude-sonnet-4-5";
+		const sonnetLine = Bun.stripANSI(
+			hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("AN4.5sonnet")) || "",
+		);
+		const sonnetModelCol = sonnetLine.slice(3, 3 + 14);
+		expect(sonnetModelCol.startsWith("AN")).toBe(true);
+		expect(sonnetModelCol.includes("4.5sonnet")).toBe(true);
+
+		sessionsList[0].progress.resolvedModel = "anthropic/claude-opus-4-5";
+		const opusLine = Bun.stripANSI(
+			hub.render(120).find(candidate => Bun.stripANSI(candidate).includes("AN4.5opus")) || "",
+		);
+		const opusModelCol = opusLine.slice(3, 3 + 14);
+		expect(opusModelCol.startsWith("AN")).toBe(true);
+		expect(opusModelCol.includes("4.5opus")).toBe(true);
 
 		hub.dispose();
 	});

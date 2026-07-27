@@ -13,7 +13,8 @@
  * China: https://api.minimaxi.com/v1
  */
 
-import { createApiKeyLogin } from "../api-key-login";
+import { validateOpenAICompatibleApiKey } from "../api-key-validation";
+import type { OAuthController } from "./types";
 
 const AUTH_URL_INTL = "https://platform.minimax.io/subscribe/token-plan";
 const AUTH_URL_CN = "https://platform.minimaxi.com/subscribe/token-plan";
@@ -21,33 +22,61 @@ const API_BASE_URL_INTL = "https://api.minimax.io/v1";
 const API_BASE_URL_CN = "https://api.minimaxi.com/v1";
 const VALIDATION_MODEL = "MiniMax-M3";
 
-function createMiniMaxLogin(authUrl: string, baseUrl: string, provider: string) {
-	return createApiKeyLogin({
-		providerLabel: "MiniMax Token Plan",
-		authUrl,
-		instructions: "Subscribe to Token Plan and copy your API key",
-		promptMessage: "Paste your MiniMax Token Plan API key",
-		placeholder: "sk-...",
-		validation: {
-			kind: "chat-completions",
-			provider,
-			baseUrl,
-			model: VALIDATION_MODEL,
-		},
-	});
-}
-
 /**
  * Login to MiniMax Token Plan (international).
  *
  * Opens browser to subscription page, prompts user to paste their API key.
  * Returns the API key directly (not OAuthCredentials - this isn't OAuth).
  */
-export const loginMiniMaxCode = createMiniMaxLogin(AUTH_URL_INTL, API_BASE_URL_INTL, "MiniMax Token Plan");
+export async function loginMiniMaxCode(options: OAuthController): Promise<string> {
+	return loginMiniMaxCodeWithBaseUrl(options, AUTH_URL_INTL, API_BASE_URL_INTL, "MiniMax Token Plan");
+}
+
+async function loginMiniMaxCodeWithBaseUrl(
+	options: OAuthController,
+	authUrl: string,
+	baseUrl: string,
+	providerName: string,
+): Promise<string> {
+	const fetchImpl = options.fetch ?? fetch;
+	if (!options.onPrompt) {
+		throw new Error("MiniMax Token Plan login requires onPrompt callback");
+	}
+	// Open browser to subscription page
+	options.onAuth?.({
+		url: authUrl,
+		instructions: "Subscribe to Token Plan and copy your API key",
+	});
+	// Prompt user to paste their API key
+	const apiKey = await options.onPrompt({
+		message: "Paste your MiniMax Token Plan API key",
+		placeholder: "sk-...",
+	});
+	if (options.signal?.aborted) {
+		throw new Error("Login cancelled");
+	}
+	const trimmed = apiKey.trim();
+	if (!trimmed) {
+		throw new Error("API key is required");
+	}
+
+	options.onProgress?.("Validating API key...");
+	await validateOpenAICompatibleApiKey({
+		provider: providerName,
+		apiKey: trimmed,
+		baseUrl,
+		model: VALIDATION_MODEL,
+		signal: options.signal,
+		fetch: fetchImpl,
+	});
+	return trimmed;
+}
 
 /**
  * Login to MiniMax Token Plan (China).
  *
  * Same flow as international but uses China endpoint.
  */
-export const loginMiniMaxCodeCn = createMiniMaxLogin(AUTH_URL_CN, API_BASE_URL_CN, "MiniMax Token Plan (China)");
+export async function loginMiniMaxCodeCn(options: OAuthController): Promise<string> {
+	return loginMiniMaxCodeWithBaseUrl(options, AUTH_URL_CN, API_BASE_URL_CN, "MiniMax Token Plan (China)");
+}

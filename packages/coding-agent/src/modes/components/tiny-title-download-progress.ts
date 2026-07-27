@@ -74,7 +74,6 @@ export class TinyTitleDownloadProgressComponent implements Component {
 	render(width: number): readonly string[] {
 		width = Math.max(1, width);
 		const spec = getTinyTitleModelSpec(this.#modelKey);
-		const border = theme.fg("border", theme.boxRound.horizontal.repeat(width));
 		const status = statusLabel(this.#event);
 		const file = currentFile(this.#event);
 		const pct =
@@ -85,6 +84,6 @@ export class TinyTitleDownloadProgressComponent implements Component {
 			.filter((part): part is string => Boolean(part))
 			.join(" ");
 
-		return [border, padLine(` ${title}`, width), padLine(` ${details}`, width), border];
+		return ["", padLine(` ${title}`, width), padLine(` ${details}`, width), ""];
 	}
 }

@@ -1,5 +1,4 @@
 import { describe, expect, it, spyOn } from "bun:test";
-import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type {
@@ -12,7 +11,9 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
-import { removeWithRetries, setProjectDir } from "@oh-my-pi/pi-utils";
+
+type FakeServiceTier = "priority" | "openai-only" | "claude-only";
+type FakeFastModeScope = "openai" | "claude" | "both";
 
 interface FakeAcpBuiltinSession {
 	fastMode: boolean;
@@ -22,23 +23,19 @@ interface FakeAcpBuiltinSession {
 	sessionId: string;
 	sessionName: string;
 	_todoPhases: Array<{ name: string; tasks: Array<{ content: string; status: string }> }>;
-	_switchedTo: string | undefined;
-	_movedFromEmptySessionFile: string | undefined;
 	toggleFastMode(): boolean;
-	setFastMode(enabled: boolean): boolean;
+	setFastMode(enabled: boolean, scope?: FakeFastModeScope): void;
 	isFastModeEnabled(): boolean;
+	serviceTier: FakeServiceTier | undefined;
 	setForcedToolChoice(toolName: string): void;
 	fetchUsageReports?: () => Promise<unknown>;
 	getAsyncJobSnapshot: (opts?: { recentLimit?: number }) => { running: unknown[]; recent: unknown[] } | null;
 	formatSessionAsText: () => string;
-	dumpLlmRequestToTmpDir: () => Promise<string | undefined>;
 	getLastAssistantText: () => string | undefined;
 	messages: unknown[];
 	settings: Settings;
 	model: { provider: string; id: string } | undefined;
 	newSession(opts?: { drop?: boolean; parentSession?: string }): Promise<boolean>;
-	switchSession(sessionPath: string): Promise<boolean>;
-	markMovedFromEmptySessionFile(sessionFile: string): void;
 	fork(): Promise<boolean>;
 	handoff(instr?: string): Promise<{ document: string; savedPath?: string } | undefined>;
 	exportToHtml(outputPath?: string): Promise<string>;
@@ -55,52 +52,56 @@ interface FakeAcpBuiltinSession {
 	redeemResetCredit: (target: ResetCreditTarget) => Promise<ResetCreditRedeemOutcome>;
 }
 
-interface FakeAcpBuiltinSessionManager {
-	_sessionFile: string | undefined;
-	_cwd: string;
-	_entries: { type: string }[];
-	_customEntries: Array<{ customType: string; data: unknown }>;
-	_movedTo: string | undefined;
-	_flushed: boolean;
-	_droppedSessions: string[];
-	_sessionName: string | undefined;
-	getSessionId(): string;
-	getSessionFile(): string | undefined;
-	getEntries(): { type: string }[];
-	getBranch(): { type: string }[];
-	appendCustomEntry(customType: string, data?: unknown): string;
-	flush(): Promise<void>;
-	moveTo(newCwd: string): Promise<void>;
-	setSessionFile(sessionFile: string): Promise<void>;
-	dropSession(sessionPath: string): Promise<void>;
-	getCwd(): string;
-	setSessionName(name: string, source: string): Promise<boolean>;
-}
-
 function createRuntime() {
 	const settings = Settings.isolated();
 	const output: string[] = [];
-	let fakeSessionManager: FakeAcpBuiltinSessionManager | undefined;
 	const session: FakeAcpBuiltinSession = {
 		fastMode: false,
+		serviceTier: undefined,
 		forcedToolChoice: undefined as string | undefined,
 		isStreaming: false,
 		sessionFile: undefined,
 		sessionId: "fake-session-id",
 		sessionName: "Fake Session",
 		_todoPhases: [],
-		_switchedTo: undefined,
-		_movedFromEmptySessionFile: undefined,
 		toggleFastMode() {
-			this.fastMode = !this.fastMode;
-			return this.fastMode;
+			const enabled = !this.isFastModeEnabled();
+			this.setFastMode(enabled);
+			return enabled;
 		},
-		setFastMode(enabled: boolean) {
-			this.fastMode = enabled;
-			return true;
+		setFastMode(enabled: boolean, scope?: FakeFastModeScope) {
+			if (scope === undefined) {
+				this.fastMode = enabled;
+				this.serviceTier = enabled ? "priority" : undefined;
+				return;
+			}
+
+			let openaiEnabled = this.serviceTier === "priority" || this.serviceTier === "openai-only";
+			let claudeEnabled = this.serviceTier === "priority" || this.serviceTier === "claude-only";
+			const scopeIncludesOpenai = scope === "openai" || scope === "both";
+			const scopeIncludesClaude = scope === "claude" || scope === "both";
+			if (enabled) {
+				openaiEnabled = openaiEnabled || scopeIncludesOpenai;
+				claudeEnabled = claudeEnabled || scopeIncludesClaude;
+			} else {
+				if (scopeIncludesOpenai) openaiEnabled = false;
+				if (scopeIncludesClaude) claudeEnabled = false;
+			}
+			if (openaiEnabled && claudeEnabled) {
+				this.serviceTier = "priority";
+			} else if (openaiEnabled) {
+				this.serviceTier = "openai-only";
+			} else if (claudeEnabled) {
+				this.serviceTier = "claude-only";
+			} else {
+				this.serviceTier = undefined;
+			}
+			this.fastMode = this.serviceTier !== undefined;
 		},
 		isFastModeEnabled() {
-			return this.fastMode;
+			return (
+				this.serviceTier === "priority" || this.serviceTier === "openai-only" || this.serviceTier === "claude-only"
+			);
 		},
 		setForcedToolChoice(toolName: string) {
 			this.forcedToolChoice = toolName;
@@ -113,17 +114,6 @@ function createRuntime() {
 		},
 		async newSession(_opts?: { drop?: boolean; parentSession?: string }) {
 			return true;
-		},
-		async switchSession(sessionPath: string) {
-			this._switchedTo = path.resolve(sessionPath);
-			this.sessionFile = this._switchedTo;
-			if (!fakeSessionManager) throw new Error("fake session manager not initialized");
-			await fakeSessionManager.flush();
-			await fakeSessionManager.setSessionFile(this._switchedTo);
-			return true;
-		},
-		markMovedFromEmptySessionFile(sessionFile: string) {
-			this._movedFromEmptySessionFile = path.resolve(sessionFile);
 		},
 		async fork() {
 			return true;
@@ -143,7 +133,6 @@ function createRuntime() {
 		async refreshBaseSystemPrompt() {},
 		getAsyncJobSnapshot: () => null,
 		formatSessionAsText: () => "",
-		dumpLlmRequestToTmpDir: async () => undefined,
 		getLastAssistantText: () => undefined,
 		messages: [],
 		model: undefined,
@@ -156,14 +145,13 @@ function createRuntime() {
 		async refreshSshTool(_options?: { activateIfAvailable?: boolean }) {},
 	};
 	const typedSession = session as unknown as AgentSession & FakeAcpBuiltinSession;
-	fakeSessionManager = {
+	const fakeSessionManager = {
 		_sessionFile: undefined as string | undefined,
 		_cwd: "/tmp/project",
 		_entries: [] as { type: string }[],
 		_customEntries: [] as Array<{ customType: string; data: unknown }>,
 		_movedTo: undefined as string | undefined,
 		_flushed: false,
-		_droppedSessions: [] as string[],
 		_sessionName: undefined as string | undefined,
 		getSessionId(): string {
 			return "fake-session-id";
@@ -187,19 +175,6 @@ function createRuntime() {
 		async moveTo(newCwd: string) {
 			this._cwd = newCwd;
 			this._movedTo = newCwd;
-		},
-		async setSessionFile(sessionFile: string) {
-			this._sessionFile = path.resolve(sessionFile);
-			const headerLine = (await Bun.file(this._sessionFile).text()).split("\n", 1)[0] ?? "{}";
-			const header = JSON.parse(headerLine) as { cwd?: string };
-			if (header.cwd) {
-				this._cwd = path.resolve(header.cwd);
-				this._movedTo = this._cwd;
-			}
-		},
-		async dropSession(sessionPath: string) {
-			this._droppedSessions.push(path.resolve(sessionPath));
-			await fs.rm(sessionPath, { force: true });
 		},
 		getCwd(): string {
 			return this._cwd;
@@ -237,6 +212,46 @@ describe("ACP builtin slash commands", () => {
 
 		expect(result).toEqual({ consumed: true });
 		expect(output).toEqual(["Fast mode is off."]);
+	});
+
+	it("enables OpenAI-scoped fast mode from /fast on gpt", async () => {
+		const { output, runtime } = createRuntime();
+
+		const result = await executeAcpBuiltinSlashCommand("/fast on gpt", runtime);
+
+		expect(result).toEqual({ consumed: true });
+		expect(runtime.session.serviceTier).toBe("openai-only");
+		expect(output).toEqual(["Fast mode on (OpenAI only)."]);
+	});
+
+	it("removes Claude from scoped fast mode with /fast off claude", async () => {
+		const { output, runtime } = createRuntime();
+		runtime.session.setFastMode(true);
+
+		const result = await executeAcpBuiltinSlashCommand("/fast off claude", runtime);
+
+		expect(result).toEqual({ consumed: true });
+		expect(runtime.session.serviceTier).toBe("openai-only");
+		expect(output).toEqual(["Fast mode on (OpenAI only)."]);
+	});
+
+	it("treats bare /fast gpt as OpenAI-scoped enable", async () => {
+		const { output, runtime } = createRuntime();
+
+		const result = await executeAcpBuiltinSlashCommand("/fast gpt", runtime);
+
+		expect(result).toEqual({ consumed: true });
+		expect(runtime.session.serviceTier).toBe("openai-only");
+		expect(output).toEqual(["Fast mode on (OpenAI only)."]);
+	});
+
+	it("prints scoped fast mode usage for unknown tokens", async () => {
+		const { output, runtime } = createRuntime();
+
+		const result = await executeAcpBuiltinSlashCommand("/fast turbo", runtime);
+
+		expect(result).toEqual({ consumed: true });
+		expect(output).toEqual(["Usage: /fast [on|off|status] [gpt|claude|both]"]);
 	});
 
 	it("forces a tool and returns remaining prompt text", async () => {
@@ -379,25 +394,9 @@ describe("ACP builtin slash commands", () => {
 	});
 
 	// /dump
-	it("dump: outputs transcript with LLM request JSON path when sidecar succeeds", async () => {
+	it("dump: outputs transcript when present", async () => {
 		const { output, runtime } = createRuntime();
 		runtime.session.formatSessionAsText = () => "Session content here";
-		runtime.session.dumpLlmRequestToTmpDir = async () => "/tmp/omp-llm-request-test.json";
-
-		const result = await executeAcpBuiltinSlashCommand("/dump", runtime);
-
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("Session content here");
-		expect(output[0]).toContain("LLM request JSON: /tmp/omp-llm-request-test.json");
-		expect(output[0]).toContain("persists on disk");
-	});
-
-	it("dump: outputs transcript without sidecar when dumpLlmRequestToTmpDir throws", async () => {
-		const { output, runtime } = createRuntime();
-		runtime.session.formatSessionAsText = () => "Session content here";
-		runtime.session.dumpLlmRequestToTmpDir = async () => {
-			throw new Error("convert failed");
-		};
 
 		const result = await executeAcpBuiltinSlashCommand("/dump", runtime);
 
@@ -549,6 +548,22 @@ describe("session lifecycle commands", () => {
 		expect(notified).toBe(false);
 	});
 
+	it("/move: reports moved path via sessionManager.getCwd() and calls notifyTitleChanged", async () => {
+		const { output, fakeSessionManager, runtime } = createRuntime();
+		let notified = false;
+		runtime.notifyTitleChanged = async () => {
+			notified = true;
+		};
+		const moveTarget = os.tmpdir();
+		const expectedMovedTo = path.resolve(moveTarget);
+		const result = await executeAcpBuiltinSlashCommand(`/move ${moveTarget}`, runtime);
+		expect(result).toEqual({ consumed: true });
+		expect(fakeSessionManager._flushed).toBe(true);
+		expect(fakeSessionManager._movedTo).toBe(expectedMovedTo);
+		expect(output[0]).toContain(expectedMovedTo);
+		expect(notified).toBe(true);
+	});
+
 	it("/move: refuses while streaming", async () => {
 		const { output, session, runtime } = createRuntime();
 		session.isStreaming = true;
@@ -603,120 +618,6 @@ describe("wave 3 commands", () => {
 		expect(fakeSessionManager._customEntries[0]?.customType).toBe("user_todo_edit");
 	});
 
-	it("/todo export: writes the default file under the active session cwd", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-todo-export-"));
-		try {
-			const { output, session, fakeSessionManager, runtime } = createRuntime();
-			fakeSessionManager._cwd = tempRoot;
-			session._todoPhases = [{ name: "Work", tasks: [{ content: "Ship it", status: "pending" }] }];
-
-			const result = await executeAcpBuiltinSlashCommand("/todo export", runtime);
-
-			const target = path.join(tempRoot, "TODO.md");
-			expect(result).toEqual({ consumed: true });
-			expect(output[0]).toBe(`Wrote todos to ${target}`);
-			expect(await fs.readFile(target, "utf8")).toBe("# Work\n- [ ] Ship it\n");
-		} finally {
-			await removeWithRetries(tempRoot);
-		}
-	});
-
-	it("/todo export: writes a quoted path with spaces", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-todo-export-quoted-"));
-		try {
-			const { output, session, runtime } = createRuntime();
-			const target = path.join(tempRoot, "todo file.md");
-			session._todoPhases = [{ name: "Work", tasks: [{ content: "Ship it", status: "pending" }] }];
-
-			const result = await executeAcpBuiltinSlashCommand(`/todo export "${target}"`, runtime);
-
-			expect(result).toEqual({ consumed: true });
-			expect(output[0]).toBe(`Wrote todos to ${target}`);
-			expect(await fs.readFile(target, "utf8")).toBe("# Work\n- [ ] Ship it\n");
-		} finally {
-			await removeWithRetries(tempRoot);
-		}
-	});
-
-	it("/todo import: reads a quoted absolute path", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-todo-import-"));
-		try {
-			const target = path.join(tempRoot, "todo file.md");
-			await fs.writeFile(target, "# Imported\n- [/] Active task\n", "utf8");
-			const { output, session, runtime } = createRuntime();
-
-			const result = await executeAcpBuiltinSlashCommand(`/todo import "${target}"`, runtime);
-
-			expect(result).toEqual({ consumed: true });
-			expect(output[0]).toBe(`Imported 1 phase(s), 1 task(s) from ${target}.`);
-			expect(session._todoPhases).toEqual([
-				{ name: "Imported", tasks: [{ content: "Active task", status: "in_progress" }] },
-			]);
-		} finally {
-			await removeWithRetries(tempRoot);
-		}
-	});
-
-	it("/todo import: reads the default file under the active session cwd", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-todo-import-default-"));
-		try {
-			const target = path.join(tempRoot, "TODO.md");
-			await fs.writeFile(target, "# Default\n- [ ] From cwd\n", "utf8");
-			const { output, session, fakeSessionManager, runtime } = createRuntime();
-			fakeSessionManager._cwd = tempRoot;
-
-			const result = await executeAcpBuiltinSlashCommand("/todo import", runtime);
-
-			expect(result).toEqual({ consumed: true });
-			expect(output[0]).toBe(`Imported 1 phase(s), 1 task(s) from ${target}.`);
-			expect(session._todoPhases).toEqual([
-				{ name: "Default", tasks: [{ content: "From cwd", status: "in_progress" }] },
-			]);
-		} finally {
-			await removeWithRetries(tempRoot);
-		}
-	});
-
-	it("/todo import: reports parse errors without committing", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-todo-import-invalid-"));
-		try {
-			const target = path.join(tempRoot, "TODO.md");
-			await fs.writeFile(target, "# Imported\nnot a todo\n", "utf8");
-			const { output, session, fakeSessionManager, runtime } = createRuntime();
-			fakeSessionManager._cwd = tempRoot;
-
-			const result = await executeAcpBuiltinSlashCommand("/todo import", runtime);
-
-			expect(result).toEqual({ consumed: true });
-			expect(output[0]).toContain(`Could not parse ${target}:`);
-			expect(session._todoPhases).toEqual([]);
-		} finally {
-			await removeWithRetries(tempRoot);
-		}
-	});
-
-	it("/todo export: reports invalid internal-scheme paths", async () => {
-		const { output, session, runtime } = createRuntime();
-		session._todoPhases = [{ name: "Work", tasks: [{ content: "Ship it", status: "pending" }] }];
-
-		const result = await executeAcpBuiltinSlashCommand("/todo export artifact://1", runtime);
-
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("Failed to write todos:");
-		expect(output[0]).toContain("internal scheme");
-	});
-
-	it("/todo import: reports invalid internal-scheme paths", async () => {
-		const { output, session, runtime } = createRuntime();
-
-		const result = await executeAcpBuiltinSlashCommand("/todo import artifact://1", runtime);
-
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("Failed to read todos:");
-		expect(output[0]).toContain("internal scheme");
-		expect(session._todoPhases).toEqual([]);
-	});
-
 	it("/todo edit: returns TUI-only usage message", async () => {
 		const { output, runtime } = createRuntime();
 		const result = await executeAcpBuiltinSlashCommand("/todo edit", runtime);
@@ -744,33 +645,6 @@ describe("wave 3 commands", () => {
 		const result = await executeAcpBuiltinSlashCommand("/move /no/such/path/xyz", runtime);
 		expect(result).toEqual({ consumed: true });
 		expect(output[0]).toContain("does not exist");
-	});
-
-	it("/move: relocates the current session instead of switching to an empty target session", async () => {
-		const { output, runtime, session, fakeSessionManager } = createRuntime();
-		const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-move-target-"));
-		const originalProjectDir = process.cwd();
-		const reloadForCwd = spyOn(runtime.settings, "reloadForCwd");
-		let configNotified = 0;
-		runtime.notifyConfigChanged = () => {
-			configNotified++;
-		};
-
-		try {
-			const result = await executeAcpBuiltinSlashCommand(`/move ${targetDir}`, runtime);
-
-			expect(result).toEqual({ consumed: true });
-			expect(fakeSessionManager._movedTo).toBe(targetDir);
-			expect(fakeSessionManager.getCwd()).toBe(targetDir);
-			expect(session._switchedTo).toBeUndefined();
-			expect(session._movedFromEmptySessionFile).toBeUndefined();
-			expect(reloadForCwd).toHaveBeenCalledWith(targetDir);
-			expect(configNotified).toBe(1);
-			expect(output[0]).toContain(`Moved to ${targetDir}.`);
-		} finally {
-			setProjectDir(originalProjectDir);
-			await fs.rm(targetDir, { recursive: true, force: true });
-		}
 	});
 
 	// /memory

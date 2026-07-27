@@ -51,15 +51,9 @@ export interface UnknownModel {
 export type ParsedModel = GeminiModel | AnthropicModel | OpenAIModel | UnknownModel;
 
 /** Strip a provider namespace prefix (`openai/gpt-5.4` → `gpt-5.4`). */
-// Cache keyed by model id (a bounded set of bundled/aggregator ids), so no eviction is needed.
-const bareModelIdCache = new Map<string, string>();
 export function bareModelId(modelId: string): string {
-	const cached = bareModelIdCache.get(modelId);
-	if (cached !== undefined) return cached;
 	const p = modelId.lastIndexOf("/");
-	const result = p !== -1 ? modelId.slice(p + 1) : modelId;
-	bareModelIdCache.set(modelId, result);
-	return result;
+	return p !== -1 ? modelId.slice(p + 1) : modelId;
 }
 
 export function parseKnownModel(modelId: string): ParsedModel {
@@ -156,20 +150,6 @@ export const parseGlmModel = parser((modelId): GlmModel | null => {
 
 export function isFableOrMythos(kind: AnthropicKind): boolean {
 	return kind === "fable" || kind === "mythos";
-}
-
-/**
- * Returns true if the parsed Anthropic model is part of the adaptive-thinking
- * Claude generation at or above a specific capability threshold.
- * - Opus has a configurable minimum version floor (e.g. "4.6", "4.7", "4.8").
- * - Sonnet, Fable, and Mythos all require version 5 or higher.
- */
-export function isAnthropicAdaptiveGenAtLeast(parsed: AnthropicModel, opusMin: "4.6" | "4.7" | "4.8"): boolean {
-	if (parsed.kind === "opus") {
-		return semverGte(parsed.version, opusMin);
-	}
-	// Sonnet 5+, Fable 5+, Mythos 5+, and any future gen-5+ models
-	return semverGte(parsed.version, "5");
 }
 
 function createSemVer(major: number, minor: number, patch = 0): SemVer {

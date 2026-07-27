@@ -9,6 +9,7 @@
  *   - `POST {generativelanguage,aiplatform}.googleapis.com/.../models/{model}:streamGenerateContent?alt=sse`
  *   - The Cloud Code Assist endpoint used by `google-gemini-cli.ts`
  */
+
 /** Mirror of `@google/genai`'s `FinishReason` string enum. */
 export type FinishReason =
 	| "FINISH_REASON_UNSPECIFIED"
@@ -35,7 +36,7 @@ export type FunctionCallingConfigMode = "MODE_UNSPECIFIED" | "AUTO" | "NONE" | "
 /** Mirror of `@google/genai`'s `ThinkingLevel` string enum. */
 export type ThinkingLevel = "THINKING_LEVEL_UNSPECIFIED" | "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
 
-/** Inline base64-encoded data part. */
+/** Inline base64-encoded image or video data part. */
 export interface InlineDataPart {
 	mimeType: string;
 	data: string;
@@ -130,11 +131,6 @@ export interface GenerateContentConfig {
 	safetySettings?: Array<Record<string, unknown>>;
 	cachedContent?: string;
 	thinkingConfig?: ThinkingConfig;
-	/**
-	 * Gemini/Vertex serving tier. Serialized to the request body root as
-	 * `serviceTier` (camelCase) by the transformer in `google-shared.ts`.
-	 */
-	serviceTier?: "auto" | "default" | "flex" | "scale" | "priority";
 	abortSignal?: AbortSignal;
 }
 

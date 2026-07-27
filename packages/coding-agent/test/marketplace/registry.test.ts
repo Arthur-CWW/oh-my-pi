@@ -23,7 +23,6 @@ import {
 	writeInstalledPluginsRegistry,
 	writeMarketplacesRegistry,
 } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
-import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
 // Inline the parseClaudePluginsRegistry validation logic to avoid pulling
 // in discovery/helpers.ts which transitively imports @oh-my-pi/pi-natives.
@@ -208,7 +207,7 @@ describe("registry file I/O", () => {
 	});
 
 	afterEach(() => {
-		removeSyncWithRetries(tmpDir);
+		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
 	// ── Marketplaces registry ────────────────────────────────────────

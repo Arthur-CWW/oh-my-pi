@@ -3,7 +3,11 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 
-const BLOB_PREFIX = "blob:sha256:";
+const BLOB_PREFIX = "blob:sha256:" as const;
+const BLOB_REF_PATTERN = /^blob:sha256:([0-9a-f]{64})$/;
+const BLOB_HASH_PATTERN = /^[0-9a-f]{64}$/;
+declare const blobRefBrand: unique symbol;
+export type BlobRef = `blob:sha256:${string}` & { readonly [blobRefBrand]: true };
 
 export interface BlobPutOptions {
 	/** Optional file extension for a sidecar hardlink/copy that OS openers can type-detect. */
@@ -16,27 +20,31 @@ export interface BlobPutResult {
 	path: string;
 	/** Path with the requested extension when supplied, otherwise the canonical path. */
 	displayPath: string;
-	get ref(): string;
+	get ref(): BlobRef;
 }
 
 /**
- * Content-addressed blob store for externalizing large binary data (images) from session JSONL files.
+ * Content-addressed blob store for externalizing binary media from session JSONL files.
  *
  * Files are stored canonically at `<dir>/<sha256-hex>`. Callers may also request
  * a typed sidecar path (`<dir>/<sha256-hex>.<ext>`) for `file://` links and OS
- * image viewers; blob refs and reads still address the extensionless hash path.
+ * media viewers; blob refs and reads still address the extensionless hash path.
  * The SHA-256 hash is computed over the raw binary data (not base64).
  * Content-addressing makes writes idempotent and provides automatic deduplication
  * across sessions.
  */
 
-const IMAGE_EXTENSION_BY_MIME: Record<string, string> = {
+const MEDIA_EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
 	"image/png": "png",
 	"image/jpeg": "jpg",
 	"image/jpg": "jpg",
 	"image/gif": "gif",
 	"image/webp": "webp",
 	"image/svg+xml": "svg",
+	"video/mp4": "mp4",
+	"video/quicktime": "mov",
+	"video/x-m4v": "m4v",
+	"video/webm": "webm",
 };
 
 function normalizeBlobExtension(extension: string | undefined): string | undefined {
@@ -79,10 +87,10 @@ function ensureDisplayPathSync(blobPath: string, displayPath: string, data: Buff
 	fs.writeFileSync(displayPath, data);
 }
 
-export function blobExtensionForImageMimeType(mimeType: string | undefined): string | undefined {
+export function blobExtensionForMimeType(mimeType: string | undefined): string | undefined {
 	if (!mimeType) return undefined;
 	const lower = mimeType.toLowerCase();
-	const known = IMAGE_EXTENSION_BY_MIME[lower];
+	const known = MEDIA_EXTENSION_BY_MIME[lower];
 	if (known) return known;
 	if (!lower.startsWith("image/")) return undefined;
 	const subtype = lower.slice("image/".length).split(";")[0]?.split("+")[0];
@@ -105,11 +113,12 @@ export class BlobStore {
 			hash,
 			path: blobPath,
 			displayPath,
-			get ref() {
-				return `${BLOB_PREFIX}${hash}`;
+			get ref(): BlobRef {
+				return `${BLOB_PREFIX}${hash}` as BlobRef;
 			},
 		};
 
+		await fsp.mkdir(this.dir, { recursive: true });
 		await Bun.write(blobPath, data);
 		await ensureDisplayPath(blobPath, displayPath, data);
 		return result;
@@ -129,8 +138,8 @@ export class BlobStore {
 			hash,
 			path: blobPath,
 			displayPath,
-			get ref() {
-				return `${BLOB_PREFIX}${hash}`;
+			get ref(): BlobRef {
+				return `${BLOB_PREFIX}${hash}` as BlobRef;
 			},
 		};
 		fs.mkdirSync(this.dir, { recursive: true });
@@ -139,24 +148,17 @@ export class BlobStore {
 		return result;
 	}
 
-	/** Read blob by hash, returns Buffer or null if not found. */
+	/** Read and integrity-check a blob by hash, returning null only when it is absent. */
 	async get(hash: string): Promise<Buffer | null> {
+		if (!BLOB_HASH_PATTERN.test(hash)) throw new Error(`Invalid blob hash: ${hash}`);
 		const blobPath = path.join(this.dir, hash);
 		try {
 			const file = Bun.file(blobPath);
 			const ab = await file.arrayBuffer();
-			return Buffer.from(ab);
-		} catch (err) {
-			if (isEnoent(err)) return null;
-			throw err;
-		}
-	}
-
-	/** Synchronous variant of {@link get}. */
-	getSync(hash: string): Buffer | null {
-		const blobPath = path.join(this.dir, hash);
-		try {
-			return fs.readFileSync(blobPath);
+			const data = Buffer.from(ab);
+			const actualHash = new Bun.SHA256().update(data).digest("hex");
+			if (actualHash !== hash) throw new Error(`Corrupt blob ${hash}: content hash is ${actualHash}`);
+			return data;
 		} catch (err) {
 			if (isEnoent(err)) return null;
 			throw err;
@@ -165,6 +167,7 @@ export class BlobStore {
 
 	/** Check if a blob exists. */
 	async has(hash: string): Promise<boolean> {
+		if (!BLOB_HASH_PATTERN.test(hash)) throw new Error(`Invalid blob hash: ${hash}`);
 		try {
 			await fsp.access(path.join(this.dir, hash));
 			return true;
@@ -174,15 +177,14 @@ export class BlobStore {
 	}
 }
 
-/** Check if a data string is a blob reference. */
-export function isBlobRef(data: string): boolean {
-	return data.startsWith(BLOB_PREFIX);
+/** Check whether a string is an exact, canonical blob reference. */
+export function isBlobRef(data: string): data is BlobRef {
+	return BLOB_REF_PATTERN.test(data);
 }
 
-/** Extract the SHA-256 hash from a blob reference string. */
+/** Extract the SHA-256 hash from an exact, canonical blob reference. */
 export function parseBlobRef(data: string): string | null {
-	if (!data.startsWith(BLOB_PREFIX)) return null;
-	return data.slice(BLOB_PREFIX.length);
+	return BLOB_REF_PATTERN.exec(data)?.[1] ?? null;
 }
 
 /** Identify provider transport image data URLs so persistence can externalize and restore them losslessly. */
@@ -194,86 +196,62 @@ export function isImageDataUrl(data: string): boolean {
  * Externalize a provider image data URL to the blob store, returning a blob reference.
  * The full data URL string is preserved so transport-native history can be reconstructed on resume.
  */
-export async function externalizeImageDataUrl(blobStore: BlobStore, dataUrl: string): Promise<string> {
+export async function externalizeImageDataUrl(blobStore: BlobStore, dataUrl: string): Promise<BlobRef> {
 	if (isBlobRef(dataUrl)) return dataUrl;
 	const { ref } = await blobStore.put(Buffer.from(dataUrl, "utf8"));
 	return ref;
 }
 
 /** Synchronous variant of {@link externalizeImageDataUrl}. */
-export function externalizeImageDataUrlSync(blobStore: BlobStore, dataUrl: string): string {
+export function externalizeImageDataUrlSync(blobStore: BlobStore, dataUrl: string): BlobRef {
 	if (isBlobRef(dataUrl)) return dataUrl;
 	return blobStore.putSync(Buffer.from(dataUrl, "utf8")).ref;
 }
 
 /**
- * Externalize an image's base64 data to the blob store, returning a blob reference.
- * If the data is already a blob reference, returns it unchanged.
+ * Externalize base64 media bytes to the blob store.
+ * Exact blob references pass through unchanged.
  */
-export async function externalizeImageData(
+export async function externalizeMediaData(
 	blobStore: BlobStore,
 	base64Data: string,
-	mimeType?: string,
-): Promise<string> {
+	mimeType: string,
+): Promise<BlobRef> {
 	if (isBlobRef(base64Data)) return base64Data;
-	const buffer = Buffer.from(base64Data, "base64");
-	const { ref } = await blobStore.put(buffer, {
-		extension: blobExtensionForImageMimeType(mimeType),
+	const { ref } = await blobStore.put(Buffer.from(base64Data, "base64"), {
+		extension: blobExtensionForMimeType(mimeType),
 	});
 	return ref;
 }
 
-/** Synchronous variant of {@link externalizeImageData}. */
-export function externalizeImageDataSync(blobStore: BlobStore, base64Data: string, mimeType?: string): string {
+/** Synchronous variant of {@link externalizeMediaData}. */
+export function externalizeMediaDataSync(blobStore: BlobStore, base64Data: string, mimeType: string): BlobRef {
 	if (isBlobRef(base64Data)) return base64Data;
 	return blobStore.putSync(Buffer.from(base64Data, "base64"), {
-		extension: blobExtensionForImageMimeType(mimeType),
+		extension: blobExtensionForMimeType(mimeType),
 	}).ref;
 }
 
 /**
  * Resolve an externalized provider image data URL back to its original string.
- * If the data is not a blob reference, returns it unchanged.
- * If the blob is missing, logs a warning and returns the reference as-is.
+ * Non-reference strings pass through unchanged; missing and corrupt refs fail.
  */
 export async function resolveImageDataUrl(blobStore: BlobStore, data: string): Promise<string> {
 	const hash = parseBlobRef(data);
 	if (!hash) return data;
-
 	const buffer = await blobStore.get(hash);
-	if (!buffer) {
-		logger.warn("Blob not found for persisted image data URL", { hash });
-		return data;
-	}
+	if (!buffer) throw new Error(`Missing blob for persisted image data URL: ${data}`);
 	return buffer.toString("utf8");
 }
 
 /**
- * Resolve a blob reference back to base64 data.
- * If the data is not a blob reference, returns it unchanged.
- * If the blob is missing, logs a warning and returns a placeholder.
+ * Resolve a media blob reference back to base64.
+ * Non-reference strings pass through unchanged; missing and corrupt refs fail.
  */
-export async function resolveImageData(blobStore: BlobStore, data: string): Promise<string> {
+export async function resolveMediaData(blobStore: BlobStore, data: string): Promise<string> {
 	const hash = parseBlobRef(data);
 	if (!hash) return data;
-
 	const buffer = await blobStore.get(hash);
-	if (!buffer) {
-		logger.warn("Blob not found for image reference", { hash });
-		return data; // Return the ref as-is; downstream will see invalid base64 but won't crash
-	}
-	return buffer.toString("base64");
-}
-
-/** Synchronous variant of {@link resolveImageData}. */
-export function resolveImageDataSync(blobStore: BlobStore, data: string): string {
-	const hash = parseBlobRef(data);
-	if (!hash) return data;
-
-	const buffer = blobStore.getSync(hash);
-	if (!buffer) {
-		logger.warn("Blob not found for image reference", { hash });
-		return data;
-	}
+	if (!buffer) throw new Error(`Missing blob for persisted media: ${data}`);
 	return buffer.toString("base64");
 }

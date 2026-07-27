@@ -10,9 +10,9 @@
  * Producers (typically `read` / `search` / `write` tools) call
  * {@link SnapshotStore.record} with the full normalized text they observed.
  * The store hashes it, dedups against the per-path history, and returns the
- * tag. Consumers (recovery, the patcher) resolve a stale tag back to the
- * recorded full text via {@link SnapshotStore.byHash} and 3-way-merge the
- * would-be edit onto the live content.
+ * tag. Consumers (the patcher) resolve a stale tag back to the recorded full
+ * text via {@link SnapshotStore.byHash} and 3-way-merge the would-be edit onto
+ * the live content.
  *
  * The abstract base class lets callers plug in whatever storage they like
  * (LRU, persistent SQLite, etc.). {@link InMemorySnapshotStore} ships as a
@@ -50,38 +50,14 @@ export interface Snapshot {
 /**
  * Storage seam for full-file version snapshots. The patcher calls {@link head}
  * for the latest version of a path and {@link byHash} when it needs the
- * historical version a section's stale tag names.
+ * specific historical version a section's stale tag names.
  */
 export abstract class SnapshotStore {
 	/** Most-recently recorded version for `path`, or `null` if none. */
 	abstract head(path: string): Snapshot | null;
 
-	/**
-	 * Recorded version for `path` whose tag equals `hash`, or `null`. When two
-	 * distinct texts collide on the 16-bit tag, returns the most-recently
-	 * recorded one.
-	 */
+	/** Recorded version for `path` whose tag equals `hash`, or `null`. */
 	abstract byHash(path: string, hash: string): Snapshot | null;
-
-	/**
-	 * Recorded version for `path` whose {@link Snapshot.text} equals `fullText`,
-	 * or `null`. The patcher uses it on the no-drift path to attach seen-line
-	 * provenance to the exact text the model read.
-	 */
-	abstract byContent(path: string, fullText: string): Snapshot | null;
-
-	/**
-	 * Every retained version whose tag equals `hash`, across all tracked
-	 * paths. The patcher uses this to recover the intended file when a section
-	 * names a path that does not exist on disk but carries a tag the store
-	 * minted — the model mistyped the path of a file it read this session.
-	 *
-	 * The base returns no matches (recovery disabled); stores that can
-	 * enumerate their contents override it to enable tag-based path recovery.
-	 */
-	findByHash(_hash: string): Snapshot[] {
-		return [];
-	}
 
 	/**
 	 * Record the full normalized text of `path` and return its content tag.
@@ -100,13 +76,6 @@ export abstract class SnapshotStore {
 
 	/** Drop the version history for a single path. */
 	abstract invalidate(path: string): void;
-
-	/**
-	 * Move retained version history (and read provenance) from `from` to `to`.
-	 * No-op when `from` has no history. Used by file moves so tags minted from
-	 * reads of the source path stay valid at the destination.
-	 */
-	abstract relocate(from: string, to: string): void;
 
 	/** Drop every version history. */
 	abstract clear(): void;
@@ -144,10 +113,7 @@ export interface InMemorySnapshotStoreOptions {
  *
  * Recording byte-identical content again refreshes recency and reuses the
  * existing tag (read fusion); recording new content unshifts a fresh version
- * onto the front of the path history. Two distinct texts that collide on the
- * short 4-hex tag are retained as separate versions so callers can still tell
- * them apart via {@link Snapshot.text} — the tag is only a fast index, never
- * the identity.
+ * onto the front of the path history.
  */
 export class InMemorySnapshotStore extends SnapshotStore {
 	readonly #versions: LRUCache<string, Snapshot[]>;
@@ -176,32 +142,11 @@ export class InMemorySnapshotStore extends SnapshotStore {
 		return history?.find(version => version.hash === hash) ?? null;
 	}
 
-	byContent(path: string, fullText: string): Snapshot | null {
-		const history = this.#versions.get(path);
-		return history?.find(version => version.text === fullText) ?? null;
-	}
-
-	findByHash(hash: string): Snapshot[] {
-		const matches: Snapshot[] = [];
-		for (const history of this.#versions.values()) {
-			for (const version of history) {
-				if (version.hash === hash) matches.push(version);
-			}
-		}
-		return matches;
-	}
-
 	record(path: string, fullText: string, seenLines?: Iterable<number>): string {
 		const hash = computeFileHash(fullText);
 		// `get` refreshes LRU recency for `path`.
 		const history = this.#versions.get(path) ?? [];
-		// Dedup requires full-text equality, not just tag equality: two distinct
-		// texts that happen to share the 4-hex tag are DIFFERENT snapshots — fusing
-		// them under one entry would corrupt seenLines (attaching lines from
-		// text B onto the stored text A) and let the patcher misresolve which
-		// snapshot the section tag names when it does 3-way merge or seen-line
-		// validation. See issue #4075.
-		const existing = history.find(version => version.hash === hash && version.text === fullText);
+		const existing = history.find(version => version.hash === hash);
 		if (existing) {
 			// Same content state observed again: refresh recency and promote to
 			// head (it is the current file content), then reuse the tag. Union any
@@ -227,26 +172,6 @@ export class InMemorySnapshotStore extends SnapshotStore {
 
 	invalidate(path: string): void {
 		this.#versions.delete(path);
-	}
-
-	relocate(from: string, to: string): void {
-		const sourceHistory = this.#versions.get(from);
-		if (sourceHistory === undefined || sourceHistory.length === 0) return;
-		const relocated = sourceHistory.map(version => ({ ...version, path: to }));
-		const destHistory = this.#versions.get(to);
-		if (destHistory === undefined) {
-			this.#versions.set(to, relocated);
-		} else {
-			const seen = new Set<string>();
-			const merged: Snapshot[] = [];
-			for (const version of [...relocated, ...destHistory]) {
-				if (seen.has(version.hash)) continue;
-				seen.add(version.hash);
-				merged.push(version);
-			}
-			this.#versions.set(to, merged.slice(0, this.#maxVersionsPerPath));
-		}
-		this.#versions.delete(from);
 	}
 
 	clear(): void {

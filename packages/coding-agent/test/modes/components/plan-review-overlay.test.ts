@@ -13,7 +13,9 @@ const RIGHT = "\x1b[C";
 const ENTER = "\r";
 const TAB = "\t";
 const SHIFT_DOWN = "\x1b[1;2B";
-const CANCEL = "\x07"; // ctrl+g, remapped to tui.select.cancel below
+const ESCAPE = "\x1b";
+const INTERRUPT = "\x11"; // ctrl+q
+const DISMISS_CTRL_G = "\x07";
 
 let darkTheme = await getThemeByName("dark");
 
@@ -36,7 +38,7 @@ describe("PlanReviewOverlay", () => {
 
 	beforeEach(() => {
 		setThemeInstance(darkTheme!);
-		setKeybindings(KeybindingsManager.inMemory({ "tui.select.cancel": "ctrl+g" }));
+		setKeybindings(KeybindingsManager.inMemory());
 	});
 
 	afterEach(() => {
@@ -44,7 +46,7 @@ describe("PlanReviewOverlay", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("renders the plan body, prompt, options and footer inside one outlined box", () => {
+	it("renders the plan body, prompt, options and footer without frame chrome", () => {
 		const overlay = new PlanReviewOverlay(
 			"# My Plan\n\nstep one then step two",
 			{ promptTitle: "Plan mode - next step", options: APPROVAL_OPTIONS, helpText: "esc cancel" },
@@ -57,10 +59,8 @@ describe("PlanReviewOverlay", () => {
 		expect(out).toContain("Plan mode - next step");
 		for (const option of APPROVAL_OPTIONS) expect(out).toContain(option);
 		expect(out).toContain("esc cancel");
-		// Outlined like the /copy overlay.
-		expect(out).toContain(theme.boxRound.topLeft);
-		expect(out).toContain("│");
-		expect(out).toContain(theme.boxRound.bottomLeft);
+		// Frameless like the /copy overlay: no corners or tee-joins.
+		expect(out).not.toMatch(/[┌┐└┘╭╮╰╯┬┴├┤┼]/);
 	});
 
 	it("confirms the highlighted option on Enter", () => {
@@ -108,14 +108,37 @@ describe("PlanReviewOverlay", () => {
 		expect(onPick).toHaveBeenCalledWith("Refine plan");
 	});
 
-	it("cancels on the cancel key", () => {
+	it("keeps Escape on ui.dismiss when only app.interrupt is remapped to Ctrl+Q", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "app.interrupt": "ctrl+q" }));
 		const onCancel = vi.fn();
 		const overlay = new PlanReviewOverlay(
 			"plan",
 			{ promptTitle: "next", options: APPROVAL_OPTIONS },
 			{ onPick: vi.fn(), onCancel },
 		);
-		overlay.handleInput(CANCEL);
+
+		overlay.handleInput(INTERRUPT);
+		expect(onCancel).not.toHaveBeenCalled();
+
+		overlay.handleInput(ESCAPE);
+		expect(onCancel).toHaveBeenCalledTimes(1);
+	});
+
+	it("dismisses on remapped ui.dismiss and renders its live hint", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g" }));
+		const onCancel = vi.fn();
+		const overlay = new PlanReviewOverlay(
+			"plan",
+			{ promptTitle: "next", options: APPROVAL_OPTIONS },
+			{ onPick: vi.fn(), onCancel },
+		);
+
+		expect(render(overlay)).toContain("ctrl+g cancel");
+
+		overlay.handleInput(ESCAPE);
+		expect(onCancel).not.toHaveBeenCalled();
+
+		overlay.handleInput(DISMISS_CTRL_G);
 		expect(onCancel).toHaveBeenCalledTimes(1);
 	});
 
@@ -147,7 +170,7 @@ describe("PlanReviewOverlay", () => {
 	});
 
 	it("invokes the external-editor callback on its key", () => {
-		setKeybindings(KeybindingsManager.inMemory({ "tui.select.cancel": "ctrl+g", "app.editor.external": "ctrl+e" }));
+		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g", "app.editor.external": "ctrl+e" }));
 		const onExternalEditor = vi.fn();
 		const overlay = new PlanReviewOverlay(
 			"plan",
@@ -218,9 +241,10 @@ describe("PlanReviewOverlay", () => {
 			{ onPick: vi.fn(), onCancel: vi.fn() },
 		);
 		const out = render(overlay);
-		// Two-column split chrome (┬ joins the title rule over the divider) and the
-		// bare section list — no "Contents" label.
-		expect(out).toContain("┬");
+		// Two-column split: a middle │ divider between the section sidebar and the
+		// body, but no outer frame or ┬ tee. No "Contents" label.
+		expect(out).toContain("│");
+		expect(out).not.toMatch(/[┌┐└┘╭╮╰╯┬┴├┤┼]/);
 		expect(out).not.toContain("Contents");
 		expect(out).toContain("Overview");
 		// Tab into the ToC region surfaces its focus-specific help.
@@ -239,7 +263,8 @@ describe("PlanReviewOverlay", () => {
 		);
 		const sidebar = render(overlay)
 			.split("\n")
-			.map(line => line.split("│")[1] ?? "")
+			.filter(line => line.includes("│"))
+			.map(line => line.split("│")[0] ?? "")
 			.join("\n");
 		expect(sidebar).toContain("Design");
 		expect(sidebar).toContain("Rollout");
@@ -346,7 +371,7 @@ describe("PlanReviewOverlay", () => {
 	});
 
 	it("opens the external editor for an active annotation draft", () => {
-		setKeybindings(KeybindingsManager.inMemory({ "tui.select.cancel": "ctrl+g", "app.editor.external": "ctrl+e" }));
+		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g", "app.editor.external": "ctrl+e" }));
 		const onFeedbackChange = vi.fn();
 		let editorDraft: string | undefined;
 		const overlay = new PlanReviewOverlay(
@@ -378,7 +403,7 @@ describe("PlanReviewOverlay", () => {
 	});
 
 	it("keeps the annotation draft when the external editor is cancelled", () => {
-		setKeybindings(KeybindingsManager.inMemory({ "tui.select.cancel": "ctrl+g", "app.editor.external": "ctrl+e" }));
+		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g", "app.editor.external": "ctrl+e" }));
 		const onFeedbackChange = vi.fn();
 		const overlay = new PlanReviewOverlay(
 			SECTION_PLAN,

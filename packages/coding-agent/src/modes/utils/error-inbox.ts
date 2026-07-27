@@ -1,0 +1,583 @@
+import { postmortem } from "@oh-my-pi/pi-utils";
+import { randomUUID } from "node:crypto";
+import { SessionOwnershipLostError } from "../../session/durable-input-queue";
+import type {
+	DiagnosticAction,
+	DiagnosticEvent,
+	DiagnosticEventInput,
+	ErrorInboxWriter,
+} from "../../session/error-inbox-ledger";
+import { appendErrorInboxEvent, enrichErrorInboxEvent } from "../../session/error-inbox-ledger";
+import { SessionStateCommandInFlightError } from "../../session/session-manager";
+import type { SessionEntry } from "../../session/session-entries";
+import type { SubagentFailureClass } from "../../task/subagent-failure";
+
+export type {
+	DiagnosticAction,
+	DiagnosticEvent,
+	DiagnosticEventInput,
+	FocusCmuxOwnerAction,
+	ResolveFallbackApprovalAction,
+} from "../../session/error-inbox-ledger";
+
+export function diagnosticInputFromError(
+	error: unknown,
+	sessionFile: string | null | undefined,
+): string | DiagnosticEventInput {
+	const message = error instanceof Error ? error.message : String(error);
+	if (!(error instanceof SessionOwnershipLostError) || !sessionFile) return message;
+	return {
+		message,
+		action: {
+			kind: "focus_cmux_owner",
+			sessionFile,
+			sessionId: error.sessionId,
+			lostOwnerEpoch: error.ownerEpoch,
+		},
+	};
+}
+
+function decodeDiagnosticAction(value: unknown): DiagnosticAction | undefined {
+	if (!isObject(value)) return undefined;
+	if (value.kind === "focus_cmux_owner") {
+		if (
+			Object.keys(value).length !== 4 ||
+			typeof value.sessionFile !== "string" ||
+			typeof value.sessionId !== "string" ||
+			typeof value.lostOwnerEpoch !== "string" ||
+			value.sessionFile.length === 0 ||
+			value.sessionId.length === 0 ||
+			value.lostOwnerEpoch.length === 0
+		) {
+			return undefined;
+		}
+		return {
+			kind: value.kind,
+			sessionFile: value.sessionFile,
+			sessionId: value.sessionId,
+			lostOwnerEpoch: value.lostOwnerEpoch,
+		};
+	}
+	if (
+		value.kind !== "resolve_fallback_approval" ||
+		Object.keys(value).length !== 7 ||
+		typeof value.agentId !== "string" ||
+		typeof value.sourceModel !== "string" ||
+		typeof value.proposedModel !== "string" ||
+		(value.cause !== "network" && value.cause !== "rate-limit" && value.cause !== "provider") ||
+		typeof value.taskContext !== "string" ||
+		!Array.isArray(value.options) ||
+		value.options.join(",") !== "wait,approve,choose,abort"
+	) {
+		return undefined;
+	}
+	return {
+		kind: value.kind,
+		agentId: value.agentId,
+		sourceModel: value.sourceModel,
+		proposedModel: value.proposedModel,
+		cause: value.cause,
+		taskContext: value.taskContext,
+		options: ["wait", "approve", "choose", "abort"],
+	};
+}
+
+function isSameAction(a: DiagnosticAction | undefined, b: DiagnosticAction | undefined): boolean {
+	if (a === b) return true;
+	if (!a || !b || a.kind !== b.kind) return false;
+	if (a.kind === "focus_cmux_owner" && b.kind === "focus_cmux_owner") {
+		return a.sessionFile === b.sessionFile && a.sessionId === b.sessionId && a.lostOwnerEpoch === b.lostOwnerEpoch;
+	}
+	if (a.kind === "resolve_fallback_approval" && b.kind === "resolve_fallback_approval") {
+		return (
+			a.agentId === b.agentId &&
+			a.sourceModel === b.sourceModel &&
+			a.proposedModel === b.proposedModel &&
+			a.cause === b.cause &&
+			a.taskContext === b.taskContext
+		);
+	}
+	return false;
+}
+
+export const DEDUPE_WINDOW_MS = 60 * 1000; // 1 minute window for deduping
+
+function isObject(val: unknown): val is Record<string, unknown> {
+	return typeof val === "object" && val !== null;
+}
+
+function isFiniteNumber(val: unknown): val is number {
+	return typeof val === "number" && Number.isFinite(val);
+}
+
+class DecoderError extends Error {}
+
+function requireString(data: Record<string, unknown>, key: string): string {
+	const val = data[key];
+	if (typeof val !== "string") throw new DecoderError(`${key} must be a string`);
+	return val;
+}
+
+function requireFiniteNumber(data: Record<string, unknown>, key: string): number {
+	const val = data[key];
+	if (!isFiniteNumber(val)) throw new DecoderError(`${key} must be a finite number`);
+	return val;
+}
+
+function requireBoolean(data: Record<string, unknown>, key: string): boolean {
+	const val = data[key];
+	if (typeof val !== "boolean") throw new DecoderError(`${key} must be a boolean`);
+	return val;
+}
+
+function optionalString(data: Record<string, unknown>, key: string): string | undefined {
+	const val = data[key];
+	if (val === undefined) return undefined;
+	if (typeof val !== "string") throw new DecoderError(`${key} must be a string or undefined`);
+	return val;
+}
+function optionalRequestFailureCause(data: Record<string, unknown>, key: string): DiagnosticEvent["cause"] {
+	const val = optionalString(data, key);
+	if (val === undefined) return undefined;
+	if (
+		val === "user-interrupt" ||
+		val === "parent-cancel" ||
+		val === "timeout" ||
+		val === "provider-stream-abort" ||
+		val === "network" ||
+		val === "rate-limit" ||
+		val === "provider-error"
+	) {
+		return val;
+	}
+	throw new DecoderError(`${key} must be a recognized request failure cause or undefined`);
+}
+
+function optionalSubagentFailureClass(data: Record<string, unknown>, key: string): SubagentFailureClass | undefined {
+	const val = optionalString(data, key);
+	if (val === undefined) return undefined;
+	if (
+		val === "failed" ||
+		val === "timeout" ||
+		val === "budget" ||
+		val === "network" ||
+		val === "provider" ||
+		val === "schema" ||
+		val === "no-yield"
+	) {
+		return val;
+	}
+	throw new DecoderError(`${key} must be a recognized subagent failure class or undefined`);
+}
+
+function optionalFiniteNumber(data: Record<string, unknown>, key: string): number | undefined {
+	const val = data[key];
+	if (val === undefined) return undefined;
+	if (!isFiniteNumber(val)) throw new DecoderError(`${key} must be a finite number or undefined`);
+	return val;
+}
+
+function optionalBoolean(data: Record<string, unknown>, key: string): boolean | undefined {
+	const val = data[key];
+	if (val === undefined) return undefined;
+	if (typeof val !== "boolean") throw new DecoderError(`${key} must be a boolean or undefined`);
+	return val;
+}
+
+function optionalStringArray(data: Record<string, unknown>, key: string): string[] | undefined {
+	const val = data[key];
+	if (val === undefined) return undefined;
+	if (!Array.isArray(val) || val.some(v => typeof v !== "string")) {
+		throw new DecoderError(`${key} must be an array of strings or undefined`);
+	}
+	return val as string[];
+}
+
+function optionalStatus(data: Record<string, unknown>, key: string): number | string | undefined {
+	const val = data[key];
+	if (val === undefined) return undefined;
+	if (typeof val === "string") return val;
+	if (isFiniteNumber(val)) return val;
+	throw new DecoderError(`${key} must be a finite number, string, or undefined`);
+}
+
+function decodeUiErrorV2(data: Record<string, unknown>): DiagnosticEvent {
+	if (data.version !== 2) throw new DecoderError("expected version 2");
+
+	const id = requireString(data, "id");
+	const message = requireString(data, "message");
+	const firstTimestamp = requireFiniteNumber(data, "firstTimestamp");
+	const lastTimestamp = requireFiniteNumber(data, "lastTimestamp");
+	if (firstTimestamp > lastTimestamp) throw new DecoderError("firstTimestamp must be <= lastTimestamp");
+	const count = requireFiniteNumber(data, "count");
+	if (count < 1 || Math.floor(count) !== count) throw new DecoderError("count must be a positive integer");
+	const unread = requireBoolean(data, "unread");
+	const resolved = requireBoolean(data, "resolved");
+
+	return {
+		id,
+		firstTimestamp,
+		lastTimestamp,
+		message,
+		count,
+		source: optionalString(data, "source"),
+		errorClass: optionalSubagentFailureClass(data, "errorClass"),
+		category: optionalString(data, "category"),
+		cause: optionalRequestFailureCause(data, "cause"),
+		disposition: optionalString(data, "disposition"),
+		detail: optionalString(data, "detail"),
+		provider: optionalString(data, "provider"),
+		model: optionalString(data, "model"),
+		session: optionalString(data, "session"),
+		agent: optionalString(data, "agent"),
+		tool: optionalString(data, "tool"),
+		job: optionalString(data, "job"),
+		operation: optionalString(data, "operation"),
+		status: optionalStatus(data, "status"),
+		code: optionalString(data, "code"),
+		retry: optionalBoolean(data, "retry"),
+		reset: optionalFiniteNumber(data, "reset"),
+		requestFingerprint: optionalString(data, "requestFingerprint"),
+		logPointer: optionalString(data, "logPointer"),
+		historyUri: optionalString(data, "historyUri"),
+		finalOutputUri: optionalString(data, "finalOutputUri"),
+		finalOutputAvailable: optionalBoolean(data, "finalOutputAvailable"),
+		causeChain: optionalStringArray(data, "causeChain"),
+		buildVersion: optionalString(data, "buildVersion"),
+		buildDigest: optionalString(data, "buildDigest"),
+		fleetRolloutId: optionalString(data, "fleetRolloutId"),
+		action: decodeDiagnosticAction(data.action),
+		unread,
+		resolved,
+	};
+}
+
+function decodeUiErrorV1(data: Record<string, unknown>): DiagnosticEvent {
+	if (data.version !== 1) throw new DecoderError("expected version 1");
+
+	const id = requireString(data, "id");
+	const message = requireString(data, "message");
+	const timestamp = requireFiniteNumber(data, "timestamp");
+	const count = requireFiniteNumber(data, "count");
+	if (count < 1 || Math.floor(count) !== count) throw new DecoderError("count must be a positive integer");
+
+	return {
+		id,
+		firstTimestamp: timestamp,
+		lastTimestamp: timestamp,
+		message,
+		count,
+		source: optionalString(data, "source"),
+		category: optionalString(data, "category"),
+		cause: optionalRequestFailureCause(data, "cause"),
+		disposition: optionalString(data, "disposition"),
+		detail: optionalString(data, "detail"),
+		provider: optionalString(data, "provider"),
+		model: optionalString(data, "model"),
+		session: optionalString(data, "session"),
+		agent: optionalString(data, "agent"),
+		tool: optionalString(data, "tool"),
+		job: optionalString(data, "job"),
+		operation: optionalString(data, "operation"),
+		status: optionalStatus(data, "status"),
+		code: optionalString(data, "code"),
+		retry: optionalBoolean(data, "retry"),
+		reset: optionalFiniteNumber(data, "reset"),
+		requestFingerprint: optionalString(data, "requestFingerprint"),
+		logPointer: optionalString(data, "logPointer"),
+		causeChain: optionalStringArray(data, "causeChain"),
+		action: decodeDiagnosticAction(data.action),
+		unread: optionalBoolean(data, "unread") ?? true,
+		resolved: optionalBoolean(data, "resolved") ?? false,
+	};
+}
+
+function decodeUiErrorEntry(entry: SessionEntry): DiagnosticEvent | null {
+	if (entry.type !== "custom" || entry.customType !== "ui_error") return null;
+	if (!isObject(entry.data)) return null;
+
+	try {
+		const data = entry.data;
+		if (data.version === 2) return decodeUiErrorV2(data);
+		if (data.version === 1) return decodeUiErrorV1(data);
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+function isClearMarker(entry: SessionEntry): boolean {
+	if (entry.type !== "custom" || entry.customType !== "ui_error_clear") return false;
+	if (!isObject(entry.data)) return false;
+	return entry.data.version === 1 && isFiniteNumber(entry.data.clearedAt);
+}
+
+function isSameCauseChain(a: string[] | undefined, b: string[] | undefined): boolean {
+	if (a === b) return true;
+	if (a === undefined || b === undefined) return false;
+	if (a.length !== b.length) return false;
+	return a.every((val, i) => val === b[i]);
+}
+
+export class ErrorInbox {
+	#errors: DiagnosticEvent[] = [];
+	readonly #maxErrors = 100;
+	readonly #sessionManager: ErrorInboxWriter;
+	readonly #subscribers = new Set<() => void>();
+	#notificationScheduled = false;
+
+	constructor(sessionManager: ErrorInboxWriter) {
+		this.#sessionManager = sessionManager;
+	}
+
+	subscribe(subscriber: () => void): () => void {
+		this.#subscribers.add(subscriber);
+		return () => {
+			this.#subscribers.delete(subscriber);
+		};
+	}
+
+	/**
+	 * Decode from existing session entries on startup. Clear markers truncate the
+	 * visible ledger; later error records repopulate it. Entries that fail strict
+	 * validation are ignored.
+	 */
+	reconcile(entries: ReadonlyArray<SessionEntry>): void {
+		const decoded = new Map<string, DiagnosticEvent>();
+
+		for (const entry of entries) {
+			if (isClearMarker(entry)) {
+				decoded.clear();
+				continue;
+			}
+
+			const event = decodeUiErrorEntry(entry);
+			if (event !== null) {
+				decoded.set(event.id, event);
+			}
+		}
+
+		this.#errors = Array.from(decoded.values())
+			.sort((a, b) => b.lastTimestamp - a.lastTimestamp)
+			.slice(0, this.#maxErrors);
+		this.#scheduleNotification();
+	}
+
+	getErrors(): ReadonlyArray<DiagnosticEvent> {
+		return this.#errors;
+	}
+
+	recordError(input: string | DiagnosticEventInput, source?: string, options?: { nowMs?: number; id?: string }): void {
+		const now = options?.nowMs ?? Date.now();
+		let message: string;
+		let details: Omit<DiagnosticEventInput, "message">;
+
+		if (typeof input === "string") {
+			message = input;
+			details = {};
+			if (source) details.source = source;
+			if (options?.id) details.id = options.id;
+		} else {
+			message = input.message;
+			details = { ...input };
+			if (source && !details.source) details.source = source;
+			if (options?.id && !details.id) details.id = options.id;
+		}
+		enrichErrorInboxEvent(this.#sessionManager, details);
+
+		const match = this.#errors.find(
+			existing =>
+				existing.message === message &&
+				existing.source === details.source &&
+				existing.category === details.category &&
+				existing.errorClass === details.errorClass &&
+				existing.cause === details.cause &&
+				existing.disposition === details.disposition &&
+				existing.detail === details.detail &&
+				existing.provider === details.provider &&
+				existing.model === details.model &&
+				existing.session === details.session &&
+				existing.agent === details.agent &&
+				existing.tool === details.tool &&
+				existing.job === details.job &&
+				existing.operation === details.operation &&
+				existing.status === details.status &&
+				existing.code === details.code &&
+				existing.retry === details.retry &&
+				existing.reset === details.reset &&
+				existing.requestFingerprint === details.requestFingerprint &&
+				existing.logPointer === details.logPointer &&
+				existing.historyUri === details.historyUri &&
+				existing.finalOutputUri === details.finalOutputUri &&
+				existing.finalOutputAvailable === details.finalOutputAvailable &&
+				existing.buildVersion === details.buildVersion &&
+				existing.buildDigest === details.buildDigest &&
+				existing.fleetRolloutId === details.fleetRolloutId &&
+				isSameCauseChain(existing.causeChain, details.causeChain) &&
+				isSameAction(existing.action, details.action) &&
+				now >= existing.lastTimestamp &&
+				now - existing.lastTimestamp <= DEDUPE_WINDOW_MS,
+		);
+
+		let record: DiagnosticEvent;
+
+		if (match) {
+			match.count++;
+			match.lastTimestamp = now;
+			match.unread = true;
+			match.resolved = false;
+			record = match;
+			this.#errors.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+		} else {
+			record = {
+				id: details.id ?? randomUUID(),
+				firstTimestamp: now,
+				lastTimestamp: now,
+				message,
+				count: 1,
+				unread: true,
+				resolved: false,
+				source: details.source,
+				category: details.category,
+				errorClass: details.errorClass,
+				cause: details.cause,
+				disposition: details.disposition,
+				detail: details.detail,
+				provider: details.provider,
+				model: details.model,
+				session: details.session,
+				agent: details.agent,
+				tool: details.tool,
+				job: details.job,
+				operation: details.operation,
+				status: details.status,
+				code: details.code,
+				retry: details.retry,
+				reset: details.reset,
+				requestFingerprint: details.requestFingerprint,
+				logPointer: details.logPointer,
+				historyUri: details.historyUri,
+				finalOutputUri: details.finalOutputUri,
+				finalOutputAvailable: details.finalOutputAvailable,
+				causeChain: details.causeChain,
+				buildVersion: details.buildVersion,
+				buildDigest: details.buildDigest,
+				fleetRolloutId: details.fleetRolloutId,
+				action: details.action,
+			};
+			this.#errors.unshift(record);
+			if (this.#errors.length > this.#maxErrors) {
+				this.#errors.length = this.#maxErrors;
+			}
+		}
+
+		appendErrorInboxEvent(this.#sessionManager, record);
+		this.#scheduleNotification();
+	}
+
+	/**
+	 * Append an append-only clear marker and empty the in-memory ledger. Later
+	 * records recorded after the clear will still be recovered on restart.
+	 */
+	clear(nowMs = Date.now()): void {
+		this.#errors = [];
+		try {
+			this.#sessionManager.appendCustomEntry("ui_error_clear", { clearedAt: nowMs, version: 1 });
+		} catch {
+			// Persistence failure must never recursively surface as a new error.
+		}
+		this.#scheduleNotification();
+	}
+
+	/**
+	 * Mark a single error resolved. Persists an updated snapshot with the same id.
+	 */
+	resolve(id: string): boolean {
+		const idx = this.#errors.findIndex(e => e.id === id);
+		if (idx === -1) return false;
+
+		const event = this.#errors[idx];
+		const resolvedEvent: DiagnosticEvent = {
+			...event,
+			unread: false,
+			resolved: true,
+		};
+		this.#errors[idx] = resolvedEvent;
+
+		appendErrorInboxEvent(this.#sessionManager, resolvedEvent);
+		this.#scheduleNotification();
+		return true;
+	}
+
+	#scheduleNotification(): void {
+		if (this.#subscribers.size === 0 || this.#notificationScheduled) return;
+		this.#notificationScheduled = true;
+		queueMicrotask(() => {
+			this.#notificationScheduled = false;
+			for (const subscriber of this.#subscribers) {
+				try {
+					subscriber();
+				} catch {
+					// Subscribers must not be able to break inbox updates.
+				}
+			}
+		});
+	}
+}
+
+interface SessionStateCommandRejection {
+	readonly commandId?: string;
+	readonly message: string;
+}
+
+function decodeSessionStateCommandRejection(reason: unknown): SessionStateCommandRejection | undefined {
+	if (
+		!(reason instanceof SessionStateCommandInFlightError) &&
+		(typeof reason !== "object" ||
+			reason === null ||
+			!("name" in reason) ||
+			reason.name !== "SessionStateCommandInFlightError")
+	) {
+		return undefined;
+	}
+	const message =
+		"message" in reason && typeof reason.message === "string"
+			? reason.message
+			: "A session state command is awaiting durable persistence";
+	const commandId =
+		"commandId" in reason && typeof reason.commandId === "string" && reason.commandId.length > 0
+			? reason.commandId
+			: undefined;
+	return { message, commandId };
+}
+
+/** Capture the recoverable session-state rejection in the live, durable error inbox. */
+export function captureSessionStateCommandUnhandledRejection(
+	inbox: ErrorInbox,
+	sessionId: string,
+	reason: unknown,
+): boolean {
+	const decoded = decodeSessionStateCommandRejection(reason);
+	if (!decoded) return false;
+	inbox.recordError({
+		id: decoded.commandId
+			? `session-control:${decoded.commandId}`
+			: `session-control:unhandled:${sessionId}`,
+		message: `SessionStateCommandInFlightError: ${decoded.message}`,
+		source: "process-unhandled-rejection",
+		category: "session-control",
+		errorClass: "SessionStateCommandInFlightError",
+		session: sessionId,
+		operation: decoded.commandId ? `unhandledRejection:${decoded.commandId}` : "unhandledRejection",
+		code: "session_state_command_in_flight",
+	});
+	return true;
+}
+
+/** Install the session-lifetime belt before postmortem's fatal rejection path. */
+export function registerSessionStateCommandRejectionBelt(inbox: ErrorInbox, sessionId: string): () => void {
+	return postmortem.registerUnhandledRejectionInterceptor(
+		`session-state-command-rejection:${sessionId}`,
+		reason => captureSessionStateCommandUnhandledRejection(inbox, sessionId, reason),
+	);
+}

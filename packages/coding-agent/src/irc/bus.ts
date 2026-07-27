@@ -8,17 +8,19 @@
  * agents receive the message as a non-interrupting aside at the next step
  * boundary (see AgentSession.deliverIrcMessage). Replies are real turns by
  * the recipient, observed via `wait` — with one exception: when the sender
- * awaits a reply and the recipient cannot run a real reply turn in time
- * (mid-turn with async execution disabled — possibly blocked in a
- * synchronous task spawn whose batch includes the sender — or idle in plan
- * mode, where autonomous wake turns are suppressed), the recipient session
- * generates an ephemeral side-channel auto-reply.
+ * awaits a reply and the recipient is mid-turn with async execution
+ * disabled, the recipient session generates an ephemeral side-channel
+ * auto-reply (it may be blocked in a synchronous task spawn whose batch
+ * includes the sender, so a real turn could never happen in time).
  */
 
 import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { CustomMessage } from "../session/messages";
+import { IRC_BODY_MAX_CHARS, IRC_BROADCAST_BODY_MAX_CHARS } from "./irc-limits";
+
+export type IrcMessageOrigin = "user" | "agent" | "system";
 
 export interface IrcMessage {
 	id: string;
@@ -28,6 +30,8 @@ export interface IrcMessage {
 	to: string;
 	body: string;
 	ts: number;
+	/** Actor that initiated the message, independent of transport. */
+	origin: IrcMessageOrigin;
 	/** Message id being answered. */
 	replyTo?: string;
 }
@@ -38,6 +42,32 @@ export interface IrcDeliveryReceipt {
 	error?: string;
 }
 
+export type IrcDeliveryState = "queued" | "delivered" | "read" | "failed";
+export type IrcDeliveryMethod = Exclude<IrcDeliveryReceipt["outcome"], "failed">;
+
+/** Body content is intentionally excluded: projections are safe to expose to host UIs. */
+export interface IrcDeliveryRecord {
+	readonly id: string;
+	readonly senderId: string;
+	readonly recipientId: string;
+	readonly origin: IrcMessageOrigin;
+	readonly preview: "[message body hidden]";
+	state: IrcDeliveryState;
+	delivery?: IrcDeliveryMethod;
+	readonly queuedAt: number;
+	deliveredAt?: number;
+	readAt?: number;
+	failedAt?: number;
+	failureReason?: string;
+}
+
+export interface IrcPeerDeliverySummary {
+	readonly peerId: string;
+	readonly pendingCount: number;
+	readonly undeliveredCount: number;
+	readonly lastMessage?: IrcDeliveryRecord;
+}
+
 interface IrcWaiter {
 	from?: string;
 	resolve: (msg: IrcMessage) => void;
@@ -46,6 +76,8 @@ interface IrcWaiter {
 
 /** Mailbox cap per agent; oldest messages are dropped beyond it. */
 const MAILBOX_CAP = 100;
+/** Process-wide history cap; records are immutable snapshots at the query boundary. */
+const DELIVERY_HISTORY_CAP = 200;
 
 export class IrcBus {
 	static #global: IrcBus | undefined;
@@ -66,6 +98,8 @@ export class IrcBus {
 	readonly #lifecycle: () => AgentLifecycleManager;
 	readonly #mailboxes = new Map<string, IrcMessage[]>();
 	readonly #waiters = new Map<string, IrcWaiter[]>();
+	readonly #deliveries: IrcDeliveryRecord[] = [];
+	readonly #deliveryById = new Map<string, IrcDeliveryRecord>();
 
 	constructor(registry: AgentRegistry = AgentRegistry.global(), lifecycle?: AgentLifecycleManager) {
 		this.#registry = registry;
@@ -80,11 +114,11 @@ export class IrcBus {
 	 * (waiter/aside = "injected", idle wake = "woken", park revival =
 	 * "revived"), not what they did with it.
 	 *
-	 * Mailbox semantics: a successfully delivered message never lingers in
-	 * the recipient's mailbox — injection/wake puts the full body into their
-	 * context, so buffering it too would double-deliver via a later
-	 * `wait`/`inbox` and inflate unread counts. Only a failed live hand-off
-	 * is buffered for the recipient to drain later.
+	 * Mailbox semantics: parked delivery is reserved before revival and removed
+	 * only after a successful hand-off, so a release/replacement race cannot
+	 * lose it. Successfully delivered messages never linger: injection/wake
+	 * already puts the full body into recipient context. Failed live hand-offs
+	 * and failed revivals remain buffered for later recovery.
 	 *
 	 * `opts.expectsReply` marks sends whose caller is blocked on an answer
 	 * (`send await:true`). It is forwarded to the recipient session so a
@@ -92,41 +126,67 @@ export class IrcBus {
 	 * disabled — e.g. blocked in a synchronous task spawn awaiting the
 	 * sender's own batch) can generate an ephemeral side-channel auto-reply
 	 * instead of stranding the sender until timeout.
-	 *
-	 * `opts.suppressRelay` skips the display-only main-UI relay for this leg.
-	 * Set by broadcast fan-out when the same broadcast also targets the main
-	 * agent directly: the main agent then already sees the body as its own
-	 * incoming card, so relaying the sibling legs would duplicate it.
 	 */
 	async send(
-		msg: Omit<IrcMessage, "id" | "ts">,
-		opts?: { expectsReply?: boolean; suppressRelay?: boolean },
+		msg: Omit<IrcMessage, "id" | "ts" | "origin"> & { origin?: IrcMessageOrigin },
+		opts?: { expectsReply?: boolean; broadcast?: boolean },
 	): Promise<IrcDeliveryReceipt> {
-		const message: IrcMessage = { ...msg, id: Snowflake.next(), ts: Date.now() };
+		const message: IrcMessage = { ...msg, origin: msg.origin ?? "agent", id: Snowflake.next(), ts: Date.now() };
+		this.#recordQueued(message);
 		const ref = this.#registry.get(message.to);
 		if (!ref || ref.status === "aborted") {
-			return { to: message.to, outcome: "failed", error: `Unknown or terminated agent "${message.to}".` };
-		}
-		// Advisor refs are observability-only transcripts, never messageable peers.
-		if (ref.kind === "advisor") {
-			return {
-				to: message.to,
-				outcome: "failed",
-				error: `Agent "${message.to}" is a read-only advisor transcript and cannot be messaged.`,
-			};
+			const error = `Unknown or terminated agent "${message.to}".`;
+			this.#recordFailed(message.id, error);
+			return { to: message.to, outcome: "failed", error };
 		}
 
+		const bodyLimit = opts?.broadcast ? IRC_BROADCAST_BODY_MAX_CHARS : IRC_BODY_MAX_CHARS;
+		if (message.body.length > bodyLimit) {
+			const kind = opts?.broadcast ? "broadcast" : "direct message";
+			const error =
+				`IRC ${kind} exceeds the ${bodyLimit}-character limit. ` +
+				"Write the content to a file and send its local:// or artifact:// path instead.";
+			this.#recordFailed(message.id, error);
+			logger.warn("IrcBus: refused oversized message", {
+				from: message.from,
+				to: message.to,
+				broadcast: Boolean(opts?.broadcast),
+				bodyLength: message.body.length,
+				bodyLimit,
+			});
+			return { to: message.to, outcome: "failed", error };
+		}
+
+		const wasParked = ref.status === "parked";
 		let revived = false;
-		if (ref.status === "parked") {
-			try {
-				await this.#lifecycle().ensureLive(message.to);
-				revived = true;
-			} catch (error) {
-				return {
-					to: message.to,
-					outcome: "failed",
-					error: error instanceof Error ? error.message : String(error),
-				};
+		if (wasParked) {
+			// Reserve the message before revival starts. A failed or superseded
+			// revive therefore cannot lose it; successful hand-off removes this
+			// exact id, preserving one-delivery semantics.
+			this.#enqueue(message);
+			let reviveRef = ref;
+			for (;;) {
+				try {
+					await this.#lifecycle().ensureLive(message.to);
+					revived = true;
+					break;
+				} catch (error) {
+					const current = this.#registry.get(message.to);
+					if (current?.session) {
+						revived = true;
+						break;
+					}
+					if (current && current !== reviveRef && current.status === "parked") {
+						reviveRef = current;
+						continue;
+					}
+					this.#recordFailed(message.id, error instanceof Error ? error.message : String(error));
+					return {
+						to: message.to,
+						outcome: "failed",
+						error: error instanceof Error ? error.message : String(error),
+					};
+				}
 			}
 		}
 
@@ -135,26 +195,33 @@ export class IrcBus {
 		// the session injection path.
 		const waiter = this.#takeMatchingWaiter(message.to, message.from);
 		if (waiter) {
+			if (wasParked) this.#removeQueued(message);
 			waiter.resolve(message);
-			if (!opts?.suppressRelay) this.#relayToMainUi(message);
+			this.#recordDelivered(message.id, revived ? "revived" : "injected");
+			this.#recordRead(message.id);
+			this.#relayToMainUi(message);
 			return { to: message.to, outcome: revived ? "revived" : "injected" };
 		}
 
 		const session = this.#registry.get(message.to)?.session;
 		if (!session) {
+			this.#recordFailed(message.id, `Agent "${message.to}" has no live session.`);
 			return { to: message.to, outcome: "failed", error: `Agent "${message.to}" has no live session.` };
 		}
 
 		try {
 			const delivery = await session.deliverIrcMessage(message, opts);
-			if (!opts?.suppressRelay) this.#relayToMainUi(message);
+			if (wasParked) this.#removeQueued(message);
+			this.#recordDelivered(message.id, revived ? "revived" : delivery);
+			this.#recordRead(message.id);
+			this.#relayToMainUi(message);
 			return { to: message.to, outcome: revived ? "revived" : delivery };
 		} catch (error) {
-			// Live hand-off failed (e.g. recipient disposed mid-shutdown): buffer
-			// the message so a later `wait`/`inbox` from the recipient can still
-			// pick it up. The receipt stays "failed" — the recipient has not
-			// seen it.
+			// Normalize to one tail copy. The original parked reservation may
+			// have been evicted by the mailbox cap during a slow revival.
+			if (wasParked) this.#removeQueued(message);
 			this.#enqueue(message);
+			this.#recordFailed(message.id, error instanceof Error ? error.message : String(error));
 			return {
 				to: message.to,
 				outcome: "failed",
@@ -184,7 +251,10 @@ export class IrcBus {
 		if (options?.drainPending !== false) {
 			// Already-pending mail satisfies the wait without parking a waiter.
 			const pending = this.#takeFromMailbox(agentId, filter.from);
-			if (pending) return pending;
+			if (pending) {
+				this.#recordRead(pending.id);
+				return pending;
+			}
 		}
 
 		const { promise, resolve, reject } = Promise.withResolvers<IrcMessage | null>();
@@ -237,11 +307,76 @@ export class IrcBus {
 		if (!mailbox || mailbox.length === 0) return [];
 		if (opts?.peek) return [...mailbox];
 		this.#mailboxes.delete(agentId);
+		for (const message of mailbox) this.#recordRead(message.id);
 		return mailbox;
 	}
 
 	unreadCount(agentId: string): number {
 		return this.#mailboxes.get(agentId)?.length ?? 0;
+	}
+
+	recentDeliveries(opts?: { limit?: number; peerId?: string }): IrcDeliveryRecord[] {
+		const limit = Math.max(0, Math.min(opts?.limit ?? 50, DELIVERY_HISTORY_CAP));
+		const records = opts?.peerId
+			? this.#deliveries.filter(record => record.senderId === opts.peerId || record.recipientId === opts.peerId)
+			: this.#deliveries;
+		return records
+			.slice(-limit)
+			.reverse()
+			.map(record => ({ ...record }));
+	}
+
+	peerDeliverySummary(peerId: string): IrcPeerDeliverySummary {
+		const records = this.#deliveries.filter(record => record.senderId === peerId || record.recipientId === peerId);
+		return {
+			peerId,
+			pendingCount: records.filter(record => record.recipientId === peerId && record.state === "queued").length,
+			undeliveredCount: records.filter(
+				record => record.recipientId === peerId && (record.state === "queued" || record.state === "failed"),
+			).length,
+			lastMessage: records.length === 0 ? undefined : { ...records[records.length - 1]! },
+		};
+	}
+
+	#recordQueued(message: IrcMessage): void {
+		const record: IrcDeliveryRecord = {
+			id: message.id,
+			senderId: message.from,
+			recipientId: message.to,
+			origin: message.origin,
+			preview: "[message body hidden]",
+			state: "queued",
+			queuedAt: message.ts,
+		};
+		this.#deliveries.push(record);
+		this.#deliveryById.set(record.id, record);
+		if (this.#deliveries.length > DELIVERY_HISTORY_CAP) {
+			const dropped = this.#deliveries.shift();
+			if (dropped) this.#deliveryById.delete(dropped.id);
+		}
+	}
+
+	#recordDelivered(id: string, delivery: IrcDeliveryMethod): void {
+		const record = this.#deliveryById.get(id);
+		if (!record) return;
+		record.state = "delivered";
+		record.delivery = delivery;
+		record.deliveredAt = Date.now();
+	}
+
+	#recordRead(id: string): void {
+		const record = this.#deliveryById.get(id);
+		if (!record) return;
+		record.state = "read";
+		record.readAt = Date.now();
+	}
+
+	#recordFailed(id: string, reason: string): void {
+		const record = this.#deliveryById.get(id);
+		if (!record) return;
+		record.state = "failed";
+		record.failedAt = Date.now();
+		record.failureReason = reason;
 	}
 
 	#enqueue(message: IrcMessage): void {
@@ -259,6 +394,16 @@ export class IrcBus {
 				droppedFrom: dropped?.from,
 			});
 		}
+	}
+
+	#removeQueued(message: IrcMessage): boolean {
+		const mailbox = this.#mailboxes.get(message.to);
+		if (!mailbox) return false;
+		const index = mailbox.findIndex(candidate => candidate.id === message.id);
+		if (index === -1) return false;
+		mailbox.splice(index, 1);
+		if (mailbox.length === 0) this.#mailboxes.delete(message.to);
+		return true;
 	}
 
 	/** Resolve the OLDEST waiter for `agentId` whose from-filter accepts `from`. */

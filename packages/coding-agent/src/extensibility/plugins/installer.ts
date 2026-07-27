@@ -53,14 +53,9 @@ export async function installPlugin(packageName: string): Promise<InstalledPlugi
 		windowsHide: true,
 	});
 
-	// Drain both pipes concurrently with proc.exited to avoid a pipe-buffer
-	// deadlock if bun install floods stdout/stderr.
-	const [exitCode, , stderr] = await Promise.all([
-		proc.exited,
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-	]);
+	const exitCode = await proc.exited;
 	if (exitCode !== 0) {
+		const stderr = await new Response(proc.stderr).text();
 		throw new Error(`Failed to install ${packageName}: ${stderr}`);
 	}
 
@@ -100,11 +95,7 @@ export async function uninstallPlugin(name: string): Promise<void> {
 		windowsHide: true,
 	});
 
-	const [exitCode] = await Promise.all([
-		proc.exited,
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-	]);
+	const exitCode = await proc.exited;
 	if (exitCode !== 0) {
 		throw new Error(`Failed to uninstall ${name}`);
 	}

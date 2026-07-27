@@ -1,19 +1,17 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger, postmortem, Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
+import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { JsRuntime, type RuntimeHooks } from "../../../eval/js/shared/runtime";
 import type { JsDisplayOutput } from "../../../eval/js/shared/types";
 import { callSessionTool } from "../../../eval/js/tool-bridge";
+import type { ToolSession } from "../../../sdk";
 import { resizeImage } from "../../../utils/image-resize";
-import type { ToolSession } from "../../index";
 import { resolveToCwd } from "../../path-utils";
 import { formatScreenshot } from "../../render-utils";
-import { ToolAbortError, ToolError, throwIfAborted } from "../../tool-errors";
-import { type AriaSnapshotOptions, buildAriaSnapshotScript } from "../aria/aria-snapshot";
+import { ToolAbortError, ToolError } from "../../tool-errors";
 import { DEFAULT_VIEWPORT } from "../launch";
 import { extractReadableFromHtml, type ReadableFormat } from "../readable";
-import { bindBrowserRunFacade, waitForBrowserRun } from "../run-cancellation";
 import type { Observation, ReadyInfo, RunResultOk, ScreenshotResult, SessionSnapshot } from "../tab-protocol";
 import {
 	type CmuxEvalResult,
@@ -45,13 +43,13 @@ interface RunContext {
 	session: SessionSnapshot;
 	displays: RunResultOk["displays"];
 	screenshots: ScreenshotResult[];
-	signal: AbortSignal;
+	signal?: AbortSignal;
 	timeoutMs: number;
 }
 
 type WaitUntil = "load" | "domcontentloaded" | "networkidle0" | "networkidle2";
 type DragTarget = string | { readonly x: number; readonly y: number };
-type SelectorKind = "css" | "ref" | "aria-ref" | "text" | "aria" | "xpath" | "pierce" | "ax";
+type SelectorKind = "css" | "ref" | "text" | "aria" | "xpath" | "pierce" | "ax";
 
 interface SelectorSpec {
 	kind: SelectorKind;
@@ -126,20 +124,6 @@ const accessibleName = element =>
 const findElement = spec => {
 	if (spec.kind === "css") return document.querySelector(spec.value);
 	if (spec.kind === "pierce") return pierceQuery(document, spec.value);
-	if (spec.kind === "aria-ref") {
-		const wanted = spec.value;
-		const scan = root => {
-			for (const el of Array.from(root.querySelectorAll("*"))) {
-				if (el._ariaRef && el._ariaRef.ref === wanted) return el;
-				if (el.shadowRoot) {
-					const found = scan(el.shadowRoot);
-					if (found) return found;
-				}
-			}
-			return null;
-		};
-		return scan(document);
-	}
 	if (spec.kind === "xpath") {
 		const result = document.evaluate(spec.value, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
 		return result.singleNodeValue instanceof Element ? result.singleNodeValue : null;
@@ -368,24 +352,6 @@ export class CmuxTab {
 		return observation;
 	}
 
-	async ariaSnapshot(selector?: string, opts?: AriaSnapshotOptions): Promise<string> {
-		const timeoutMs = Math.min(this.#runContext?.timeoutMs ?? 30_000, 30_000);
-		const result = (await this.#request(
-			"browser.eval",
-			{ script: buildAriaSnapshotScript(selector, opts) },
-			timeoutMs,
-		)) as CmuxEvalResult;
-		return result.value as string;
-	}
-
-	async ref(id: string): Promise<CmuxElementHandle> {
-		const refId = /^e\d+$/.test(id.trim()) ? id.trim() : id.trim().replace(/^(?:aria-ref=|aria-ref\/|ariaref\/)/, "");
-		const selector = `aria-ref=${refId}`;
-		const timeoutMs = this.#runContext?.timeoutMs ?? 30_000;
-		await this.#waitForSelector(selector, timeoutMs);
-		return new CmuxElementHandle(this, selector);
-	}
-
 	async click(selector: string): Promise<void> {
 		await this.#selectorAction(selector, "click");
 	}
@@ -430,12 +396,6 @@ export class CmuxTab {
 	}
 
 	async waitFor(selector: string, opts?: { timeout?: number }): Promise<CmuxElementHandle> {
-		const timeoutMs = opts?.timeout ?? this.#runContext?.timeoutMs ?? 30_000;
-		await this.#waitForSelector(selector, timeoutMs);
-		return new CmuxElementHandle(this, selector);
-	}
-
-	async waitForSelector(selector: string, opts?: { timeout?: number }): Promise<CmuxElementHandle> {
 		const timeoutMs = opts?.timeout ?? this.#runContext?.timeoutMs ?? 30_000;
 		await this.#waitForSelector(selector, timeoutMs);
 		return new CmuxElementHandle(this, selector);
@@ -536,10 +496,9 @@ export class CmuxTab {
 
 	async waitForUrl(pattern: string | RegExp, opts?: { timeout?: number }): Promise<string> {
 		const timeoutMs = opts?.timeout ?? this.#runContext?.timeoutMs ?? 30_000;
-		const signal = this.#runContext?.signal;
 		if (typeof pattern === "string") {
-			await this.#request("browser.wait", { url_contains: pattern, timeout_ms: timeoutMs }, timeoutMs, signal);
-			const result = (await this.#request("browser.url.get", {}, timeoutMs, signal)) as CmuxUrlGetResult;
+			await this.#request("browser.wait", { url_contains: pattern, timeout_ms: timeoutMs }, timeoutMs);
+			const result = (await this.#request("browser.url.get", {}, timeoutMs)) as CmuxUrlGetResult;
 			if (typeof result.url === "string" && result.url.length > 0) {
 				this.#lastUrl = result.url;
 			}
@@ -547,62 +506,14 @@ export class CmuxTab {
 		}
 		const deadline = Date.now() + timeoutMs;
 		while (Date.now() <= deadline) {
-			const result = (await this.#request(
-				"browser.url.get",
-				{},
-				Math.min(timeoutMs, 5_000),
-				signal,
-			)) as CmuxUrlGetResult;
+			const result = (await this.#request("browser.url.get", {}, Math.min(timeoutMs, 5_000))) as CmuxUrlGetResult;
 			if (typeof result.url === "string" && result.url.length > 0) {
 				this.#lastUrl = result.url;
 				if (pattern.test(result.url)) return result.url;
 			}
-			await untilAborted(signal, () => Bun.sleep(200));
+			await Bun.sleep(200);
 		}
 		throw new ToolError(`tab.waitForUrl() timed out after ${timeoutMs}ms`);
-	}
-
-	async waitForNavigation(opts?: { waitUntil?: WaitUntil; timeout?: number }): Promise<null> {
-		const timeoutMs = opts?.timeout ?? this.#runContext?.timeoutMs ?? 30_000;
-		const signal = this.#runContext?.signal;
-		// Cmux has no native "next navigation" wait — snapshot the current URL via a fresh
-		// `browser.url.get` (never the possibly-stale `#lastUrl`), then poll for a change
-		// from it (mirroring headless `page.waitForNavigation` intent) and optionally settle
-		// on the requested load state. Start it BEFORE the click/submit that navigates; after
-		// a completed nav it times out like puppeteer does.
-		const baseline = (await this.#request(
-			"browser.url.get",
-			{},
-			Math.min(timeoutMs, 5_000),
-			signal,
-		)) as CmuxUrlGetResult;
-		const startUrl = typeof baseline.url === "string" && baseline.url.length > 0 ? baseline.url : this.#lastUrl;
-		if (typeof baseline.url === "string" && baseline.url.length > 0) this.#lastUrl = baseline.url;
-		const deadline = Date.now() + timeoutMs;
-		while (Date.now() <= deadline) {
-			const result = (await this.#request(
-				"browser.url.get",
-				{},
-				Math.min(timeoutMs, 5_000),
-				signal,
-			)) as CmuxUrlGetResult;
-			if (typeof result.url === "string" && result.url.length > 0) {
-				this.#lastUrl = result.url;
-				if (result.url !== startUrl) {
-					if (opts?.waitUntil) {
-						await this.#request(
-							"browser.wait",
-							{ load_state: mapWaitUntil(opts.waitUntil), timeout_ms: timeoutMs },
-							timeoutMs,
-							signal,
-						);
-					}
-					return null;
-				}
-			}
-			await untilAborted(signal, () => Bun.sleep(200));
-		}
-		throw new ToolError(`tab.waitForNavigation() timed out after ${timeoutMs}ms`);
 	}
 
 	async drag(from: DragTarget, to: DragTarget): Promise<void> {
@@ -646,7 +557,6 @@ export class CmuxTab {
 		opts?: { timeout?: number },
 	): Promise<CmuxResponse> {
 		const timeoutMs = opts?.timeout ?? this.#runContext?.timeoutMs ?? 30_000;
-		const signal = this.#runContext?.signal;
 		await this.#installResponseObserver();
 		const startId = await this.#responseCursor();
 		const deadline = Date.now() + timeoutMs;
@@ -660,7 +570,7 @@ export class CmuxTab {
 					return response;
 				}
 			}
-			await untilAborted(signal, () => Bun.sleep(100));
+			await Bun.sleep(100);
 		}
 		throw new ToolError(`tab.waitForResponse() timed out after ${timeoutMs}ms`);
 	}
@@ -685,14 +595,8 @@ export class CmuxTab {
 		method: string,
 		params: Record<string, unknown>,
 		timeoutMs?: number,
-		signal: AbortSignal | undefined = this.#runContext?.signal,
 	): Promise<Record<string, unknown>> {
-		throwIfAborted(signal);
-		const result = await untilAborted(signal, () =>
-			this.#client.request(method, { surface_id: this.#surfaceId, ...params }, { timeoutMs }),
-		);
-		throwIfAborted(signal);
-		return result;
+		return await this.#client.request(method, { surface_id: this.#surfaceId, ...params }, { timeoutMs });
 	}
 
 	async #readGeometry(timeoutMs?: number): Promise<CmuxGeometry> {
@@ -743,13 +647,12 @@ export class CmuxTab {
 		...args: unknown[]
 	): Promise<unknown> {
 		const timeoutMs = opts?.timeout ?? this.#runContext?.timeoutMs ?? 30_000;
-		const signal = this.#runContext?.signal;
 		const pollingMs = typeof opts?.polling === "number" ? opts.polling : 200;
 		const deadline = Date.now() + timeoutMs;
 		while (Date.now() <= deadline) {
 			const value = typeof fn === "string" ? await this.#evalScript<unknown>(fn) : await this.evaluate(fn, ...args);
 			if (value) return value;
-			await untilAborted(signal, () => Bun.sleep(pollingMs));
+			await Bun.sleep(pollingMs);
 		}
 		throw new ToolError(`page.waitForFunction() timed out after ${timeoutMs}ms`);
 	}
@@ -890,17 +793,16 @@ export class CmuxTab {
 	}
 
 	async #waitForSelector(selector: string, timeoutMs: number): Promise<void> {
-		const signal = this.#runContext?.signal;
 		const spec = this.#selectorSpec(selector);
 		const nativeSelector = this.#nativeSelector(spec);
 		if (nativeSelector) {
-			await this.#request("browser.wait", { selector: nativeSelector, timeout_ms: timeoutMs }, timeoutMs, signal);
+			await this.#request("browser.wait", { selector: nativeSelector, timeout_ms: timeoutMs }, timeoutMs);
 			return;
 		}
 		const deadline = Date.now() + timeoutMs;
 		while (Date.now() <= deadline) {
 			if (await this.#selectorExists(spec)) return;
-			await untilAborted(signal, () => Bun.sleep(100));
+			await Bun.sleep(100);
 		}
 		throw new ToolError(`tab.waitFor(${JSON.stringify(selector)}) timed out after ${timeoutMs}ms`);
 	}
@@ -991,8 +893,6 @@ export class CmuxTab {
 		else if (normalized.startsWith("p-aria/")) normalized = `aria/${normalized.slice("p-aria/".length)}`;
 		else if (normalized.startsWith("p-xpath/")) normalized = `xpath/${normalized.slice("p-xpath/".length)}`;
 		else if (normalized.startsWith("p-pierce/")) normalized = `pierce/${normalized.slice("p-pierce/".length)}`;
-		const ariaRef = /^(?:aria-ref=|aria-ref\/|ariaref\/)(e\d+)$/.exec(normalized);
-		if (ariaRef) return { kind: "aria-ref", value: ariaRef[1]!, raw };
 		const ref = /^@?e(\d+)$/.exec(normalized);
 		if (ref) return { kind: "ref", value: ref[1]!, raw, ref: `@e${ref[1]}` };
 		const slash = normalized.indexOf("/");
@@ -1279,66 +1179,40 @@ class CmuxBrowserFacade {
 }
 
 export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promise<RunResultOk> {
-	const runAc = new AbortController();
 	const timeoutSignal = AbortSignal.timeout(opts.timeoutMs);
-	const signal = AbortSignal.any(
-		opts.signal ? [timeoutSignal, opts.signal, runAc.signal] : [timeoutSignal, runAc.signal],
-	);
+	const signal = opts.signal ? AbortSignal.any([timeoutSignal, opts.signal]) : timeoutSignal;
 	const displays: RunResultOk["displays"] = [];
 	const screenshots: ScreenshotResult[] = [];
 	const runId = crypto.randomUUID();
 	tab.setRunContext({ session: opts.snapshot, displays, screenshots, signal, timeoutMs: opts.timeoutMs });
+	const runtime = tab.ensureRuntime(opts.snapshot);
+	runtime.setCwd(opts.snapshot.cwd);
+	runtime.setRunScope({
+		page: tab.page,
+		browser: tab.browser,
+		tab,
+		assert: (cond: unknown, text?: string): void => {
+			if (!cond) throw new ToolError(text ?? "Assertion failed");
+		},
+		wait: (ms: number): Promise<void> => Bun.sleep(ms),
+	});
 
 	const { promise: cancelRejection, reject } = Promise.withResolvers<never>();
-	// If the synchronous setup below throws (same-realm ownership conflict)
-	// while `signal` is already aborted, `Promise.race` never attaches a
-	// handler to this promise; keep its armed rejection from surfacing as an
-	// unhandled rejection — the postmortem-fatal path this run guards against.
-	cancelRejection.catch(() => {});
 	const onAbort = (): void => {
 		if (timeoutSignal.aborted) {
 			reject(new ToolError(`Browser code execution timed out after ${opts.timeoutMs}ms`));
 		} else {
-			reject(
-				signal.reason instanceof ToolAbortError
-					? signal.reason
-					: new ToolAbortError(undefined, { cause: signal.reason }),
-			);
+			reject(new ToolAbortError());
 		}
 	};
 	if (signal.aborted) onAbort();
 	else signal.addEventListener("abort", onAbort, { once: true });
 
 	try {
-		const runtime = tab.ensureRuntime(opts.snapshot);
-		// setCwd is non-exclusive; setRunScope/run still assert same-realm ownership.
-		// Keep both inside try so a concurrent in-process eval/browser run surfaces as
-		// a rejected promise the supervisor can report, never an unhandled rejection.
-		runtime.setCwd(opts.snapshot.cwd);
-		const runTab = bindBrowserRunFacade(tab, signal);
-		runtime.setRunScope({
-			page: bindBrowserRunFacade(tab.page, signal),
-			browser: bindBrowserRunFacade(tab.browser, signal),
-			tab: runTab,
-			assert: (cond: unknown, text?: string): void => {
-				if (!cond) throw new ToolError(text ?? "Assertion failed");
-			},
-			wait: (ms: number): Promise<void> => waitForBrowserRun(ms, signal),
-		});
-
 		const hooks: RuntimeHooks = {
-			onText: chunk => {
-				throwIfAborted(signal);
-				logger.debug(chunk.replace(/\n$/, ""));
-			},
-			onDisplay: output => {
-				throwIfAborted(signal);
-				pushDisplay(displays, output);
-			},
-			callTool: (name, args) => {
-				throwIfAborted(signal);
-				return callSessionTool(name, args, { session: opts.session, signal });
-			},
+			onText: chunk => logger.debug(chunk.replace(/\n$/, "")),
+			onDisplay: output => pushDisplay(displays, output),
+			callTool: (name, args) => callSessionTool(name, args, { session: opts.session, signal }),
 		};
 		// Like the inline worker fallback, cmux runs user JS in-process: awaited cmux/tool calls
 		// observe this abort signal, but a synchronous infinite loop cannot be interrupted here.
@@ -1349,7 +1223,6 @@ export async function runCmuxCode(tab: CmuxTab, opts: RunCmuxCodeOptions): Promi
 		return { displays, returnValue: cloneSafe(returnValue), screenshots };
 	} finally {
 		signal.removeEventListener("abort", onAbort);
-		runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
 		tab.clearRunContext();
 	}
 }

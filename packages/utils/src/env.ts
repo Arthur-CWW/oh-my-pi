@@ -53,19 +53,6 @@ export function filterProcessEnv(env: Record<string, string | undefined>): Recor
 	return result;
 }
 
-/** Filters process env for child shells without launch-cwd `.env.local` values. */
-export function filterChildShellEnv(
-	env: Record<string, string | undefined>,
-	cwd: string = process.cwd(),
-): Record<string, string> {
-	const result = filterProcessEnv(env);
-	const launchLocalEnv = parseEnvFile(path.join(cwd, ".env.local"));
-	for (const key in launchLocalEnv) {
-		if (result[key] === launchLocalEnv[key]) delete result[key];
-	}
-	return result;
-}
-
 /**
  * Parses a .env file synchronously and extracts key-value string pairs.
  * Ignores lines that are empty or start with '#'. Trims whitespace.
@@ -178,33 +165,6 @@ export function $envpos(name: string, defaultValue: number): number {
 /** True when `BUN_ENV` or `NODE_ENV` is the string `test`. */
 export function isBunTestRuntime(): boolean {
 	return Bun.env.BUN_ENV === "test" || Bun.env.NODE_ENV === "test";
-}
-
-let terminalHeadless = isBunTestRuntime();
-
-/**
- * True when real-terminal side effects must be suppressed: stdout escape/frame
- * writes, stdin raw-mode + resume, CSI/OSC capability probes, SIGWINCH, window
- * title changes, and emergency restore. Defaults to {@link isBunTestRuntime} so
- * `bun test` launched inside a real TTY never paints the TUI, leaks probe
- * queries, or hijacks the developer's stdin; production runtimes stay
- * interactive.
- *
- * Terminal-contract tests that must exercise the real I/O path opt out with
- * `setTerminalHeadless(false)` and restore it afterwards.
- */
-export function isTerminalHeadless(): boolean {
-	return terminalHeadless;
-}
-
-/**
- * Override the {@link isTerminalHeadless} default and return the previous value
- * so callers can restore exact prior state (`const prev = setTerminalHeadless(false); … setTerminalHeadless(prev);`).
- */
-export function setTerminalHeadless(headless: boolean): boolean {
-	const previous = terminalHeadless;
-	terminalHeadless = headless;
-	return previous;
 }
 
 /**

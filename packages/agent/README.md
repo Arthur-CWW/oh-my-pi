@@ -134,7 +134,7 @@ const agent = new Agent({
   initialState: {
     systemPrompt: string[],
     model: Model,
-    thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
+    thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
     tools: AgentTool<any>[],
     messages: AgentMessage[],
   },
@@ -151,8 +151,8 @@ const agent = new Agent({
   // Custom stream function (for proxy backends)
   streamFn: streamProxy,
 
-  // Dynamic model-scoped API key resolution (for expiring OAuth tokens)
-  getApiKey: async (model) => tokenForModel(model),
+  // Dynamic API key resolution (for expiring OAuth tokens)
+  getApiKey: async (provider) => refreshToken(),
 
   // Tool execution context (late-bound UI/session access)
   getToolContext: () => ({ /* app-defined */ }),

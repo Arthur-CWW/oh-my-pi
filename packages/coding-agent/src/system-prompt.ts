@@ -7,6 +7,7 @@ import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { ToolExample, TSchema } from "@oh-my-pi/pi-ai";
 import { renderToolInventory } from "@oh-my-pi/pi-ai/dialect";
 import { $env, getGpuCachePath, getProjectDir, hasFsCode, isEnoent, logger, prompt } from "@oh-my-pi/pi-utils";
+import { $ } from "bun";
 import { contextFileCapability } from "./capability/context-file";
 import { systemPromptCapability } from "./capability/system-prompt";
 import { findConfigFile } from "./config";
@@ -15,19 +16,14 @@ import { type ContextFile, loadCapability, type SystemPrompt as SystemPromptFile
 import { expandAtImports } from "./discovery/at-imports";
 import { loadSkills, type Skill } from "./extensibility/skills";
 import { hasObsidian } from "./internal-urls/vault-protocol";
-import activeRepoContextTemplate from "./prompts/system/active-repo-context.md" with { type: "text" };
 import customSystemPromptTemplate from "./prompts/system/custom-system-prompt.md" with { type: "text" };
 import defaultPersonality from "./prompts/system/personalities/default.md" with { type: "text" };
 import friendlyPersonality from "./prompts/system/personalities/friendly.md" with { type: "text" };
 import pragmaticPersonality from "./prompts/system/personalities/pragmatic.md" with { type: "text" };
 import projectPromptTemplate from "./prompts/system/project-prompt.md" with { type: "text" };
 import systemPromptTemplate from "./prompts/system/system-prompt.md" with { type: "text" };
-import { normalizeConcurrencyLimit } from "./task/parallel";
-import { usesCodexTaskPrompt } from "./task/prompt-policy";
 import { shortenPath } from "./tools/render-utils";
-import { type ActiveRepoContext, resolveActiveRepoContext } from "./utils/active-repo-context";
-import { formatLocalCalendarDate } from "./utils/local-date";
-import { normalizePromptPath } from "./utils/prompt-path";
+import { compactToolOriginTag, type ToolOrigin } from "./tools/tool-origin";
 import { AGENTS_MD_LIMIT, buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 
 /** Bundled personality specs, keyed by the `personality` setting value. */
@@ -95,15 +91,6 @@ function firstNonEmpty(...values: (string | undefined | null)[]): string | null 
 	return null;
 }
 
-function renderActiveRepoContextPrompt(activeRepoContext: ActiveRepoContext | null): string {
-	if (!activeRepoContext) return "";
-	return prompt
-		.render(activeRepoContextTemplate, {
-			relativeRepoRoot: normalizePromptPath(activeRepoContext.relativeRepoRoot),
-		})
-		.trim();
-}
-
 function parseWmicTable(output: string, header: string): string | null {
 	const lines = output
 		.split("\n")
@@ -114,60 +101,21 @@ function parseWmicTable(output: string, header: string): string | null {
 }
 
 const SYSTEM_PROMPT_PREP_TIMEOUT_MS = 5000;
-/** Kept below prep timeout so timed-out probes can still write the null cache before fallback. */
-const GPU_PROBE_TIMEOUT_MS = SYSTEM_PROMPT_PREP_TIMEOUT_MS - 500;
-/** Drop stdout from a probe descendant that inherited the pipe after the probe exited. */
-const GPU_PROBE_STDOUT_DRAIN_MS = 250;
-
-async function runGpuProbe(cmd: string[]): Promise<string | null> {
-	try {
-		const proc = Bun.spawn({
-			cmd,
-			stdout: "pipe",
-			stderr: "ignore",
-			stdin: "ignore",
-			timeout: GPU_PROBE_TIMEOUT_MS,
-			// SIGKILL so a probe ignoring SIGTERM (PATH wrapper, wedged WMI) still
-			// dies at the deadline and lets getCachedGpu reach the null-cache write.
-			killSignal: "SIGKILL",
-		});
-		const stdoutReader = proc.stdout.getReader();
-		let stdout = "";
-		const decoder = new TextDecoder();
-		const stdoutDone = (async () => {
-			while (true) {
-				const chunk = await stdoutReader.read();
-				if (chunk.done) break;
-				stdout += decoder.decode(chunk.value, { stream: true });
-			}
-			stdout += decoder.decode();
-		})();
-		const exitCode = await proc.exited;
-		// Even on exit 0, a probe wrapper can leave a descendant holding stdout open.
-		// Bound the EOF wait so getCachedGpu cannot outlive the probe in either path;
-		// keep whatever bytes the reader already captured before cancelling.
-		const drained = await Promise.race([
-			stdoutDone.then(() => "ok" as const).catch(() => "err" as const),
-			Bun.sleep(GPU_PROBE_STDOUT_DRAIN_MS).then(() => "timeout" as const),
-		]);
-		if (drained !== "ok") {
-			await stdoutReader.cancel().catch(() => undefined);
-			await stdoutDone.catch(() => undefined);
-		}
-		return exitCode === 0 ? stdout : null;
-	} catch {
-		return null;
-	}
-}
 
 async function getGpuModel(): Promise<string | null> {
 	switch (process.platform) {
 		case "win32": {
-			const output = await runGpuProbe(["wmic", "path", "win32_VideoController", "get", "name"]);
+			const output = await $`wmic path win32_VideoController get name`
+				.quiet()
+				.text()
+				.catch(() => null);
 			return output ? parseWmicTable(output, "Name") : null;
 		}
 		case "linux": {
-			const output = await runGpuProbe(["lspci"]);
+			const output = await $`lspci`
+				.quiet()
+				.text()
+				.catch(() => null);
 			if (!output) return null;
 			const gpus: Array<{ name: string; priority: number }> = [];
 			for (const line of output.split("\n")) {
@@ -217,20 +165,20 @@ function getTerminalName(): string | undefined {
 	return term ?? undefined;
 }
 
-/** Cached GPU probe result. */
+/** Cached system info structure */
 interface GpuCache {
-	gpu: string | null;
+	gpu: string;
+}
+
+function getSystemInfoCachePath(): string {
+	return getGpuCachePath();
 }
 
 async function loadGpuCache(): Promise<GpuCache | null> {
 	try {
-		const cachePath = getGpuCachePath();
+		const cachePath = getSystemInfoCachePath();
 		const content = await Bun.file(cachePath).json();
-		if (content && typeof content === "object" && "gpu" in content) {
-			const gpu = content.gpu;
-			return { gpu: typeof gpu === "string" ? gpu : null };
-		}
-		return null;
+		return content as GpuCache;
 	} catch {
 		return null;
 	}
@@ -238,7 +186,7 @@ async function loadGpuCache(): Promise<GpuCache | null> {
 
 async function saveGpuCache(info: GpuCache): Promise<void> {
 	try {
-		const cachePath = getGpuCachePath();
+		const cachePath = getSystemInfoCachePath();
 		await Bun.write(cachePath, JSON.stringify(info, null, "\t"));
 	} catch {
 		// Silently ignore cache write failures
@@ -247,48 +195,25 @@ async function saveGpuCache(info: GpuCache): Promise<void> {
 
 async function getCachedGpu(): Promise<string | undefined> {
 	const cached = await logger.time("getCachedGpu:loadGpuCache", loadGpuCache);
-	if (cached) return cached.gpu ?? undefined;
+	if (cached) return cached.gpu;
 	const gpu = await logger.time("getCachedGpu:getGpuModel", getGpuModel);
-	await logger.time("getCachedGpu:saveGpuCache", saveGpuCache, { gpu });
+	if (gpu) {
+		await logger.time("getCachedGpu:saveGpuCache", saveGpuCache, { gpu });
+	}
 	return gpu ?? undefined;
 }
-
-async function getCpuModel(): Promise<string | undefined> {
-	if (process.platform !== "linux") return undefined;
+async function getEnvironmentInfo(): Promise<Array<{ label: string; value: string }>> {
+	const gpu = await getCachedGpu();
+	let cpuModel: string | undefined;
 	try {
-		const cpuInfo = await Bun.file("/proc/cpuinfo").text();
-		const match = /^model name\s*:\s*(.+)$/m.exec(cpuInfo);
-		return match?.[1]?.trim() || undefined;
-	} catch (error) {
-		if (!isEnoent(error)) {
-			logger.debug("Could not read Linux CPU model", { error: String(error) });
-		}
-		return undefined;
+		cpuModel = os.cpus()[0]?.model;
+	} catch {
+		cpuModel = undefined;
 	}
-}
-
-/**
- * Kernel identity for the workstation block. Prefers the uname build string
- * from `os.version()`, but Bun on macOS 15+ (Darwin 24/25) returns the literal
- * `"unknown"` when `uv_os_uname()`'s `version` field is empty — which surfaces
- * `Kernel: unknown` in the system prompt and makes the model misidentify the
- * host as Windows (#4141). Fall back to `<type> <release>` (uname -s + -r) so
- * macOS is always tagged as `Darwin <release>` and Linux keeps its build info.
- */
-function getKernelIdentity(): string {
-	const version = os.version()?.trim();
-	if (version && version.toLowerCase() !== "unknown") return version;
-	return `${os.type()} ${os.release()}`.trim();
-}
-
-function getEnvironmentInfo(
-	cpuModel: string | undefined,
-	gpu: string | undefined,
-): Array<{ label: string; value: string }> {
 	const entries: Array<{ label: string; value: string | undefined }> = [
 		{ label: "OS", value: `${os.platform()} ${os.release()}` },
 		{ label: "Distro", value: os.type() },
-		{ label: "Kernel", value: getKernelIdentity() },
+		{ label: "Kernel", value: os.version() },
 		{ label: "Arch", value: os.arch() },
 		{ label: "CPU", value: cpuModel },
 		{ label: "GPU", value: gpu },
@@ -403,8 +328,6 @@ export async function loadSystemPromptFiles(options: LoadContextFilesOptions = {
 	return userLevel?.content ?? null;
 }
 
-export const DEFAULT_SYSTEM_PROMPT_TOOL_NAMES = ["read", "bash", "edit", "write"] as const;
-
 export interface SystemPromptToolMetadata {
 	label: string;
 	description: string;
@@ -414,6 +337,8 @@ export interface SystemPromptToolMetadata {
 	parameters?: TSchema;
 	/** Illustrative examples rendered into the verbose inventory. */
 	examples?: readonly ToolExample[];
+	/** Queryable tool provenance rendered into the agent-facing inventory. */
+	origin?: ToolOrigin;
 }
 
 export function buildSystemPromptToolMetadata(
@@ -422,7 +347,7 @@ export function buildSystemPromptToolMetadata(
 ): Map<string, SystemPromptToolMetadata> {
 	return new Map(
 		Array.from(tools.entries(), ([name, tool]) => {
-			const toolRecord = tool as AgentTool & { label?: string; description?: string };
+			const toolRecord = tool as AgentTool & { label?: string; description?: string; origin?: ToolOrigin };
 			const override = overrides[name];
 			const wireName =
 				override?.wireName ??
@@ -436,6 +361,7 @@ export function buildSystemPromptToolMetadata(
 					parameters: toolRecord.parameters,
 					examples: toolRecord.examples,
 					wireName,
+					origin: override?.origin ?? toolRecord.origin,
 				},
 			] as const;
 		}),
@@ -445,21 +371,17 @@ export function buildSystemPromptToolMetadata(
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
-	/** Already-loaded custom system prompt text; bypasses path resolution. */
-	resolvedCustomPrompt?: string;
 	/** Tools to include in prompt. */
 	tools?: Map<string, SystemPromptToolMetadata>;
 	/** Tool names to include in prompt. */
 	toolNames?: string[];
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
-	/** Already-loaded append prompt text; bypasses path resolution. */
-	resolvedAppendSystemPrompt?: string;
-	/** Inline full tool descriptors in the system prompt. Default: false */
-	inlineToolDescriptors?: boolean;
+	/** Repeat full tool descriptions in system prompt. Default: false */
+	repeatToolDescriptions?: boolean;
 	/**
 	 * Whether provider-native tool calling is active (no owned/in-band syntax).
-	 * When true and `inlineToolDescriptors` is false, the inventory renders as a
+	 * When true and `repeatToolDescriptions` is false, the inventory renders as a
 	 * compact tool-name list; otherwise it renders full `# Tool:` sections. Default: true
 	 */
 	nativeTools?: boolean;
@@ -483,12 +405,8 @@ export interface BuildSystemPromptOptions {
 	eagerTasks?: boolean;
 	/** When true, the Eager Tasks section uses the hard MUST/ONLY wording (`task.eager: always`) rather than the softer `preferred` nudge. */
 	eagerTasksAlways?: boolean;
-	/** Whether `task.batch` is enabled; selects the centralized delegation guidance's call shape. */
+	/** Whether `task.batch` is enabled; gates batch-call guidance in the Eager Tasks section. */
 	taskBatch?: boolean;
-	/** Effective task concurrency limit displayed in centralized delegation guidance. Zero means unlimited. */
-	taskMaxConcurrency?: number;
-	/** Whether IRC-backed parallel coordination can be included in delegation policy. */
-	taskIrcEnabled?: boolean;
 	/** Rules with alwaysApply=true — their full content is injected into the prompt. */
 	alwaysApplyRules?: AlwaysApplyRule[];
 	/** Whether secret obfuscation is active. When true, explains the redaction format in the prompt. */
@@ -497,18 +415,10 @@ export interface BuildSystemPromptOptions {
 	workspaceTree?: WorkspaceTree | Promise<WorkspaceTree>;
 	/** Whether the local memory://root summary is active. */
 	memoryRootEnabled?: boolean;
-	/** Active model identifier (e.g. "anthropic/claude-opus-4") used by prompt policy and optionally surfaced. */
+	/** Active model identifier (e.g. "anthropic/claude-opus-4") surfaced to the agent. */
 	model?: string;
-	/** Whether to surface `model` in the workstation block. Model-specific prompt policy still uses it. Default: true. */
-	includeModelInPrompt?: boolean;
 	/** Personality preset rendered into the default system prompt. "none" omits the block. Default: "default" */
 	personality?: Personality;
-	/** Whether to include the workspace directory tree in the system prompt. Default: false */
-	includeWorkspaceTree?: boolean;
-	/** Whether Mermaid fenced blocks render as terminal ASCII diagrams. Default: true */
-	renderMermaid?: boolean;
-	/** Pre-resolved nested active repo context. Undefined resolves from cwd. */
-	activeRepoContext?: ActiveRepoContext | null;
 }
 
 /** Result of building provider-facing system prompt messages. */
@@ -525,11 +435,9 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 
 	const {
 		customPrompt,
-		resolvedCustomPrompt: providedResolvedCustomPrompt,
 		tools,
 		appendSystemPrompt,
-		inlineToolDescriptors: providedInlineToolDescriptors,
-		resolvedAppendSystemPrompt: providedResolvedAppendPrompt,
+		repeatToolDescriptions = false,
 		nativeTools = true,
 		skillsSettings,
 		toolNames: providedToolNames,
@@ -544,19 +452,12 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		eagerTasks = false,
 		eagerTasksAlways = false,
 		taskBatch = true,
-		taskMaxConcurrency = 0,
-		taskIrcEnabled = false,
 		secretsEnabled = false,
 		workspaceTree: providedWorkspaceTree,
 		memoryRootEnabled = false,
 		model,
-		includeModelInPrompt = true,
 		personality = "default",
-		includeWorkspaceTree = false,
-		renderMermaid = true,
-		activeRepoContext: providedActiveRepoContext,
 	} = options;
-	const inlineToolDescriptors = providedInlineToolDescriptors ?? false;
 	const resolvedCwd = cwd ?? getProjectDir();
 
 	const prepDefaults = {
@@ -572,15 +473,9 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 			totalLines: 0,
 			agentsMdFiles: [],
 		} satisfies WorkspaceTree,
-		activeRepoContext: null as ActiveRepoContext | null,
-		cpuModel: undefined as string | undefined,
-		gpu: undefined as string | undefined,
 	};
 
-	const { promise: deadline, resolve: fireDeadline } = Promise.withResolvers<"__timeout__">();
-	const deadlineTimer = setTimeout(() => fireDeadline("__timeout__"), SYSTEM_PROMPT_PREP_TIMEOUT_MS);
-	// Unref so a fast prep does not hold a one-shot CLI alive waiting for this timer.
-	deadlineTimer.unref();
+	const deadline = Bun.sleep(SYSTEM_PROMPT_PREP_TIMEOUT_MS).then(() => "__timeout__" as const);
 	const timedOut: string[] = [];
 	const failed: Array<{ name: string; error: unknown }> = [];
 
@@ -608,81 +503,48 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		return result.value;
 	}
 
-	// Caller-supplied `customPrompt` / `resolvedCustomPrompt` owns block 0; the
-	// secondary capability-path `SYSTEM.md` walk-up MUST NOT silently augment it,
-	// because that would defeat CLI precedence over project/user `SYSTEM.md`.
-	const callerControlsCustomPrompt =
-		(typeof providedResolvedCustomPrompt === "string" && providedResolvedCustomPrompt.length > 0) ||
-		(typeof customPrompt === "string" && customPrompt.length > 0);
-	const systemPromptCustomizationPromise: Promise<string | null> = callerControlsCustomPrompt
-		? Promise.resolve(null)
-		: logger.time("loadSystemPromptFiles", loadSystemPromptFiles, { cwd: resolvedCwd });
+	const systemPromptCustomizationPromise = logger.time("loadSystemPromptFiles", loadSystemPromptFiles, {
+		cwd: resolvedCwd,
+	});
 	const contextFilesPromise = providedContextFiles
 		? Promise.resolve(providedContextFiles)
 		: logger.time("loadProjectContextFiles", loadProjectContextFiles, { cwd: resolvedCwd });
 	const workspaceTreePromise =
 		providedWorkspaceTree !== undefined
 			? Promise.resolve(providedWorkspaceTree)
-			: includeWorkspaceTree
-				? logger.time("buildWorkspaceTree", () =>
-						buildWorkspaceTree(resolvedCwd, { timeoutMs: SYSTEM_PROMPT_PREP_TIMEOUT_MS }),
-					)
-				: Promise.resolve({
-						rootPath: resolvedCwd,
-						rendered: "",
-						truncated: false,
-						totalLines: 0,
-						agentsMdFiles: [],
-					});
+			: logger.time("buildWorkspaceTree", () =>
+					buildWorkspaceTree(resolvedCwd, { timeoutMs: SYSTEM_PROMPT_PREP_TIMEOUT_MS }),
+				);
 	const skillsPromise: Promise<Skill[]> =
 		providedSkills !== undefined
 			? Promise.resolve(providedSkills)
 			: skillsSettings?.enabled !== false
 				? loadSkills({ ...skillsSettings, cwd: resolvedCwd }).then(result => result.skills)
 				: Promise.resolve([]);
-	const activeRepoContextPromise =
-		providedActiveRepoContext !== undefined
-			? Promise.resolve(providedActiveRepoContext)
-			: logger.time("resolveActiveRepoContext", () => resolveActiveRepoContext(resolvedCwd));
-	const cpuModelPromise = logger.time("getCpuModel", getCpuModel);
-	const gpuPromise = logger.time("getCachedGpu", getCachedGpu);
 
-	const [
-		resolvedCustomPrompt,
-		resolvedAppendPrompt,
-		systemPromptCustomization,
-		contextFiles,
-		skills,
-		workspaceTree,
-		activeRepoContext,
-		cpuModel,
-		gpu,
-	] = await Promise.all([
-		withDeadline(
-			"customPrompt",
-			providedResolvedCustomPrompt !== undefined
-				? Promise.resolve(providedResolvedCustomPrompt)
-				: resolvePromptInput(customPrompt, "system prompt"),
-			prepDefaults.resolvedCustomPrompt,
-		),
-		withDeadline(
-			"appendSystemPrompt",
-			providedResolvedAppendPrompt !== undefined
-				? Promise.resolve(providedResolvedAppendPrompt)
-				: resolvePromptInput(appendSystemPrompt, "append system prompt"),
-			prepDefaults.resolvedAppendPrompt,
-		),
-		withDeadline("loadSystemPromptFiles", systemPromptCustomizationPromise, prepDefaults.systemPromptCustomization),
-		withDeadline("loadProjectContextFiles", contextFilesPromise, prepDefaults.contextFiles).then(
-			dedupeExactContextFiles,
-		),
-		withDeadline("loadSkills", skillsPromise, prepDefaults.skills),
-		withDeadline("buildWorkspaceTree", workspaceTreePromise, prepDefaults.workspaceTree),
-		withDeadline("resolveActiveRepoContext", activeRepoContextPromise, prepDefaults.activeRepoContext),
-		withDeadline("getCpuModel", cpuModelPromise, prepDefaults.cpuModel),
-		withDeadline("getCachedGpu", gpuPromise, prepDefaults.gpu),
-	]);
-	clearTimeout(deadlineTimer);
+	const [resolvedCustomPrompt, resolvedAppendPrompt, systemPromptCustomization, contextFiles, skills, workspaceTree] =
+		await Promise.all([
+			withDeadline(
+				"customPrompt",
+				resolvePromptInput(customPrompt, "system prompt"),
+				prepDefaults.resolvedCustomPrompt,
+			),
+			withDeadline(
+				"appendSystemPrompt",
+				resolvePromptInput(appendSystemPrompt, "append system prompt"),
+				prepDefaults.resolvedAppendPrompt,
+			),
+			withDeadline(
+				"loadSystemPromptFiles",
+				systemPromptCustomizationPromise,
+				prepDefaults.systemPromptCustomization,
+			),
+			withDeadline("loadProjectContextFiles", contextFilesPromise, prepDefaults.contextFiles).then(
+				dedupeExactContextFiles,
+			),
+			withDeadline("loadSkills", skillsPromise, prepDefaults.skills),
+			withDeadline("buildWorkspaceTree", workspaceTreePromise, prepDefaults.workspaceTree),
+		]);
 	const agentsMdFiles = Array.from(new Set(workspaceTree.agentsMdFiles)).sort().slice(0, AGENTS_MD_LIMIT);
 
 	if (timedOut.length > 0) {
@@ -705,62 +567,67 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		}
 	}
 
-	const date = formatLocalCalendarDate();
+	const date = new Date().toISOString().slice(0, 10);
 	const dateTime = date;
-	const promptCwd = shortenPath(normalizePromptPath(resolvedCwd));
-	const activeRepoContextPrompt = renderActiveRepoContextPrompt(activeRepoContext);
+	const promptCwd = shortenPath(resolvedCwd.replace(/\\/g, "/"));
 
-	// Build tool metadata for system prompt rendering.
-	// Priority: explicit list > tools map > conservative SDK fallback.
+	// Build tool metadata for system prompt rendering
+	// Priority: explicit list > tools map > defaults
+	// Default includes both bash and python; actual availability determined by settings in createTools
 	let toolNames = providedToolNames;
 	if (!toolNames) {
-		toolNames = tools ? Array.from(tools.keys()) : [...DEFAULT_SYSTEM_PROMPT_TOOL_NAMES];
+		if (tools) {
+			// Tools map provided
+			toolNames = Array.from(tools.keys());
+		} else {
+			// Use defaults
+			toolNames = ["read", "bash", "eval", "edit", "write"]; // TODO: Why?
+		}
 	}
 
 	// Build tool descriptions for system prompt rendering.
 	const toolPromptNames = new Map<string, string>(toolNames.map(name => [name, tools?.get(name)?.wireName ?? name]));
 	const toolRefs = Object.fromEntries(toolPromptNames.entries());
-	const toolInfo = toolNames.map(name => ({
-		name: toolPromptNames.get(name) ?? name,
-		internalName: name,
-		label: tools?.get(name)?.label ?? "",
-		description: tools?.get(name)?.description ?? "",
-	}));
-	const inventoryTools = toolNames.map(name => {
+	const toolInfo = toolNames.map(name => {
 		const meta = tools?.get(name);
 		return {
 			name: toolPromptNames.get(name) ?? name,
+			internalName: name,
+			label: meta?.label ?? "",
 			description: meta?.description ?? "",
+			originTag: meta?.origin ? compactToolOriginTag(meta.origin, shortenPath) : "",
+		};
+	});
+	const inventoryTools = toolNames.map(name => {
+		const meta = tools?.get(name);
+		const originTag = meta?.origin ? compactToolOriginTag(meta.origin, shortenPath) : "";
+		return {
+			name: toolPromptNames.get(name) ?? name,
+			description: originTag ? `${meta?.description ?? ""}\n\nOrigin: (${originTag})` : (meta?.description ?? ""),
 			parameters: meta?.parameters ?? ({ type: "object" } as TSchema),
 			examples: meta?.examples,
 		};
 	});
-	// List mode shows a compact tool-name list; it only applies when descriptors
-	// stay in provider-native tool schemas AND native tool calling is active.
-	// Otherwise render full `# Tool:` sections inline in the system prompt.
-	const toolListMode = !inlineToolDescriptors && nativeTools;
+	// List mode shows a compact tool-name list; it only applies when descriptions
+	// are not repeated AND native tool calling is active (the model already has the
+	// schemas). Otherwise render full `# Tool:` sections.
+	const toolListMode = !repeatToolDescriptions && nativeTools;
 	const toolInventory = toolListMode ? "" : renderToolInventory(inventoryTools, model ?? "");
 
 	// Filter skills for the rendered system prompt:
 	// - require the `read` tool so the model can actually fetch skill content;
 	// - drop skills with frontmatter `hide: true` (still loadable via skill:// and /skill:<name>).
-	const hasRead = toolNames.includes("read");
+	const hasRead = tools?.has("read");
 	const filteredSkills = hasRead ? skills.filter(skill => skill.hide !== true) : [];
 
 	const effectiveSystemPromptCustomization = dedupePromptSource(systemPromptCustomization, [
 		resolvedCustomPrompt,
 		resolvedAppendPrompt,
 	]);
-	const contextPromptSources = contextFiles.map(file => file.content);
-	const promptSources = [
-		effectiveSystemPromptCustomization,
-		resolvedCustomPrompt,
-		resolvedAppendPrompt,
-		...contextPromptSources,
-	];
+	const promptSources = [effectiveSystemPromptCustomization, resolvedCustomPrompt, resolvedAppendPrompt];
 	const injectedAlwaysApplyRules = dedupeAlwaysApplyRules(alwaysApplyRules, promptSources);
 
-	const environment = getEnvironmentInfo(cpuModel, gpu);
+	const environment = await logger.time("getEnvironmentInfo", getEnvironmentInfo);
 	const data = {
 		systemPromptCustomization: effectiveSystemPromptCustomization,
 		customPrompt: resolvedCustomPrompt,
@@ -768,7 +635,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		tools: toolNames,
 		toolInfo,
 		toolInventory,
-		inlineToolDescriptors,
+		repeatToolDescriptions,
 		toolListMode,
 		toolRefs,
 		environment,
@@ -781,8 +648,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		date,
 		dateTime,
 		cwd: promptCwd,
-		model: includeModelInPrompt ? (model ?? "") : "",
-		useCodexTaskPrompt: usesCodexTaskPrompt(model),
+		model: model ?? "",
 		personality: personality === "none" ? "" : PERSONALITY_SPECS[personality].trim(),
 		intentTracing: !!intentField,
 		intentField: intentField ?? "",
@@ -792,26 +658,15 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		eagerTasks,
 		eagerTasksAlways,
 		taskBatch,
-		MAX_CONCURRENCY: normalizeConcurrencyLimit(taskMaxConcurrency),
-		taskIrcEnabled,
 		secretsEnabled,
 		hasMemoryRoot: memoryRootEnabled,
 		hasObsidian: hasObsidian(),
-		includeWorkspaceTree,
-		renderMermaid,
 	};
 	const rendered = prompt.render(resolvedCustomPrompt ? customSystemPromptTemplate : systemPromptTemplate, data);
 	const systemPrompt = [rendered];
-	// Custom prompt templates already render context files and append text; the
-	// project footer still carries environment, cwd, workspace, and dir-context.
-	const projectPrompt = prompt
-		.render(projectPromptTemplate, resolvedCustomPrompt ? { ...data, contextFiles: [], appendPrompt: "" } : data)
-		.trim();
+	const projectPrompt = resolvedCustomPrompt ? "" : prompt.render(projectPromptTemplate, data).trim();
 	if (projectPrompt) {
 		systemPrompt.push(projectPrompt);
-	}
-	if (activeRepoContextPrompt) {
-		systemPrompt.push(activeRepoContextPrompt);
 	}
 
 	return { systemPrompt };

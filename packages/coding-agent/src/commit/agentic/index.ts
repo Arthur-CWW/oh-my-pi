@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { $env, getProjectDir, isEnoent, prompt } from "@oh-my-pi/pi-utils";
+import { appendCommitTrailers, resolveCommitAttribution } from "../../commit/attribution";
 import { applyChangelogProposals } from "../../commit/changelog";
 import { detectChangelogBoundaries } from "../../commit/changelog/detect";
 import { parseUnreleasedSection } from "../../commit/changelog/parse";
@@ -13,7 +14,6 @@ import { discoverAuthStorage, discoverContextFiles } from "../../sdk";
 import * as git from "../../utils/git";
 import { type ExistingChangelogEntries, runCommitAgentSession } from "./agent";
 import { generateFallbackProposal } from "./fallback";
-import { assignLockFilesToPlan } from "./lock-files";
 import splitConfirmPrompt from "./prompts/split-confirm.md" with { type: "text" };
 import type { CommitAgentState, CommitProposal, HunkSelector, SplitCommitPlan } from "./state";
 import { computeDependencyOrder } from "./topo-sort";
@@ -45,7 +45,7 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 	const primaryModelPromise = resolvePrimaryModel(args.model, settings, modelRegistry);
 	const [primaryModelResult, stagedFiles] = await Promise.all([primaryModelPromise, stagedFilesPromise]);
 	const { model: primaryModel, apiKey: primaryApiKey } = primaryModelResult;
-	process.stdout.write(`  └─ ${primaryModel.name}\n`);
+	process.stdout.write(`     ${primaryModel.name}\n`);
 
 	const { model: agentModel, thinkingLevel: agentThinkingLevel } = await resolveSmolModel(
 		settings,
@@ -72,10 +72,10 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 	if (!args.noChangelog) {
 		if (changelogTargets.length > 0) {
 			for (const path of changelogTargets) {
-				process.stdout.write(`  └─ ${path}\n`);
+				process.stdout.write(`     ${path}\n`);
 			}
 		} else {
-			process.stdout.write("  └─ (none found)\n");
+			process.stdout.write("     (none found)\n");
 		}
 	}
 
@@ -83,10 +83,10 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 	const agentsMdFiles = contextFiles.filter(file => file.path.endsWith("AGENTS.md"));
 	if (agentsMdFiles.length > 0) {
 		for (const file of agentsMdFiles) {
-			process.stdout.write(`  └─ ${file.path}\n`);
+			process.stdout.write(`     ${file.path}\n`);
 		}
 	} else {
-		process.stdout.write("  └─ (none found)\n");
+		process.stdout.write("     (none found)\n");
 	}
 	const forceFallback = $env.PI_COMMIT_TEST_FALLBACK?.toLowerCase() === "true";
 	if (forceFallback) {
@@ -171,16 +171,16 @@ export async function runAgenticCommit(args: CommitCommandArgs): Promise<void> {
 			proposals: commitState.changelogProposal.entries,
 			dryRun: args.dryRun,
 			onProgress: message => {
-				process.stdout.write(`  ├─ ${message}\n`);
+				process.stdout.write(`     ${message}\n`);
 			},
 		});
 		updatedChangelogFiles = updated.map(filePath => path.relative(cwd, filePath));
 		if (updated.length > 0) {
 			for (const filePath of updated) {
-				process.stdout.write(`  └─ ${filePath}\n`);
+				process.stdout.write(`     ${filePath}\n`);
 			}
 		} else {
-			process.stdout.write("  └─ (no changes)\n");
+			process.stdout.write("     (no changes)\n");
 		}
 	}
 
@@ -212,7 +212,7 @@ async function runSingleCommit(proposal: CommitProposal, ctx: CommitExecutionCon
 		process.stdout.write(`${commitMessage}\n`);
 		return;
 	}
-	await git.commit(ctx.cwd, commitMessage);
+	await git.commit(ctx.cwd, appendCommitTrailers(commitMessage, await resolveCommitAttribution(ctx.cwd)));
 	process.stdout.write("Commit created.\n");
 	if (ctx.push) {
 		await git.push(ctx.cwd);
@@ -231,7 +231,6 @@ async function runSplitCommit(
 		appendFilesToLastCommit(plan, ctx.additionalFiles);
 	}
 	const stagedFiles = await git.diff.changedFiles(ctx.cwd, { cached: true });
-	assignLockFilesToPlan(plan, stagedFiles);
 	const plannedFiles = new Set(plan.commits.flatMap(commit => commit.changes.map(change => change.path)));
 	const missingFiles = stagedFiles.filter(file => !plannedFiles.has(file));
 	if (missingFiles.length > 0) {
@@ -268,7 +267,7 @@ async function runSplitCommit(
 		throw new Error(order.error);
 	}
 
-	const stagedDiff = await git.diff(ctx.cwd, { cached: true, binary: true });
+	const stagedDiff = await git.diff(ctx.cwd, { cached: true });
 	await git.stage.reset(ctx.cwd);
 	for (const commitIndex of order) {
 		const commit = plan.commits[commitIndex];
@@ -280,7 +279,7 @@ async function runSplitCommit(
 			issueRefs: commit.issueRefs,
 		};
 		const message = formatCommitMessage(analysis, commit.summary);
-		await git.commit(ctx.cwd, message);
+		await git.commit(ctx.cwd, appendCommitTrailers(message, await resolveCommitAttribution(ctx.cwd)));
 		await git.stage.reset(ctx.cwd);
 	}
 	process.stdout.write("Split commits created.\n");

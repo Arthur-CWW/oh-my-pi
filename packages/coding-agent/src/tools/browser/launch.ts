@@ -19,6 +19,12 @@ import stealthHardwareScript from "../puppeteer/11_stealth_hardware.txt" with { 
 import stealthCodecsScript from "../puppeteer/12_stealth_codecs.txt" with { type: "text" };
 import stealthWorkerScript from "../puppeteer/13_stealth_worker.txt" with { type: "text" };
 import { ToolError } from "../tool-errors";
+import {
+	prepareOwnedBrowserProfile,
+	recordOwnedBrowserPid,
+	removeOwnedBrowserProfile,
+	type OwnedBrowserProfile,
+} from "./process-ownership";
 
 export const DEFAULT_VIEWPORT = { width: 1365, height: 768, deviceScaleFactor: 1.25 };
 
@@ -29,46 +35,11 @@ export const DEFAULT_VIEWPORT = { width: 1365, height: 768, deviceScaleFactor: 1
  * connection dropped, etc.).
  */
 export const BROWSER_PROTOCOL_TIMEOUT_MS = 60_000;
-const ENABLE_AUTOMATION_FLAG = "--enable-automation";
-// Automation-tell launch flags that puppeteer-core adds by default. We suppress
-// them via `ignoreDefaultArgs` (the supported escape hatch) to mirror xxxx's
-// chromiumSwitches patch. `--enable-automation` is the loudest: it normally sets
-// navigator.webdriver=true and shows the "controlled by automated software" infobar.
-// Edge is the launch-stability exception: it can exit before CDP opens when this
-// default flag is stripped, so Edge keeps Puppeteer's flag while our explicit
-// `--disable-blink-features=AutomationControlled` launch arg still handles
-// navigator.webdriver.
-// `ignoreDefaultArgs` does exact-string matching, so each entry must be a flag that
-// puppeteer emits verbatim. The default `--disable-features=...` string can't be
-// matched this way; it is neutralized in the puppeteer-core patch (ChromeLauncher).
 const STEALTH_IGNORE_DEFAULT_ARGS = [
-	ENABLE_AUTOMATION_FLAG,
 	"--disable-extensions",
 	"--disable-default-apps",
 	"--disable-component-extensions-with-background-pages",
-	"--disable-popup-blocking",
-	"--disable-client-side-phishing-detection",
-	"--allow-pre-commit-input",
-	"--disable-ipc-flooding-protection",
-	"--metrics-recording-only",
 ];
-
-function isMicrosoftEdgeExecutable(executablePath: string | undefined): boolean {
-	if (!executablePath) return false;
-	const normalizedPath = executablePath.replaceAll("\\", "/").toLowerCase();
-	const executableName = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
-	return (
-		executableName === "msedge.exe" ||
-		executableName === "microsoft edge" ||
-		executableName.startsWith("microsoft-edge")
-	);
-}
-
-function stealthIgnoreDefaultArgs(executablePath: string | undefined): string[] {
-	if (!isMicrosoftEdgeExecutable(executablePath)) return [...STEALTH_IGNORE_DEFAULT_ARGS];
-	return STEALTH_IGNORE_DEFAULT_ARGS.filter(arg => arg !== ENABLE_AUTOMATION_FLAG);
-}
-
 const STEALTH_ACCEPT_LANGUAGE = "en-US,en";
 
 const USER_AGENT_TARGET_TIMEOUT_MS = 5_000;
@@ -273,10 +244,19 @@ function resolveSystemChromium(): string | undefined {
 
 export interface LaunchHeadlessOptions {
 	headless: boolean;
+	sessionId: string;
 	viewport?: { width: number; height: number; deviceScaleFactor?: number };
+	maxOwnedPerSession?: number;
+	maxOwnedGlobal?: number;
 }
 
-export async function launchHeadlessBrowser(opts: LaunchHeadlessOptions): Promise<Browser> {
+export interface HeadlessBrowserLaunch {
+	browser: Browser;
+	ownership: OwnedBrowserProfile;
+	pid?: number;
+}
+
+export async function launchHeadlessBrowser(opts: LaunchHeadlessOptions): Promise<HeadlessBrowserLaunch> {
 	const vp = opts.viewport ?? DEFAULT_VIEWPORT;
 	const initialViewport = {
 		width: vp.width,
@@ -304,15 +284,27 @@ export async function launchHeadlessBrowser(opts: LaunchHeadlessOptions): Promis
 	if (ignoreCert === "true" || ignoreCert === "1" || ignoreCert === "yes" || ignoreCert === "on") {
 		launchArgs.push("--ignore-certificate-errors");
 	}
-	const executablePath = await ensureChromiumExecutable();
-	return await puppeteer.launch({
-		headless: opts.headless,
-		defaultViewport: opts.headless ? initialViewport : null,
-		executablePath,
-		args: launchArgs,
-		ignoreDefaultArgs: stealthIgnoreDefaultArgs(executablePath),
-		protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
+	const ownership = await prepareOwnedBrowserProfile(opts.sessionId, {
+		maxOwnedPerSession: opts.maxOwnedPerSession,
+		maxOwnedGlobal: opts.maxOwnedGlobal,
 	});
+	try {
+		const browser = await puppeteer.launch({
+			headless: opts.headless,
+			defaultViewport: opts.headless ? initialViewport : null,
+			executablePath: await ensureChromiumExecutable(),
+			userDataDir: ownership.profileDir,
+			args: launchArgs,
+			ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULT_ARGS],
+			protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
+		});
+		const pid = browser.process()?.pid;
+		await recordOwnedBrowserPid(ownership, pid ?? null);
+		return { browser, ownership, ...(pid === undefined ? {} : { pid }) };
+	} catch (error) {
+		await removeOwnedBrowserProfile(ownership);
+		throw error;
+	}
 }
 
 export async function applyViewport(
@@ -345,11 +337,9 @@ export interface UserAgentOverride {
 	userAgentMetadata: {
 		brands: Array<{ brand: string; version: string }>;
 		fullVersion: string;
-		fullVersionList: Array<{ brand: string; version: string }>;
 		platform: string;
 		platformVersion: string;
 		architecture: string;
-		bitness: string;
 		model: string;
 		mobile: boolean;
 	};
@@ -409,26 +399,6 @@ function patchSourceUrl(page: Page): void {
 	};
 }
 
-async function resolveMacOsProductVersion(): Promise<string> {
-	if (os.platform() !== "darwin") return "";
-	try {
-		const plist = await Bun.file("/System/Library/CoreServices/SystemVersion.plist").text();
-		return plist.match(/<key>ProductVersion<\/key>\s*<string>([^<]+)<\/string>/)?.[1] ?? "";
-	} catch {
-		return "";
-	}
-}
-
-function resolveHostArchitecture(): string {
-	if (os.arch() === "arm64") return "arm";
-	if (os.arch().includes("64")) return "x86";
-	return "";
-}
-
-function resolveHostBitness(): string {
-	return os.arch().includes("64") ? "64" : "";
-}
-
 async function resolveUserAgentOverride(page: Page): Promise<UserAgentOverride> {
 	const rawUserAgent = await page.browser().userAgent();
 	let userAgent = rawUserAgent.replace("HeadlessChrome/", "Chrome/");
@@ -437,24 +407,32 @@ async function resolveUserAgentOverride(page: Page): Promise<UserAgentOverride> 
 	}
 
 	const uaVersionMatch = userAgent.match(/Chrome\/([\d|.]+)/);
-	const browserVersionMatch = (await page.browser().version()).match(/\/([\d|.]+)/);
-	const legacyVersion = uaVersionMatch?.[1] ?? browserVersionMatch?.[1] ?? "0";
-	const fullVersion = browserVersionMatch?.[1] ?? legacyVersion;
-	const majorVersion = Number.parseInt(legacyVersion.split(".")[0] ?? "0", 10) || 0;
+	const fallbackVersionMatch = uaVersionMatch ?? (await page.browser().version()).match(/\/([\d|.]+)/);
+	const uaVersion = fallbackVersionMatch?.[1] ?? "0";
+	const majorVersion = Number.parseInt(uaVersion.split(".")[0] ?? "0", 10) || 0;
 	const isAndroid = userAgent.includes("Android");
-	const isMac = userAgent.includes("Mac OS X");
-	const isWindows = userAgent.includes("Windows");
-	const platform = isMac ? "MacIntel" : isAndroid ? "Android" : userAgent.includes("Linux") ? "Linux" : "Win32";
-	const platformFull = isMac ? "macOS" : isAndroid ? "Android" : userAgent.includes("Linux") ? "Linux" : "Windows";
-	const platformVersion = isMac
-		? await resolveMacOsProductVersion()
+	const platform = userAgent.includes("Mac OS X")
+		? "MacIntel"
+		: isAndroid
+			? "Android"
+			: userAgent.includes("Linux")
+				? "Linux"
+				: "Win32";
+	const platformFull = userAgent.includes("Mac OS X")
+		? "Mac OS X"
+		: isAndroid
+			? "Android"
+			: userAgent.includes("Linux")
+				? "Linux"
+				: "Windows";
+	const platformVersion = userAgent.includes("Mac OS X ")
+		? (userAgent.match(/Mac OS X ([^)]+)/)?.[1] ?? "")
 		: userAgent.includes("Android ")
 			? (userAgent.match(/Android ([^;]+)/)?.[1] ?? "")
-			: isWindows
-				? (userAgent.match(/Windows NT ([\d.]+)/)?.[1] ?? "")
+			: userAgent.includes("Windows ")
+				? (userAgent.match(/Windows .*?([\d|.]+);?/)?.[1] ?? "")
 				: "";
-	const architecture = isAndroid ? "" : resolveHostArchitecture();
-	const bitness = isAndroid ? "" : resolveHostBitness();
+	const architecture = isAndroid ? "" : "x86";
 	const model = isAndroid ? (userAgent.match(/Android.*?;\s([^)]+)/)?.[1] ?? "") : "";
 
 	const brandOrders = [
@@ -472,10 +450,6 @@ async function resolveUserAgentOverride(page: Page): Promise<UserAgentOverride> 
 	brands[order[0]!] = { brand: greaseyBrand, version: "99" };
 	brands[order[1]!] = { brand: "Chromium", version: String(majorVersion) };
 	brands[order[2]!] = { brand: "Google Chrome", version: String(majorVersion) };
-	const fullVersionList = brands.map(({ brand }) => ({
-		brand,
-		version: brand === greaseyBrand ? "99.0.0.0" : fullVersion,
-	}));
 
 	return {
 		userAgent,
@@ -483,12 +457,10 @@ async function resolveUserAgentOverride(page: Page): Promise<UserAgentOverride> 
 		acceptLanguage: STEALTH_ACCEPT_LANGUAGE,
 		userAgentMetadata: {
 			brands,
-			fullVersion,
-			fullVersionList,
+			fullVersion: uaVersion,
 			platform: platformFull,
 			platformVersion,
 			architecture,
-			bitness,
 			model,
 			mobile: isAndroid,
 		},
@@ -634,29 +606,15 @@ function buildStealthInjectionScript(scripts: readonly string[] = STEALTH_PATCH_
 		.join(";\n");
 
 	return `(() => {
-				const Page_Function_toString = Function.prototype.toString;
-				const Page_FunctionToStringDescriptor = Object.getOwnPropertyDescriptor(Function.prototype, "toString");
-				const Page_Proxy = Proxy;
-				const Page_WeakMap = WeakMap;
-				const Page_WeakMap_get = Page_WeakMap.prototype.get;
-				const Page_WeakMap_set = Page_WeakMap.prototype.set;
-				// Native function cache - captured before any tampering.
-				// A same-origin iframe yields natives uncontaminated by page-level
-				// tampering, but at document-start (when this preload runs) there is
-				// no documentElement to attach it to. In that case the page itself
-				// hasn't executed yet, so window's own natives are still pristine —
-				// fall back to window instead of bailing, otherwise none of the
-				// fingerprint patches below would ever run.
-				let iframe = null;
+				// Native function cache - captured before any tampering
+				const iframe = document.createElement("iframe");
+				iframe.style.display = "none";
 				const container = document.head ?? document.documentElement;
-				if (container) {
-					iframe = document.createElement("iframe");
-					iframe.style.display = "none";
-					container.appendChild(iframe);
-					if (!iframe.contentWindow) iframe = null;
-				}
+				if (!container) return;
+				container.appendChild(iframe);
 				try {
-					const nativeWindow = iframe ? iframe.contentWindow : window;
+					const nativeWindow = iframe.contentWindow;
+					if (!nativeWindow) return;
 
 					// Cache pristine native functions
 					const Function_toString = nativeWindow.Function.prototype.toString;
@@ -680,54 +638,12 @@ function buildStealthInjectionScript(scripts: readonly string[] = STEALTH_PATCH_
 					const Promise_resolve = nativeWindow.Promise.resolve.bind(nativeWindow.Promise);
 					const Window_Blob = nativeWindow.Blob;
 					const Window_Proxy = nativeWindow.Proxy;
-					const Reflect_get = nativeWindow.Reflect.get;
-					const Reflect_set = nativeWindow.Reflect.set;
-					const Reflect_apply = nativeWindow.Reflect.apply;
-					const Reflect_construct = nativeWindow.Reflect.construct;
-					const Reflect_defineProperty = nativeWindow.Reflect.defineProperty;
-					const Reflect_deleteProperty = nativeWindow.Reflect.deleteProperty;
-					const Reflect_getOwnPropertyDescriptor = nativeWindow.Reflect.getOwnPropertyDescriptor;
-					const Reflect_getPrototypeOf = nativeWindow.Reflect.getPrototypeOf;
-					const Reflect_has = nativeWindow.Reflect.has;
-					const Reflect_isExtensible = nativeWindow.Reflect.isExtensible;
-					const Reflect_ownKeys = nativeWindow.Reflect.ownKeys;
-					const Reflect_preventExtensions = nativeWindow.Reflect.preventExtensions;
-					const Reflect_setPrototypeOf = nativeWindow.Reflect.setPrototypeOf;
 					const Intl_DateTimeFormat = nativeWindow.Intl.DateTimeFormat;
 					const Date_constructor = nativeWindow.Date;
 
-					const nativeFunctionSources = new Page_WeakMap();
-					const makeNativeString = (name) => "function " + (name || "") + "() { [native code] }";
-					const registerNativeSource = (fn, source) => {
-						if (typeof fn === "function") Reflect_apply(Page_WeakMap_set, nativeFunctionSources, [fn, source]);
-						return fn;
-					};
-					const patchToString = (fn, name) => registerNativeSource(fn, makeNativeString(name));
-					if (${scripts.length > 0 ? "true" : "false"}) {
-						const functionToStringProxy = new Page_Proxy(Page_Function_toString, {
-							apply(target, thisArg, args) {
-								const source = Reflect_apply(Page_WeakMap_get, nativeFunctionSources, [thisArg]);
-								if (source) return source;
-								return Reflect_apply(target, thisArg, args || []);
-							},
-							get(target, key, receiver) {
-								return Reflect_get(target, key, receiver);
-							},
-						});
-						registerNativeSource(functionToStringProxy, makeNativeString("toString"));
-						Object_defineProperty(Function.prototype, "toString", {
-							...(Page_FunctionToStringDescriptor || {
-								writable: true,
-								configurable: true,
-								enumerable: false,
-							}),
-							value: functionToStringProxy,
-						});
-					}
-
 					${joint}
 				} finally {
-					if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+					if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
 				}})();`;
 }
 
@@ -758,10 +674,6 @@ export async function applyStealthPatches(
 	await configureUserAgentTargets(browser, targetState);
 	state.browserSession = targetState.browserSession;
 	await injectStealthScripts(page);
-}
-
-export function stealthIgnoreDefaultArgsForTest(executablePath: string | undefined): string[] {
-	return stealthIgnoreDefaultArgs(executablePath);
 }
 
 export function targetSupportsUserAgentOverrideForTest(target: Target): boolean {

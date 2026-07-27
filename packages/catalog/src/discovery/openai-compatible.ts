@@ -1,29 +1,7 @@
-import { type } from "arktype";
+import { z } from "zod/v4";
 import type { Api, FetchImpl, ModelSpec, Provider } from "../types";
-import { discoveryFetch } from "../utils";
 
 const MODELS_PATH = "/models";
-
-/**
- * Uses a cancellable timer rather than the native abort-timeout helper so
- * successful fast discovery requests do not leave armed timeout signals for
- * concurrent GC to trip over later.
- */
-async function withOpenAICompatibleDiscoveryTimeout<T>(
-	timeoutMs: number,
-	run: (signal: AbortSignal) => Promise<T>,
-): Promise<T> {
-	const controller = new AbortController();
-	const timer = setTimeout(
-		() => controller.abort(new DOMException("The operation timed out.", "TimeoutError")),
-		timeoutMs,
-	);
-	try {
-		return await run(controller.signal);
-	} finally {
-		clearTimeout(timer);
-	}
-}
 
 /**
  * Minimal OpenAI-style model entry shape consumed by discovery.
@@ -54,23 +32,28 @@ export interface OpenAICompatibleModelsEnvelope {
 	[key: string]: unknown;
 }
 
-const openAICompatibleModelRecordSchema = type({
-	id: "string >= 1",
-	"name?": "string | null",
-	"object?": "unknown",
-	"owned_by?": "unknown",
-});
+const openAICompatibleModelRecordSchema = z
+	.object({
+		id: z.string().min(1),
+		name: z.string().optional().nullable(),
+		object: z.unknown().optional(),
+		owned_by: z.unknown().optional(),
+	})
+	.loose();
 
-const openAICompatibleModelsEnvelopeSchema = type({
-	"data?": "unknown",
-	"models?": "unknown",
-	"result?": "unknown",
-	"items?": "unknown",
-});
+const openAICompatibleModelsEnvelopeSchema = z
+	.object({
+		data: z.unknown().optional(),
+		models: z.unknown().optional(),
+		result: z.unknown().optional(),
+		items: z.unknown().optional(),
+	})
+	.loose();
 
-const openAICompatibleModelsPayloadSchema = type("unknown[]").or(openAICompatibleModelsEnvelopeSchema);
+const openAICompatibleModelsPayloadSchema = z.union([z.array(z.unknown()), openAICompatibleModelsEnvelopeSchema]);
 
-type ParsedOpenAICompatibleModelRecord = typeof openAICompatibleModelRecordSchema.infer;
+type ParsedOpenAICompatibleModelRecord = z.infer<typeof openAICompatibleModelRecordSchema>;
+
 /**
  * Context passed to custom OpenAI-compatible model mappers.
  */
@@ -94,10 +77,8 @@ export interface FetchOpenAICompatibleModelsOptions<TApi extends Api> {
 	apiKey?: string;
 	/** Additional request headers. */
 	headers?: Record<string, string>;
-	/** Optional AbortSignal for request cancellation; caller owns its lifecycle. */
+	/** Optional AbortSignal for request cancellation. */
 	signal?: AbortSignal;
-	/** Optional cancellable request timeout used when `signal` is omitted. */
-	timeoutMs?: number;
 	/** Optional fetch implementation override for testing/custom runtimes. */
 	fetch?: FetchImpl;
 	/**
@@ -138,36 +119,26 @@ export async function fetchOpenAICompatibleModels<TApi extends Api>(
 		requestHeaders.Authorization = `Bearer ${options.apiKey}`;
 	}
 
-	const fetchImpl = discoveryFetch(options.fetch);
-	const fetchPayload = async (signal?: AbortSignal): Promise<unknown | null> => {
-		let response: Response;
-		try {
-			response = await fetchImpl(`${baseUrl}${MODELS_PATH}`, {
-				method: "GET",
-				headers: requestHeaders,
-				signal,
-			});
-		} catch {
-			return null;
-		}
+	const fetchImpl = options.fetch ?? globalThis.fetch;
+	let response: Response;
+	try {
+		response = await fetchImpl(`${baseUrl}${MODELS_PATH}`, {
+			method: "GET",
+			headers: requestHeaders,
+			signal: options.signal,
+		});
+	} catch {
+		return null;
+	}
 
-		if (!response.ok) {
-			return null;
-		}
+	if (!response.ok) {
+		return null;
+	}
 
-		try {
-			return await response.json();
-		} catch {
-			return null;
-		}
-	};
-	const payload =
-		options.signal !== undefined
-			? await fetchPayload(options.signal)
-			: options.timeoutMs !== undefined
-				? await withOpenAICompatibleDiscoveryTimeout(options.timeoutMs, fetchPayload)
-				: await fetchPayload();
-	if (payload === null) {
+	let payload: unknown;
+	try {
+		payload = await response.json();
+	} catch {
 		return null;
 	}
 
@@ -225,17 +196,22 @@ function extractModelEntries(payload: unknown): ParsedOpenAICompatibleModelRecor
 }
 
 function extractModelEntriesFromNode(node: unknown): ParsedOpenAICompatibleModelRecord[] | null {
-	const parsedPayload = openAICompatibleModelsPayloadSchema(node);
-	if (parsedPayload instanceof type.errors) {
+	const parsedPayload = openAICompatibleModelsPayloadSchema.safeParse(node);
+	if (!parsedPayload.success) {
 		return null;
 	}
-	if (Array.isArray(parsedPayload)) {
-		const parsedEntries = parsedPayload
-			.map(entry => openAICompatibleModelRecordSchema(entry))
-			.flatMap(entry => (entry instanceof type.errors ? [] : [entry]));
+	if (Array.isArray(parsedPayload.data)) {
+		const parsedEntries = parsedPayload.data
+			.map(entry => openAICompatibleModelRecordSchema.safeParse(entry))
+			.flatMap(entry => (entry.success ? [entry.data] : []));
 		return parsedEntries;
 	}
-	for (const candidate of [parsedPayload.data, parsedPayload.models, parsedPayload.result, parsedPayload.items]) {
+	for (const candidate of [
+		parsedPayload.data.data,
+		parsedPayload.data.models,
+		parsedPayload.data.result,
+		parsedPayload.data.items,
+	]) {
 		if (candidate === undefined) {
 			continue;
 		}

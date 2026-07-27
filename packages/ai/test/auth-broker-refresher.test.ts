@@ -2,10 +2,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { AuthBrokerRefresher } from "@oh-my-pi/pi-ai/auth-broker";
+import { AuthBrokerRefresher, AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import * as oauthUtils from "@oh-my-pi/pi-ai/registry/oauth";
-import { removeWithRetries } from "../../utils/src/temp";
 
 const ANTHROPIC_ENV = ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"] as const;
 const savedEnv: Partial<Record<(typeof ANTHROPIC_ENV)[number], string | undefined>> = {};
@@ -28,7 +26,7 @@ describe("AuthBrokerRefresher", () => {
 		vi.restoreAllMocks();
 		storage?.close();
 		store?.close();
-		await removeWithRetries(tempDir);
+		await fs.rm(tempDir, { recursive: true, force: true });
 		for (const key of ANTHROPIC_ENV) {
 			if (savedEnv[key] === undefined) delete process.env[key];
 			else process.env[key] = savedEnv[key];
@@ -123,7 +121,7 @@ describe("AuthBrokerRefresher", () => {
 		expect(storage.exportSnapshot().credentials).toHaveLength(0);
 	});
 
-	test("keeps credentials on transient failures (timeout/network)", async () => {
+	test("keeps credentials on a direct ENOTFOUND refresh failure", async () => {
 		const now = 1_700_000_000_000;
 		store!.saveOAuth("anthropic", {
 			access: "old",
@@ -131,7 +129,10 @@ describe("AuthBrokerRefresher", () => {
 			expires: now + 60_000,
 			accountId: "a",
 		});
-		vi.spyOn(oauthUtils, "refreshOAuthToken").mockRejectedValue(new Error("fetch failed: ECONNREFUSED"));
+		const networkFailure = Object.assign(new Error("getaddrinfo ENOTFOUND api.anthropic.com"), {
+			code: "ENOTFOUND",
+		});
+		vi.spyOn(oauthUtils, "refreshOAuthToken").mockRejectedValue(networkFailure);
 
 		storage = new AuthStorage(store!);
 		const disableEvents: string[] = [];
@@ -150,37 +151,28 @@ describe("AuthBrokerRefresher", () => {
 		expect(storage.exportSnapshot().credentials).toHaveLength(1);
 	});
 
-	test("does not disable a credential a peer rotated during the refresh (CAS)", async () => {
+	test("keeps credentials on a 401 wrapping a transient network cause", async () => {
 		const now = 1_700_000_000_000;
 		store!.saveOAuth("anthropic", {
-			access: "stale",
-			refresh: "stale-refresh",
+			access: "old",
+			refresh: "old-refresh",
 			expires: now + 60_000,
 			accountId: "a",
 		});
+		const networkCause = Object.assign(new Error("getaddrinfo ENOTFOUND api.anthropic.com"), {
+			code: "ENOTFOUND",
+		});
+		const fetchFailure = new Error("fetch failed", { cause: networkCause });
+		vi.spyOn(oauthUtils, "refreshOAuthToken").mockRejectedValue(
+			new Error("HTTP 401 unauthorized", { cause: fetchFailure }),
+		);
+
 		storage = new AuthStorage(store!);
 		const disableEvents: string[] = [];
 		storage.onCredentialDisabled(event => {
 			disableEvents.push(event.disabledCause);
 		});
 		await storage.reload();
-		const id = store!.listAuthCredentials("anthropic")[0]!.id;
-
-		// Our refresh fails with a dead-grant error, but a peer (another process /
-		// a fresh login) rotates the persisted row to a new token first. The
-		// CAS disable must see the row no longer holds the token we attempted and
-		// leave the freshly-rotated credential intact instead of clobbering it.
-		vi.spyOn(oauthUtils, "refreshOAuthToken").mockImplementation(async () => {
-			store!.updateAuthCredential(id, {
-				type: "oauth",
-				access: "fresh-from-peer",
-				refresh: "fresh-refresh-from-peer",
-				expires: now + 60 * 60_000,
-				accountId: "a",
-			});
-			throw new Error('HTTP 400 invalid_grant {"error":"invalid_grant"}');
-		});
-
 		const refresher = new AuthBrokerRefresher({
 			storage,
 			refreshSkewMs: 5 * 60_000,
@@ -189,11 +181,6 @@ describe("AuthBrokerRefresher", () => {
 		await refresher.tick();
 
 		expect(disableEvents).toHaveLength(0);
-		const rows = store!.listAuthCredentials("anthropic");
-		expect(rows).toHaveLength(1);
-		expect(rows[0]?.credential.type).toBe("oauth");
-		if (rows[0]?.credential.type === "oauth") {
-			expect(rows[0].credential.refresh).toBe("fresh-refresh-from-peer");
-		}
+		expect(storage.exportSnapshot().credentials).toHaveLength(1);
 	});
 });

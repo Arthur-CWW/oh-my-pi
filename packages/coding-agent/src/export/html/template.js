@@ -11,6 +11,14 @@
       //    a promise resolving to the session JSON (fetched + decrypted).
       // The entire app lives in bootSession(); its body keeps the original
       // one-level indentation to avoid a whole-file reindent.
+      async function decodeGzipBase64(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+        return JSON.parse(await new Response(stream).text());
+      }
+
       function bootSession(data) {
       const { header, entries, leafId: defaultLeafId, systemPrompt, tools, subSessions } = data;
 
@@ -102,14 +110,15 @@
           }
         }
 
-        // Sort children by timestamp
-        function sortChildren(node) {
+        // Sort iteratively: a long linear transcript can exceed the JS call stack.
+        const pending = [...roots];
+        while (pending.length > 0) {
+          const node = pending.pop();
           node.children.sort((a, b) =>
             new Date(a.entry.timestamp).getTime() - new Date(b.entry.timestamp).getTime()
           );
-          node.children.forEach(sortChildren);
+          for (const child of node.children) pending.push(child);
         }
-        roots.forEach(sortChildren);
 
         return roots;
       }
@@ -138,13 +147,11 @@
         const path = [];
         let current = byId.get(targetId);
         while (current) {
-          path.unshift(current);
-          // Stop if no parent or self-referencing (root)
-          if (!current.parentId || current.parentId === current.id) {
-            break;
-          }
+          path.push(current);
+          if (!current.parentId || current.parentId === current.id) break;
           current = byId.get(current.parentId);
         }
+        path.reverse();
         return path;
       }
 
@@ -153,21 +160,20 @@
        * Returns array of { node, indent, showConnector, isLast, gutters, isVirtualRootChild, multipleRoots }.
        * Matches tree-selector.ts logic exactly.
        */
+      const collapsedBranchIds = new Set();
       function flattenTree(roots, activePathIds) {
         const result = [];
         const multipleRoots = roots.length > 1;
 
-        // Mark which subtrees contain the active leaf
+        // An active path already contains exactly the ancestors whose
+        // subtrees contain the leaf; avoid recursive walks on huge sessions.
         const containsActive = new Map();
-        function markActive(node) {
-          let has = activePathIds.has(node.entry.id);
-          for (const child of node.children) {
-            if (markActive(child)) has = true;
-          }
-          containsActive.set(node, has);
-          return has;
+        const markStack = [...roots];
+        while (markStack.length > 0) {
+          const node = markStack.pop();
+          containsActive.set(node, activePathIds.has(node.entry.id));
+          for (const child of node.children) markStack.push(child);
         }
-        roots.forEach(markActive);
 
         // Stack: [node, indent, justBranched, showConnector, isLast, gutters, isVirtualRootChild]
         const stack = [];
@@ -186,7 +192,7 @@
 
           result.push({ node, indent, showConnector, isLast, gutters, isVirtualRootChild, multipleRoots });
 
-          const children = node.children;
+          const children = collapsedBranchIds.has(node.entry.id) ? [] : node.children;
           const multipleChildren = children.length > 1;
 
           // Order children (active branch first)
@@ -226,48 +232,17 @@
       }
 
       /**
-       * Build ASCII prefix string for tree node.
+       * Build the indentation-only prefix string for a tree node.
+       *
+       * Hierarchy reads from depth alone — a fixed 3-cell indent per visible
+       * level, no tree/gutter glyphs — matching the terminal tree-selector's
+       * borderless rendering so rebuilt transcripts copy cleanly. The width
+       * (displayIndent * 3) is unchanged, preserving the original layout math.
        */
       function buildTreePrefix(flatNode) {
-        const { indent, showConnector, isLast, gutters, isVirtualRootChild, multipleRoots } = flatNode;
+        const { indent, multipleRoots } = flatNode;
         const displayIndent = multipleRoots ? Math.max(0, indent - 1) : indent;
-        const connector = showConnector && !isVirtualRootChild ? (isLast ? '└─ ' : '├─ ') : '';
-        const connectorPosition = connector ? displayIndent - 1 : -1;
-        // Chain rows (no connector of their own) under a last-sibling (`└─`)
-        // branch stay anchored by a vertical drawn one level right of the
-        // suppressed gutter — below the branch head's content — never in the
-        // `└─` corner column itself (#2298, #2325). Chains under `├─` heads
-        // are already anchored by the sibling line (`show: true` gutter).
-        const nearestGutter = !connector ? gutters[gutters.length - 1] : undefined;
-        const chainAnchorLevel = nearestGutter && !nearestGutter.show ? nearestGutter.position + 1 : -1;
-
-        const totalChars = displayIndent * 3;
-        const prefixChars = [];
-        for (let i = 0; i < totalChars; i++) {
-          const level = Math.floor(i / 3);
-          const posInLevel = i % 3;
-
-          const gutter = gutters.find(g => g.position === level);
-          if (gutter) {
-            // Standard tree semantics: `│` only while more siblings continue
-            // below (`show`), space below a `└─`.
-            prefixChars.push(posInLevel === 0 && gutter.show ? '│' : ' ');
-          } else if (level === chainAnchorLevel) {
-            // Chain anchor for rows under a `└─` branch head.
-            prefixChars.push(posInLevel === 0 ? '│' : ' ');
-          } else if (connector && level === connectorPosition) {
-            if (posInLevel === 0) {
-              prefixChars.push(isLast ? '└' : '├');
-            } else if (posInLevel === 1) {
-              prefixChars.push('─');
-            } else {
-              prefixChars.push(' ');
-            }
-          } else {
-            prefixChars.push(' ');
-          }
-        }
-        return prefixChars.join('');
+        return ' '.repeat(displayIndent * 3);
       }
 
       // ============================================================
@@ -433,12 +408,10 @@
             const cmd = rawCmd.replace(/[\n\t]/g, ' ').trim().slice(0, 50);
             return `[bash: ${cmd}${rawCmd.length > 50 ? '...' : ''}]`;
           }
-          case 'search':
           case 'grep':
             return `[grep: /${args.pattern || ''}/ in ${shortenPath(String((args.paths || [args.path || '.']).join(', ')))}]`;
           case 'find':
-          case 'glob':
-            return `[glob: ${shortenPath(String((args.paths || [args.pattern || '.']).join(', ')))}]`;
+            return `[find: ${shortenPath(String((args.paths || [args.pattern || '.']).join(', ')))}]`;
           case 'ls':
             return `[ls: ${shortenPath(String(args.path || '.'))}]`;
           default: {
@@ -550,6 +523,7 @@
       let currentLeafId = leafId;
       let currentTargetId = urlTargetId || leafId;
       let treeRendered = false;
+      const collapsedSubSessionKeys = new Set();
 
       function renderTree() {
         const tree = buildTree();
@@ -581,6 +555,19 @@
             const marker = document.createElement('span');
             marker.className = 'tree-marker';
             marker.textContent = isOnPath ? '•' : ' ';
+            if (flatNode.node.children.length > 1) {
+              const disclosure = document.createElement('span');
+              disclosure.className = 'tree-disclosure';
+              disclosure.textContent = collapsedBranchIds.has(entry.id) ? '▸' : '▾';
+              disclosure.title = 'Collapse branch';
+              disclosure.addEventListener('click', event => {
+                event.stopPropagation();
+                if (collapsedBranchIds.has(entry.id)) collapsedBranchIds.delete(entry.id);
+                else collapsedBranchIds.add(entry.id);
+                forceTreeRerender();
+              });
+              div.appendChild(disclosure);
+            }
 
             const content = document.createElement('span');
             content.className = 'tree-content';
@@ -592,6 +579,39 @@
             div.addEventListener('click', () => navigateTo(entry.id));
 
             container.appendChild(div);
+          }
+          if (subSessions && Object.keys(subSessions).length > 0) {
+            const heading = document.createElement('div');
+            heading.className = 'tree-section-heading';
+            heading.textContent = 'Subagents';
+            container.appendChild(heading);
+            for (const key of Object.keys(subSessions).sort()) {
+              const sub = subSessions[key];
+              if (sub.parent && collapsedSubSessionKeys.has(sub.parent)) continue;
+              const row = document.createElement('div');
+              row.className = 'tree-node subsession-tree-node';
+              row.style.paddingLeft = `${12 + key.split('/').length * 14}px`;
+              row.dataset.subsession = key;
+              const hasChildren = Object.values(subSessions).some(candidate => candidate.parent === key);
+              if (hasChildren) {
+                const disclosure = document.createElement('span');
+                disclosure.className = 'tree-disclosure';
+                disclosure.textContent = collapsedSubSessionKeys.has(key) ? '▸' : '▾';
+                disclosure.addEventListener('click', event => {
+                  event.stopPropagation();
+                  if (collapsedSubSessionKeys.has(key)) collapsedSubSessionKeys.delete(key);
+                  else collapsedSubSessionKeys.add(key);
+                  forceTreeRerender();
+                });
+                row.appendChild(disclosure);
+              }
+              const content = document.createElement('span');
+              content.className = 'tree-content';
+              content.textContent = `${sub.agentId} · ${sub.entryCount ?? sub.entries.length} entries`;
+              row.appendChild(content);
+              row.addEventListener('click', () => openSubSession(key));
+              container.appendChild(row);
+            }
           }
 
           treeRendered = true;
@@ -789,10 +809,11 @@
         if (!current && entryList.length > 0) current = entryList[entryList.length - 1];
         const path = [];
         while (current) {
-          path.unshift(current);
+          path.push(current);
           if (!current.parentId || current.parentId === current.id) break;
           current = map.get(current.parentId);
         }
+        path.reverse();
         return path;
       }
 
@@ -892,11 +913,16 @@
         el.querySelector('.subsession-panel').focus();
       }
 
-      function openSubSession(key) {
+      async function openSubSession(key) {
         if (!subSessions || !subSessions[key]) return;
-        if (overlayStack.length === 0) {
-          subOverlayLastFocus = document.activeElement;
+        const sub = subSessions[key];
+        if (sub.payloadId && sub.entries.length === 0) {
+          const payload = document.getElementById(sub.payloadId);
+          if (!payload) return;
+          sub.entries = await decodeGzipBase64(payload.textContent);
+          payload.remove();
         }
+        if (overlayStack.length === 0) subOverlayLastFocus = document.activeElement;
         overlayStack.push(key);
         renderSubOverlay();
       }
@@ -1236,7 +1262,7 @@
         let html = `
           <div class="header">
             <h1>Session: ${escapeHtml(header?.id || 'unknown')}</h1>
-            <div class="help-bar">T toggle thinking · O toggle tools</div>
+            <div class="help-bar">Ctrl+T toggle thinking · Ctrl+O toggle tools</div>
             <div class="header-info">
               <div class="info-item"><span class="info-label">Date:</span><span class="info-value">${header?.timestamp ? new Date(header.timestamp).toLocaleString() : 'unknown'}</span></div>
               <div class="info-item"><span class="info-label">Models:</span><span class="info-value">${globalStats.models.join(', ') || 'unknown'}</span></div>
@@ -1297,57 +1323,92 @@
         return node;
       }
 
+      const INITIAL_RENDER_COUNT = 12;
+      const RENDER_CHUNK_SIZE = 24;
+      let visiblePath = [];
+      let renderedPathIndex = 0;
+      let renderGeneration = 0;
+
+      function appendPathChunk(limit = RENDER_CHUNK_SIZE) {
+        const messagesEl = document.getElementById('messages');
+        const fragment = document.createDocumentFragment();
+        const end = Math.min(visiblePath.length, renderedPathIndex + limit);
+        while (renderedPathIndex < end) {
+          const entry = visiblePath[renderedPathIndex++];
+          const node = renderEntryToNode(entry, mainSctx);
+          if (node) fragment.appendChild(node);
+        }
+        messagesEl.appendChild(fragment);
+        return renderedPathIndex < visiblePath.length;
+      }
+
+      function renderThroughEntry(entryId) {
+        const index = visiblePath.findIndex(entry => entry.id === entryId);
+        if (index < 0) return;
+        while (renderedPathIndex <= index) appendPathChunk(RENDER_CHUNK_SIZE);
+      }
+
+      function scheduleRemainingPath(generation) {
+        const work = deadline => {
+          if (generation !== renderGeneration) return;
+          const hasMore = appendPathChunk(RENDER_CHUNK_SIZE);
+          if (!hasMore) return;
+          if (deadline && deadline.timeRemaining() > 5) {
+            work(deadline);
+          } else if ('requestIdleCallback' in window) {
+            requestIdleCallback(work, { timeout: 120 });
+          } else {
+            setTimeout(() => work(null), 16);
+          }
+        };
+        if ('requestIdleCallback' in window) {
+          requestIdleCallback(work, { timeout: 120 });
+        } else {
+          setTimeout(() => work(null), 16);
+        }
+      }
+
+      function scrollToRenderedEntry(entryId, highlight) {
+        renderThroughEntry(entryId);
+        const targetEl = document.getElementById(`entry-${entryId}`);
+        if (!targetEl) return;
+        targetEl.scrollIntoView({ block: 'center' });
+        if (highlight) {
+          targetEl.classList.add('highlight');
+          setTimeout(() => targetEl.classList.remove('highlight'), 2000);
+        }
+      }
+
       function navigateTo(targetId, scrollMode = 'target', scrollToEntryId = null) {
         currentLeafId = targetId;
         currentTargetId = scrollToEntryId || targetId;
-        const path = getPath(targetId);
+        visiblePath = getPath(targetId);
+        renderedPathIndex = 0;
+        const generation = ++renderGeneration;
 
         renderTree();
-
         document.getElementById('header-container').innerHTML = renderHeader();
+        document.getElementById('messages').innerHTML = '';
+        appendPathChunk(INITIAL_RENDER_COUNT);
 
-        // Build messages using cached DOM nodes
-        const messagesEl = document.getElementById('messages');
-        const fragment = document.createDocumentFragment();
-
-        for (const entry of path) {
-          const node = renderEntryToNode(entry, mainSctx);
-          if (node) {
-            fragment.appendChild(node);
-          }
-        }
-
-        messagesEl.innerHTML = '';
-        messagesEl.appendChild(fragment);
-
-        // Attach click handlers for copy-link buttons
-        messagesEl.querySelectorAll('.copy-link-btn').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const entryId = btn.dataset.entryId;
-            const shareUrl = buildShareUrl(entryId);
-            copyToClipboard(shareUrl, btn);
-          });
-        });
-
-        // Use setTimeout(0) to ensure DOM is fully laid out before scrolling
-        setTimeout(() => {
+        requestAnimationFrame(() => {
           const content = document.getElementById('content');
           if (scrollMode === 'bottom') {
+            while (appendPathChunk(RENDER_CHUNK_SIZE)) {}
             content.scrollTop = content.scrollHeight;
           } else if (scrollMode === 'target') {
-            const scrollTargetId = scrollToEntryId || targetId;
-            const targetEl = document.getElementById(`entry-${scrollTargetId}`);
-            if (targetEl) {
-              targetEl.scrollIntoView({ block: 'center' });
-              if (scrollToEntryId) {
-                targetEl.classList.add('highlight');
-                setTimeout(() => targetEl.classList.remove('highlight'), 2000);
-              }
-            }
+            scrollToRenderedEntry(scrollToEntryId || targetId, Boolean(scrollToEntryId));
           }
-        }, 0);
+          scheduleRemainingPath(generation);
+        });
       }
+
+      document.getElementById('messages').addEventListener('click', e => {
+        const btn = e.target.closest('.copy-link-btn');
+        if (!btn) return;
+        e.stopPropagation();
+        copyToClipboard(buildShareUrl(btn.dataset.entryId), btn);
+      });
 
       // ============================================================
       // INITIALIZATION
@@ -1540,14 +1601,11 @@
         overlay.classList.remove('open');
         hamburger.style.display = '';
       };
-
       overlay.addEventListener('click', closeSidebar);
       document.getElementById('sidebar-close').addEventListener('click', closeSidebar);
 
-      // Toggle states
       let thinkingExpanded = false;
       let toolOutputsExpanded = false;
-
       const toggleThinking = () => {
         thinkingExpanded = !thinkingExpanded;
         document.querySelectorAll('.thinking-text').forEach(el => {
@@ -1557,42 +1615,123 @@
           el.style.display = thinkingExpanded ? 'none' : 'block';
         });
       };
-
       const toggleToolOutputs = () => {
         toolOutputsExpanded = !toolOutputsExpanded;
-        document.querySelectorAll('.tool-output.expandable').forEach(el => {
-          el.classList.toggle('expanded', toolOutputsExpanded);
-        });
-        document.querySelectorAll('.compaction').forEach(el => {
+        document.querySelectorAll('.tool-output.expandable, .compaction').forEach(el => {
           el.classList.toggle('expanded', toolOutputsExpanded);
         });
       };
 
-      // Keyboard shortcuts
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          if (overlayStack.length > 0) {
-            e.preventDefault();
-            popSubSession();
-            return;
-          }
-          searchInput.value = '';
-          searchQuery = '';
-          navigateTo(leafId, 'bottom');
+      let lastGAt = 0;
+      let searchMatches = [];
+      let searchMatchIndex = -1;
+      const toggleViewerTree = () => document.body.classList.toggle('viewer-tree-hidden');
+
+      function showKeyboardHelp() {
+        let help = document.getElementById('keyboard-help');
+        if (!help) {
+          help = document.createElement('div');
+          help.id = 'keyboard-help';
+          help.className = 'keyboard-help';
+          help.innerHTML = `<div class="keyboard-help-panel" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+            <h2>Keyboard shortcuts</h2><dl>
+            <dt>j / k</dt><dd>scroll down / up</dd><dt>gg / G</dt><dd>top / bottom</dd>
+            <dt>Ctrl-d / Ctrl-u</dt><dd>half page down / up</dd><dt>/</dt><dd>search transcript</dd>
+            <dt>n / N</dt><dd>next / previous result</dd><dt>[ / ]</dt><dd>previous / next message</dd>
+            <dt>t</dt><dd>toggle tree</dd><dt>?</dt><dd>toggle this help</dd><dt>Esc</dt><dd>close / clear</dd>
+            </dl></div>`;
+          help.addEventListener('click', () => help.classList.remove('open'));
+          document.body.appendChild(help);
         }
-        if (e.key === 't' || e.key === 'T' || e.key === 'o' || e.key === 'O') {
-          // Skip when typing in the sidebar search (or any other editable target)
-          // so the chord can't fire on a user's letter input. Avoid Ctrl/Cmd-based
-          // chords entirely — every major browser reserves Ctrl+T (new tab) and
-          // Ctrl+O (open file), so the shortcut would never reach the page.
-          const t = e.target;
-          const editable =
-            t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-          if (editable) return;
-          if (e.ctrlKey || e.metaKey || e.altKey) return;
+        help.classList.toggle('open');
+      }
+
+      function updateTranscriptSearch() {
+        const query = searchInput.value.trim().toLowerCase();
+        searchMatches = query ? visiblePath.filter(entry => getSearchableText(entry, labelMap.get(entry.id)).includes(query)) : [];
+        searchMatchIndex = searchMatches.length ? 0 : -1;
+        if (searchMatchIndex >= 0) scrollToRenderedEntry(searchMatches[0].id, true);
+      }
+
+      function moveSearchMatch(delta) {
+        if (!searchMatches.length) updateTranscriptSearch();
+        if (!searchMatches.length) return;
+        searchMatchIndex = (searchMatchIndex + delta + searchMatches.length) % searchMatches.length;
+        scrollToRenderedEntry(searchMatches[searchMatchIndex].id, true);
+      }
+
+      function moveMessage(delta) {
+        const index = visiblePath.findIndex(entry => entry.id === currentTargetId);
+        const next = Math.max(0, Math.min(visiblePath.length - 1, (index < 0 ? 0 : index) + delta));
+        const entry = visiblePath[next];
+        if (!entry) return;
+        currentTargetId = entry.id;
+        renderTree();
+        scrollToRenderedEntry(entry.id, true);
+      }
+
+      document.addEventListener('keydown', e => {
+        const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target.isContentEditable;
+        if (e.key === 'Escape') {
+          const help = document.getElementById('keyboard-help');
+          if (help?.classList.contains('open')) help.classList.remove('open');
+          else if (overlayStack.length > 0) popSubSession();
+          else {
+            searchInput.value = '';
+            searchQuery = '';
+            searchMatches = [];
+            forceTreeRerender();
+            searchInput.blur();
+          }
+          return;
+        }
+        if (typing) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            updateTranscriptSearch();
+          }
+          return;
+        }
+        const content = document.getElementById('content');
+        if (e.ctrlKey && e.key === 't') {
           e.preventDefault();
-          if (e.key === 't' || e.key === 'T') toggleThinking();
-          else toggleToolOutputs();
+          toggleThinking();
+        } else if (e.ctrlKey && e.key === 'o') {
+          e.preventDefault();
+          toggleToolOutputs();
+        } else if (e.key === '/') {
+          e.preventDefault();
+          searchInput.focus();
+          searchInput.select();
+        } else if (e.key === '?') {
+          e.preventDefault();
+          showKeyboardHelp();
+        } else if (e.key === 't') {
+          e.preventDefault();
+          toggleViewerTree();
+        } else if (e.key === 'j' || e.key === 'k') {
+          e.preventDefault();
+          content.scrollBy({ top: e.key === 'j' ? 72 : -72, behavior: 'smooth' });
+        } else if (e.ctrlKey && (e.key === 'd' || e.key === 'u')) {
+          e.preventDefault();
+          content.scrollBy({ top: (e.key === 'd' ? 1 : -1) * content.clientHeight / 2, behavior: 'smooth' });
+        } else if (e.key === 'G') {
+          e.preventDefault();
+          while (appendPathChunk(RENDER_CHUNK_SIZE)) {}
+          content.scrollTop = content.scrollHeight;
+        } else if (e.key === 'g') {
+          const now = performance.now();
+          if (now - lastGAt < 500) {
+            e.preventDefault();
+            content.scrollTop = 0;
+          }
+          lastGAt = now;
+        } else if (e.key === 'n' || e.key === 'N') {
+          e.preventDefault();
+          moveSearchMatch(e.key === 'n' ? 1 : -1);
+        } else if (e.key === '[' || e.key === ']') {
+          e.preventDefault();
+          moveMessage(e.key === ']' ? 1 : -1);
         }
       });
 
@@ -1623,12 +1762,8 @@
       if (pending && typeof pending.then === 'function') {
         pending.then(bootSession, showLoadError);
       } else {
-        const base64 = document.getElementById('session-data').textContent;
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-        bootSession(JSON.parse(new TextDecoder('utf-8').decode(bytes)));
+        decodeGzipBase64(document.getElementById('session-data').textContent)
+          .then(bootSession)
+          .catch(showLoadError);
       }
     })();

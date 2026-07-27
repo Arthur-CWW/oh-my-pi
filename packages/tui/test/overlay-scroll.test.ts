@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { type Component, CURSOR_MARKER, type Focusable, type OverlayFocusOwner, TUI } from "@oh-my-pi/pi-tui";
+import { describe, expect, it } from "bun:test";
+import { type Component, CURSOR_MARKER, type RenderScheduler, type RenderTimer, TUI } from "@oh-my-pi/pi-tui";
 import { VirtualTerminal } from "./virtual-terminal";
 
 class LineComponent implements Component {
@@ -64,54 +64,6 @@ class CursorOnlyComponent implements Component {
 	}
 }
 
-class FocusedMutableOverlay implements Component, Focusable {
-	focused = false;
-	#text: string;
-
-	constructor(text: string) {
-		this.#text = text;
-	}
-
-	setText(text: string): void {
-		this.#text = text;
-	}
-
-	invalidate(): void {
-		// No cached state
-	}
-
-	render(_width: number): string[] {
-		return [`${this.#text}${this.focused ? CURSOR_MARKER : ""}`];
-	}
-}
-
-class OverlayFocusDelegator implements Component, OverlayFocusOwner {
-	#text: string;
-
-	constructor(
-		text: string,
-		private readonly ownedFocusTarget: Component,
-	) {
-		this.#text = text;
-	}
-
-	setText(text: string): void {
-		this.#text = text;
-	}
-
-	ownsOverlayFocusTarget(component: Component): boolean {
-		return component === this.ownedFocusTarget;
-	}
-
-	invalidate(): void {
-		// No cached state
-	}
-
-	render(_width: number): string[] {
-		return [this.#text];
-	}
-}
-
 function buildRows(count: number): string[] {
 	return Array.from({ length: count }, (_v, i) => `row-${i}`);
 }
@@ -138,6 +90,54 @@ function longestBlankRun(lines: string[]): number {
 	}
 	return longest;
 }
+// Deterministic scheduler for resize bursts. The resize callback paints the
+// viewport synchronously; immediate callbacks are the positive/control signal
+// for any follow-up paints, while the active delayed callback is the settle.
+class OverlayResizeScheduler implements RenderScheduler {
+	#time = 0;
+	#immediates: (() => void)[] = [];
+	#renders = new Map<number, { callback: () => void; delayMs: number }>();
+	#nextId = 0;
+
+	now(): number {
+		this.#time += 20;
+		return this.#time;
+	}
+
+	scheduleImmediate(callback: () => void): void {
+		this.#immediates.push(callback);
+	}
+
+	scheduleRender(callback: () => void, delayMs: number): RenderTimer {
+		const id = this.#nextId++;
+		this.#renders.set(id, { callback, delayMs });
+		return {
+			cancel: () => {
+				this.#renders.delete(id);
+			},
+		};
+	}
+
+	async flushImmediates(term: VirtualTerminal): Promise<void> {
+		let rounds = 0;
+		while (this.#immediates.length > 0) {
+			if (++rounds > 100) throw new Error("immediates did not settle");
+			const batch = this.#immediates;
+			this.#immediates = [];
+			for (const callback of batch) callback();
+		}
+		await term.flush();
+	}
+
+	async flushDeferredSettle(term: VirtualTerminal): Promise<void> {
+		const settle = [...this.#renders.entries()].find(([, entry]) => entry.delayMs >= 100);
+		if (!settle) throw new Error("resize settle did not remain pending");
+		this.#renders.delete(settle[0]);
+		settle[1].callback();
+		await this.flushImmediates(term);
+	}
+}
+
 async function withEnv(name: string, value: string, run: () => Promise<void>): Promise<void> {
 	const previous = Bun.env[name];
 	Bun.env[name] = value;
@@ -168,25 +168,6 @@ async function settleResize(term: VirtualTerminal): Promise<void> {
 }
 
 describe("TUI overlays", () => {
-	let savedTerminalEnv: Record<string, string | undefined> = {};
-	beforeEach(() => {
-		// A resize on Warp takes the in-place path (no ED3), so neutralize the
-		// ambient terminal identity to keep the direct-terminal resize/scrollback
-		// assertions below deterministic on any dev machine.
-		for (const key of ["TERM_PROGRAM", "PI_TUI_RESIZE_IN_PLACE"]) {
-			savedTerminalEnv[key] = Bun.env[key];
-			delete Bun.env[key];
-		}
-	});
-	afterEach(() => {
-		for (const key in savedTerminalEnv) {
-			const value = savedTerminalEnv[key];
-			if (value === undefined) delete Bun.env[key];
-			else Bun.env[key] = value;
-		}
-		savedTerminalEnv = {};
-	});
-
 	it("does not scroll the terminal when an overlay is shown with a large historical working area", async () => {
 		const term = new VirtualTerminal(80, 24);
 		const tui = new TUI(term);
@@ -205,52 +186,6 @@ describe("TUI overlays", () => {
 
 		// The scroll buffer should stay small; we should not have printed hundreds/thousands of blank lines.
 		expect(term.getScrollBuffer().length).toBeLessThan(200);
-	});
-
-	it("keeps the native viewport anchored when an overlay repaint follows a focused cursor below the frame tail", async () => {
-		const term = new VirtualTerminal(24, 6, 100);
-		const tui = new TUI(term, true);
-		const base = new MutableContentComponent(buildRows(8));
-		const cursorOverlay = new FocusedMutableOverlay("overlay-cursor");
-		const statusOverlay = new OverlayFocusDelegator("status-before", cursorOverlay);
-		tui.addChild(base);
-
-		try {
-			tui.start();
-			await flushRender(term);
-
-			tui.showOverlay(cursorOverlay, { row: 5, col: 0, width: 16 });
-			tui.showOverlay(statusOverlay, { row: 0, col: 0, width: 16 });
-			tui.setFocus(cursorOverlay);
-			tui.requestRender();
-			await flushRender(term);
-
-			base.setLines(["base-0", "base-1"]);
-			tui.requestRender();
-			await flushRender(term);
-			expect(term.getCursor().row).toBe(5);
-
-			const before = term.getBufferPosition();
-			const beforeScrollBufferLength = term.getScrollBuffer().length;
-
-			statusOverlay.setText("status-after");
-			tui.requestRender();
-			await flushRender(term);
-
-			expect(term.getBufferPosition()).toEqual(before);
-			expect(term.getScrollBuffer()).toHaveLength(beforeScrollBufferLength);
-			expect(term.getViewport().map(line => line.trimEnd())).toEqual([
-				"status-after",
-				"base-1",
-				"",
-				"",
-				"",
-				"overlay-cursor",
-			]);
-			expect(term.getCursor().row).toBe(5);
-		} finally {
-			tui.stop();
-		}
 	});
 
 	it("clamps tall overlays without an explicit maxHeight to the available rows", async () => {
@@ -294,28 +229,6 @@ describe("TUI overlays", () => {
 		expect(maxVisibleOverlayIndex()).toBeLessThan(10 - marginBottom);
 
 		tui.stop();
-	});
-
-	it("preserves bottom-anchored overlay actions when clamped", async () => {
-		const term = new VirtualTerminal(80, 5);
-		const tui = new TUI(term);
-
-		tui.addChild(new LineComponent("base-", 1));
-
-		try {
-			tui.start();
-			await flushRender(term);
-
-			tui.showOverlay(new LineComponent("ov-", 10), { anchor: "bottom-center", width: "100%", maxHeight: "100%" });
-			await flushRender(term);
-
-			const viewport = term.getViewport().join("\n");
-			expect(viewport).toContain("ov-5");
-			expect(viewport).toContain("ov-9");
-			expect(viewport).not.toContain("ov-0");
-		} finally {
-			tui.stop();
-		}
 	});
 
 	it("clears stale viewport content on launch", async () => {
@@ -664,23 +577,25 @@ describe("TUI overlays", () => {
 
 	it("limits scrollback growth during resize oscillation with overflowing content", async () => {
 		const term = new VirtualTerminal(60, 10);
-		const tui = new TUI(term);
+		const scheduler = new OverlayResizeScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
 		const component = new MutableContentComponent(buildRows(160));
 		tui.addChild(component);
 		try {
 			tui.start();
-			await flushRender(term);
+			await scheduler.flushImmediates(term);
 			const before = term.getScrollBuffer().length;
 
 			for (let i = 0; i < 18; i++) {
 				component.setLines(buildRows(140 + (i % 6) * 8));
 				term.resize(i % 2 === 0 ? 59 : 60, i % 3 === 0 ? 11 : 10);
 				tui.requestRender();
-				await flushRender(term);
+				await term.flush();
 				const viewportRows = viewportRowNumbers(term);
 				expect(viewportRows.length).toBeGreaterThan(0);
 			}
 
+			await scheduler.flushDeferredSettle(term);
 			const scrollback = term.getScrollBuffer();
 			expect(scrollback.length - before).toBeLessThan(220);
 			expect(longestBlankRun(scrollback)).toBeLessThan(30);
@@ -768,22 +683,24 @@ describe("TUI overlays", () => {
 	});
 	it("stays stable with direct row-delta movement", async () => {
 		const term = new VirtualTerminal(50, 10);
-		const tui = new TUI(term);
+		const scheduler = new OverlayResizeScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
 		const component = new MutableContentComponent(buildRows(150));
 		tui.addChild(component);
 		try {
 			tui.start();
-			await flushRender(term);
+			await scheduler.flushImmediates(term);
 			const before = term.getScrollBuffer().length;
 
 			for (let i = 0; i < 18; i++) {
 				component.setLines(buildRows(120 + (i % 8) * 6));
 				term.resize(i % 2 === 0 ? 50 : 49, i % 3 === 0 ? 11 : 10);
 				tui.requestRender();
-				await flushRender(term);
+				await term.flush();
 				expect(viewportRowNumbers(term).length).toBeGreaterThan(0);
 			}
 
+			await scheduler.flushDeferredSettle(term);
 			const scrollback = term.getScrollBuffer();
 			expect(scrollback.length - before).toBeLessThan(260);
 			expect(longestBlankRun(scrollback)).toBeLessThan(40);

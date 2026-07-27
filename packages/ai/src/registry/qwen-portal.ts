@@ -1,4 +1,3 @@
-import * as AIError from "../error";
 import { validateOpenAICompatibleApiKey } from "./api-key-validation";
 import type { OAuthController, OAuthLoginCallbacks } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
@@ -9,7 +8,7 @@ const VALIDATION_MODEL = "coder-model";
 
 export async function loginQwenPortal(options: OAuthController): Promise<string> {
 	if (!options.onPrompt) {
-		throw new AIError.OnPromptRequiredError("Qwen Portal");
+		throw new Error("Qwen Portal login requires onPrompt callback");
 	}
 
 	options.onAuth?.({
@@ -23,12 +22,12 @@ export async function loginQwenPortal(options: OAuthController): Promise<string>
 	});
 
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 
 	const trimmed = token.trim();
 	if (!trimmed) {
-		throw new AIError.ApiKeyRequiredError("Qwen token/API key is required");
+		throw new Error("Qwen token/API key is required");
 	}
 
 	options.onProgress?.("Validating credentials...");

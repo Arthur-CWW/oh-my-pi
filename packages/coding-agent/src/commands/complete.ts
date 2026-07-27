@@ -9,24 +9,30 @@
  * doesn't pay for the full agent boot.
  */
 import { type GeneratedProvider, getBundledModels, getBundledProviders } from "@oh-my-pi/pi-catalog/models";
-import { Command } from "@oh-my-pi/pi-utils/cli";
+import { Effect } from "effect";
+import { Argument, Command } from "effect/unstable/cli";
 import { SessionManager } from "../session/session-manager";
 
-export default class Complete extends Command {
-	static hidden = true;
-	static strict = false;
-
-	async run(): Promise<void> {
-		const argv = this.argv.filter(token => token !== "--");
-		const kind = argv[0];
-		const prefix = argv.length > 1 ? argv[argv.length - 1] : "";
-		if (kind === "models") {
-			completeModels(prefix);
-		} else if (kind === "sessions") {
-			await completeSessions(prefix);
-		}
-	}
-}
+export default Command.make(
+	"__complete",
+	{
+		args: Argument.string("args").pipe(
+			Argument.withDescription("Completion kind followed by the current prefix"),
+			Argument.variadic(),
+		),
+	},
+	config =>
+		Effect.promise(async () => {
+			const argv = config.args.filter(token => token !== "--");
+			const kind = argv[0];
+			const prefix = argv.length > 1 ? (argv[argv.length - 1] ?? "") : "";
+			if (kind === "models") {
+				completeModels(prefix);
+			} else if (kind === "sessions") {
+				await completeSessions(prefix);
+			}
+		}),
+).pipe(Command.withHidden);
 
 /** Strip control chars that would corrupt the tab-separated line protocol. */
 function clean(text: string): string {

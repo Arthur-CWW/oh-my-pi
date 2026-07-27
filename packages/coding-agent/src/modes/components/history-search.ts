@@ -5,6 +5,7 @@ import {
 	Input,
 	matchesKey,
 	padding,
+	ScrollView,
 	Spacer,
 	Text,
 	truncateToWidth,
@@ -12,16 +13,15 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
 import {
-	matchesAppInterrupt,
 	matchesSelectDown,
 	matchesSelectPageDown,
 	matchesSelectPageUp,
 	matchesSelectUp,
+	matchesUiDismiss,
 } from "../../modes/utils/keybinding-matchers";
 import type { HistoryEntry, HistoryStorage } from "../../session/history-storage";
 import { DynamicBorder } from "./dynamic-border";
-import { rawKeyHint } from "./keybinding-hints";
-import { centeredWindow, contentRowWidth, renderScrollableList } from "./selector-helpers";
+import { keyHint, rawKeyHint } from "./keybinding-hints";
 
 /** Visible result rows; also the jump distance for PageUp/PageDown. */
 const MAX_VISIBLE = 10;
@@ -110,9 +110,14 @@ class HistoryResultsList implements Component {
 		const cursorSymbol = `${theme.nav.cursor} `;
 		const gutterWidth = visibleWidth(cursorSymbol);
 
-		const { startIndex, endIndex } = centeredWindow(this.#selectedIndex, this.#results.length, this.#maxVisible);
+		const startIndex = Math.max(
+			0,
+			Math.min(this.#selectedIndex - Math.floor(this.#maxVisible / 2), this.#results.length - this.#maxVisible),
+		);
+		const endIndex = Math.min(startIndex + this.#maxVisible, this.#results.length);
 
-		const rowWidth = contentRowWidth(width, this.#results.length, this.#maxVisible);
+		const overflow = this.#results.length > this.#maxVisible;
+		const rowWidth = Math.max(0, width - (overflow ? 1 : 0));
 		const rows: string[] = [];
 
 		for (let i = startIndex; i < endIndex; i++) {
@@ -143,7 +148,14 @@ class HistoryResultsList implements Component {
 			);
 		}
 
-		lines.push(...renderScrollableList(rows, { width, totalRows: this.#results.length, scrollOffset: startIndex }));
+		const sv = new ScrollView(rows, {
+			height: rows.length,
+			scrollbar: "auto",
+			totalRows: this.#results.length,
+			theme: { track: t => theme.fg("muted", t), thumb: t => theme.fg("accent", t) },
+		});
+		sv.setScrollOffset(startIndex);
+		lines.push(...sv.render(width));
 		return lines;
 	}
 }
@@ -171,15 +183,14 @@ export class HistorySearchComponent extends Container {
 				this.#onSelect(selected.prompt);
 			}
 		};
-		this.#searchInput.onEscape = () => {
-			this.#onCancel();
-		};
 
 		this.#resultsList = new HistoryResultsList();
 
 		const title = theme.bold(theme.fg("accent", `${theme.icon.rewind} Search History`));
 		const dot = theme.fg("dim", theme.sep.dot);
-		const hint = [rawKeyHint("↑↓", "navigate"), rawKeyHint("enter", "select"), rawKeyHint("esc", "cancel")].join(dot);
+		const hint = [rawKeyHint("↑↓", "navigate"), rawKeyHint("enter", "select"), keyHint("ui.dismiss", "cancel")].join(
+			dot,
+		);
 
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(title, 1, 0));
@@ -248,7 +259,7 @@ export class HistorySearchComponent extends Container {
 			return;
 		}
 
-		if (matchesAppInterrupt(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.#onCancel();
 			return;
 		}

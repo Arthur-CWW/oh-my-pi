@@ -64,7 +64,7 @@
 		"connectMode": "socket",
 		"languages": ["go"],
 		"fileTypes": [".go"],
-		"rootMarkers": ["go.mod", "go.sum", "go.work"],
+		"rootMarkers": ["go.mod", "go.sum"],
 		"acceptsDirectoryProgram": true,
 		"launchDefaults": {
 			"request": "launch",

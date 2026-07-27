@@ -2,14 +2,18 @@ import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallb
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { prompt } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import type { AsyncJob, AsyncJobManager } from "../async";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { shimmerEnabled, shimmerText } from "../modes/theme/shimmer";
 import type { Theme } from "../modes/theme/theme";
 import jobDescription from "../prompts/tools/job.md" with { type: "text" };
+import { isAgentJobOwned } from "../registry/agent-ref";
+import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import { type HotswapResult, hotswapAgentModel } from "../task/hotswap";
 import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../tui";
 import type { ToolSession } from "./index";
+import { resolveFallbackApproval } from "./job-fallback-approval";
 import {
 	formatBadge,
 	formatDuration,
@@ -23,13 +27,34 @@ import {
 } from "./render-utils";
 import { ToolError } from "./tool-errors";
 
-const jobSchema = type({
-	"poll?": type("string[]").describe("job ids to wait for; omit to wait on all running jobs"),
-	"cancel?": type("string[]").describe("job ids to cancel"),
-	"list?": type("boolean").describe("snapshot all jobs"),
+const jobSchema = z.object({
+	poll: z.array(z.string()).optional().describe("job ids to wait for; omit to wait on all running jobs"),
+	cancel: z.array(z.string()).optional().describe("job ids to cancel"),
+	interrupt: z.array(z.string()).optional().describe("job ids to interrupt without killing the agent"),
+	interruptReason: z.string().optional().describe("why the job is being interrupted"),
+	list: z.boolean().optional().describe("snapshot all jobs"),
+	fallbackApproval: z
+		.object({
+			id: z.string().describe("stable child id with a pending fallback proposal"),
+			action: z.enum(["wait", "approve", "choose", "abort"]),
+			timeoutMs: z.number().nonnegative().optional().describe("wait time before retrying the source model"),
+			model: z.string().optional().describe("explicit model selector for the choose action"),
+		})
+		.optional()
+		.describe("resolve a child fallback proposal without respawning it"),
+	setModel: z
+		.object({
+			id: z.string().describe("current Main session or stable descendant id to hot-swap"),
+			model: z.string().describe("model selector to apply, including optional :thinking suffix"),
+			reason: z.string().optional().describe("why the target agent is being swapped"),
+		})
+		.optional()
+		.describe(
+			"swap the current Main session or a live, parked, or historical descendant model; live targets switch at a safe boundary",
+		),
 });
 
-type JobParams = typeof jobSchema.infer;
+type JobParams = z.infer<typeof jobSchema>;
 
 const WAIT_DURATION_MS: Record<string, number> = {
 	"5s": 5_000,
@@ -51,9 +76,11 @@ interface JobSnapshot {
 	durationMs: number;
 	resultText?: string;
 	errorText?: string;
+	interrupted?: boolean;
 }
 
 type CancelStatus = "cancelled" | "not_found" | "already_completed";
+type InterruptStatus = "interrupted" | "not_found" | "not_running" | "isolated";
 
 interface CancelOutcome {
 	id: string;
@@ -61,9 +88,16 @@ interface CancelOutcome {
 	message: string;
 }
 
+interface InterruptOutcome {
+	id: string;
+	status: InterruptStatus;
+	message: string;
+}
+
 export interface JobToolDetails {
 	jobs: JobSnapshot[];
 	cancelled?: { id: string; status: CancelStatus }[];
+	interrupted?: { id: string; status: InterruptStatus }[];
 }
 
 /**
@@ -75,7 +109,7 @@ export interface JobToolDetails {
 export function isWaitingPollDetails(details: unknown): boolean {
 	const d = details as JobToolDetails | undefined;
 	if (!d || !Array.isArray(d.jobs) || d.jobs.length === 0) return false;
-	if (d.cancelled?.length) return false;
+	if (d.cancelled?.length || d.interrupted?.length) return false;
 	return d.jobs.every(job => job?.status === "running");
 }
 
@@ -83,7 +117,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	readonly name = "job";
 	readonly approval = "read" as const;
 	readonly label = "Job";
-	readonly summary = "Manage long-running background jobs (async bash/python)";
+	readonly summary = "Manage background jobs and hot-swap the current session or descendant models";
 	readonly description: string;
 	readonly parameters = jobSchema;
 	readonly strict = true;
@@ -94,13 +128,63 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	}
 
 	async execute(
-		_toolCallId: string,
+		toolCallId: string,
 		params: JobParams,
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<JobToolDetails>,
 		_context?: AgentToolContext,
 	): Promise<AgentToolResult<JobToolDetails>> {
 		const manager = this.session.asyncJobManager;
+
+		// Scope every visible operation to the calling agent. Tests / SDK
+		// consumers without an agent id see everything (legacy behavior).
+		const ownerId = this.session.getAgentId?.() ?? undefined;
+		const ownerFilter = ownerId ? { ownerId } : undefined;
+
+		if (params.fallbackApproval) {
+			if (
+				params.setModel ||
+				params.list ||
+				params.cancel?.length ||
+				params.interrupt?.length ||
+				params.poll?.length
+			) {
+				throw new ToolError(
+					"`fallbackApproval` cannot be combined with `setModel`, `list`, `poll`, `cancel`, or `interrupt`.",
+				);
+			}
+			return resolveFallbackApproval(ownerId, params.fallbackApproval);
+		}
+
+		if (params.setModel) {
+			if (params.list || params.cancel?.length || params.interrupt?.length || params.poll?.length) {
+				throw new ToolError("`setModel` cannot be combined with `list`, `poll`, `cancel`, or `interrupt`.");
+			}
+			const job = params.setModel.id === MAIN_AGENT_ID ? undefined : manager?.getJob(params.setModel.id);
+			if (job && !this.#ownsJob(job, ownerId)) {
+				return {
+					content: [{ type: "text", text: `Hot-swap failed: background job not found: ${params.setModel.id}` }],
+					details: { jobs: [] },
+				};
+			}
+			const result = await hotswapAgentModel({
+				agentId: params.setModel.id,
+				model: params.setModel.model,
+				reason: params.setModel.reason,
+				requestedBy: ownerId,
+				commandId: toolCallId,
+				correlationId: toolCallId,
+				...(this.session.sessionManager && this.session.modelRegistry
+					? {
+							parentSessionManager: this.session.sessionManager,
+							modelRegistry: this.session.modelRegistry,
+							settings: this.session.settings,
+						}
+					: {}),
+			});
+			return this.#buildHotswapResult(result);
+		}
+
 		if (!manager) {
 			return {
 				content: [{ type: "text", text: "Async execution is disabled; no background jobs are available." }],
@@ -108,15 +192,10 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			};
 		}
 
-		// Scope every visible operation to the calling agent. Tests / SDK
-		// consumers without an agent id see everything (legacy behavior).
-		const ownerId = this.session.getAgentId?.() ?? undefined;
-		const ownerFilter = ownerId ? { ownerId } : undefined;
-
 		// `list` is a read-only snapshot mode. Replaces the legacy `jobs://` URL.
 		if (params.list) {
-			if (params.cancel?.length || params.poll?.length) {
-				throw new ToolError("`list` cannot be combined with `poll` or `cancel`.");
+			if (params.cancel?.length || params.interrupt?.length || params.poll?.length) {
+				throw new ToolError("`list` cannot be combined with `poll`, `cancel`, or `interrupt`.");
 			}
 			return this.#buildResult(manager, manager.getAllJobs(ownerFilter), []);
 		}
@@ -125,7 +204,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		const cancelOutcomes: CancelOutcome[] = [];
 		for (const id of cancelIds) {
 			const existing = manager.getJob(id);
-			if (!existing || (ownerId && existing.ownerId !== ownerId)) {
+			if (!existing || !this.#ownsJob(existing, ownerId)) {
 				cancelOutcomes.push({ id, status: "not_found", message: `Background job not found: ${id}` });
 				continue;
 			}
@@ -137,7 +216,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				});
 				continue;
 			}
-			const cancelled = manager.cancel(id, ownerFilter);
+			const cancelled = manager.cancel(id);
 			cancelOutcomes.push(
 				cancelled
 					? { id, status: "cancelled", message: `Cancelled background job ${id}.` }
@@ -145,13 +224,56 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			);
 		}
 
+		const interruptIds = params.interrupt ?? [];
+		const interruptOutcomes: InterruptOutcome[] = [];
+		if (params.interruptReason !== undefined && interruptIds.length === 0) {
+			throw new ToolError("`interruptReason` requires `interrupt`.");
+		}
+		for (const id of interruptIds) {
+			const existing = manager.getJob(id);
+			if (!existing || !this.#ownsJob(existing, ownerId)) {
+				interruptOutcomes.push({ id, status: "not_found", message: `Background job not found: ${id}` });
+				continue;
+			}
+			if (existing.status !== "running") {
+				interruptOutcomes.push({
+					id,
+					status: "not_running",
+					message: `Background job ${id} is already ${existing.status}.`,
+				});
+				continue;
+			}
+			if (existing.isolated) {
+				interruptOutcomes.push({
+					id,
+					status: "isolated",
+					message: `Background job ${id} is isolated — interrupt cannot keep it alive; use cancel.`,
+				});
+				continue;
+			}
+			const interrupted = manager.interrupt(id, undefined, params.interruptReason, ownerId);
+			interruptOutcomes.push(
+				interrupted
+					? {
+							id,
+							status: "interrupted",
+							message: `Interrupted ${id} — agent kept alive (irc-addressable)`,
+						}
+					: {
+							id,
+							status: "not_running",
+							message: `Background job ${id} is not running.`,
+						},
+			);
+		}
+
 		const requestedPollIds = params.poll;
-		// If only `cancel` was provided (no `poll`), don't wait \u2014 return immediately.
-		const shouldPoll = requestedPollIds !== undefined || cancelIds.length === 0;
+		// If only `cancel`/`interrupt` was provided (no `poll`), don't wait — return immediately.
+		const shouldPoll = requestedPollIds !== undefined || (cancelIds.length === 0 && interruptIds.length === 0);
 
 		if (!shouldPoll) {
-			const cancelledJobs = this.#visibleJobs(manager, cancelIds, ownerId);
-			return this.#buildResult(manager, cancelledJobs, cancelOutcomes);
+			const changedJobs = this.#visibleJobs(manager, [...cancelIds, ...interruptIds], ownerId);
+			return this.#buildResult(manager, changedJobs, cancelOutcomes, interruptOutcomes);
 		}
 
 		// Resolve which jobs to watch.
@@ -162,9 +284,9 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			: manager.getRunningJobs(ownerFilter);
 
 		if (jobsToWatch.length === 0) {
-			if (cancelOutcomes.length > 0) {
-				const cancelledJobs = this.#visibleJobs(manager, cancelIds, ownerId);
-				return this.#buildResult(manager, cancelledJobs, cancelOutcomes);
+			if (cancelOutcomes.length > 0 || interruptOutcomes.length > 0) {
+				const changedJobs = this.#visibleJobs(manager, [...cancelIds, ...interruptIds], ownerId);
+				return this.#buildResult(manager, changedJobs, cancelOutcomes, interruptOutcomes);
 			}
 			const message = requestedPollIds?.length
 				? `No matching jobs found for IDs: ${requestedPollIds.join(", ")}`
@@ -181,8 +303,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		// If all watched jobs are already done, build immediate result.
 		const runningJobs = jobsToWatch.filter(j => j.status === "running");
 		if (runningJobs.length === 0) {
-			const cancelledJobs = cancelIds.map(id => manager.getJob(id)).filter(j => j != null);
-			return this.#buildResult(manager, [...cancelledJobs, ...jobsToWatch], cancelOutcomes);
+			const changedJobs = this.#visibleJobs(manager, [...cancelIds, ...interruptIds], ownerId);
+			return this.#buildResult(manager, [...changedJobs, ...jobsToWatch], cancelOutcomes, interruptOutcomes);
 		}
 
 		// Wait until at least one running job finishes, the wait window elapses,
@@ -202,8 +324,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		const watchedJobIds = runningJobs.map(job => job.id);
 		manager.watchJobs(watchedJobIds);
 
-		const cancelledJobs = this.#visibleJobs(manager, cancelIds, ownerId);
-		const allTrackedJobs = [...cancelledJobs, ...jobsToWatch];
+		const changedJobs = this.#visibleJobs(manager, [...cancelIds, ...interruptIds], ownerId);
+		const allTrackedJobs = [...changedJobs, ...jobsToWatch];
 
 		const PROGRESS_INTERVAL_MS = 500;
 		const emitProgress = () => {
@@ -215,6 +337,9 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 					jobs: snapshot,
 					...(cancelOutcomes.length
 						? { cancelled: cancelOutcomes.map(({ id, status }) => ({ id, status })) }
+						: {}),
+					...(interruptOutcomes.length
+						? { interrupted: interruptOutcomes.map(({ id, status }) => ({ id, status })) }
 						: {}),
 				},
 			});
@@ -247,23 +372,21 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			}
 		}
 
-		return this.#buildResult(manager, allTrackedJobs, cancelOutcomes);
+		return this.#buildResult(manager, allTrackedJobs, cancelOutcomes, interruptOutcomes);
 	}
 
-	/**
-	 * Resolve a list of job ids to job records visible to the calling agent.
-	 * Drops missing ids and ids owned by other agents, so cross-agent inspection
-	 * via the `job` tool is impossible.
-	 */
+	/** Resolve job ids within the caller's complete registered agent subtree. */
 	#visibleJobs(manager: AsyncJobManager, ids: string[], ownerId: string | undefined): AsyncJob[] {
 		const out: AsyncJob[] = [];
 		for (const id of ids) {
 			const job = manager.getJob(id);
-			if (!job) continue;
-			if (ownerId && job.ownerId !== ownerId) continue;
-			out.push(job);
+			if (job && this.#ownsJob(job, ownerId)) out.push(job);
 		}
 		return out;
+	}
+
+	#ownsJob(job: AsyncJob, ownerId: string | undefined): boolean {
+		return isAgentJobOwned(job, ownerId, AgentRegistry.global());
 	}
 
 	#snapshotJobs(
@@ -275,6 +398,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			startTime: number;
 			resultText?: string;
 			errorText?: string;
+			interruptRequested?: boolean;
+			interrupted?: boolean;
 		}[],
 	): JobSnapshot[] {
 		const now = Date.now();
@@ -289,8 +414,21 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				durationMs: Math.max(0, now - latest.startTime),
 				...(latest.resultText ? { resultText: latest.resultText } : {}),
 				...(latest.errorText ? { errorText: latest.errorText } : {}),
+				...(latest.interrupted || latest.interruptRequested ? { interrupted: true } : {}),
 			};
 		});
+	}
+
+	#buildHotswapResult(result: HotswapResult): AgentToolResult<JobToolDetails> {
+		const text =
+			result.status === "applied"
+				? `Hot-swap applied: ${result.agentId} now ${result.to} (was ${result.from})`
+				: result.status === "queued"
+					? `Hot-swap queued: ${result.agentId} will switch ${result.from} → ${result.to} at its next turn boundary`
+					: result.status === "recorded"
+						? `Hot-swap recorded: ${result.agentId} will use ${result.to} when revived (was ${result.from})`
+						: `Hot-swap failed: ${result.error}`;
+		return { content: [{ type: "text", text }], details: { jobs: [] } };
 	}
 
 	#buildResult(
@@ -303,8 +441,11 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			startTime: number;
 			resultText?: string;
 			errorText?: string;
+			interruptRequested?: boolean;
+			interrupted?: boolean;
 		}[],
 		cancelOutcomes: CancelOutcome[],
+		interruptOutcomes: InterruptOutcome[] = [],
 	): AgentToolResult<JobToolDetails> {
 		// Deduplicate by id (cancelled jobs may also appear in the watched set).
 		const seen = new Set<string>();
@@ -325,6 +466,12 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		if (cancelOutcomes.length > 0) {
 			lines.push(`## Cancelled (${cancelOutcomes.length})\n`);
 			for (const o of cancelOutcomes) lines.push(`- ${o.message}`);
+			lines.push("");
+		}
+
+		if (interruptOutcomes.length > 0) {
+			lines.push(`## Interrupted (${interruptOutcomes.length})\n`);
+			for (const o of interruptOutcomes) lines.push(`- ${o.message}`);
 			lines.push("");
 		}
 
@@ -353,6 +500,9 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		const details: JobToolDetails = {
 			jobs: jobResults,
 			...(cancelOutcomes.length ? { cancelled: cancelOutcomes.map(({ id, status }) => ({ id, status })) } : {}),
+			...(interruptOutcomes.length
+				? { interrupted: interruptOutcomes.map(({ id, status }) => ({ id, status })) }
+				: {}),
 		};
 		return {
 			content: [{ type: "text", text: lines.join("\n").trimEnd() }],
@@ -372,7 +522,16 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 interface JobRenderArgs {
 	poll?: string[];
 	cancel?: string[];
+	interrupt?: string[];
+	interruptReason?: string;
 	list?: boolean;
+	fallbackApproval?: {
+		id: string;
+		action: "wait" | "approve" | "choose" | "abort";
+		timeoutMs?: number;
+		model?: string;
+	};
+	setModel?: { id: string; model: string; reason?: string };
 }
 
 const COLLAPSED_LIST_LIMIT = PREVIEW_LIMITS.COLLAPSED_ITEMS;
@@ -435,11 +594,17 @@ function flattenStructuredPreview(text: string): string {
 
 function describeTarget(args: JobRenderArgs | undefined): string {
 	if (args?.list) return "background jobs";
+	if (args?.setModel) return `swap model of ${args.setModel.id}`;
+	if (args?.fallbackApproval) return `resolve fallback for ${args.fallbackApproval.id}`;
 	const poll = args?.poll ?? [];
 	const cancel = args?.cancel ?? [];
+	const interrupt = args?.interrupt ?? [];
 	const parts: string[] = [];
 	if (cancel.length > 0) {
 		parts.push(cancel.length === 1 ? `cancel ${cancel[0]}` : `cancel ${cancel.length} jobs`);
+	}
+	if (interrupt.length > 0) {
+		parts.push(interrupt.length === 1 ? `interrupt ${interrupt[0]}` : `interrupt ${interrupt.length} jobs`);
 	}
 	if (poll.length > 0) {
 		parts.push(poll.length === 1 ? `poll ${poll[0]}` : `poll ${poll.length} jobs`);
@@ -466,12 +631,18 @@ export const jobToolRenderer = {
 
 		if (jobs.length === 0) {
 			const fallback = result.content?.find(c => c.type === "text")?.text || "No jobs to process";
-			const header = renderStatusLine({ icon: "warning", title: describeTarget(args) || "Job" }, uiTheme);
+			const icon: ToolUIStatus =
+				(args?.setModel && !fallback.startsWith("Hot-swap failed:")) || args?.fallbackApproval
+					? "success"
+					: "warning";
+			const header = renderStatusLine({ icon, title: describeTarget(args) || "Job" }, uiTheme);
 			return new Text([header, formatEmptyMessage(fallback, uiTheme)].join("\n"), 0, 0);
 		}
 
 		const isPollCall = args
-			? !args.list && (!args.cancel || args.cancel.length === 0 || args.poll !== undefined)
+			? !args.list &&
+				(!args.cancel || args.cancel.length === 0 || args.poll !== undefined) &&
+				(!args.interrupt || args.interrupt.length === 0 || args.poll !== undefined)
 			: true;
 
 		if (!options.isPartial && isPollCall) {

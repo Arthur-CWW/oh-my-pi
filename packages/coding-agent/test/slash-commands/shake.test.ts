@@ -13,7 +13,7 @@ function acpRuntime() {
 		mode,
 		toolResultsDropped: 1,
 		blocksDropped: 0,
-		imagesDropped: mode === "images" ? 1 : undefined,
+		mediaDropped: mode === "media" ? 1 : undefined,
 		tokensFreed: 100,
 	}));
 	const output = vi.fn();
@@ -43,7 +43,7 @@ describe("/shake dispatch (ACP)", () => {
 	});
 
 	it("parses each explicit mode", async () => {
-		for (const mode of ["elide", "images"] as const) {
+		for (const mode of ["elide", "media"] as const) {
 			const h = acpRuntime();
 			await executeAcpBuiltinSlashCommand(`/shake ${mode}`, h.runtime);
 			expect(h.shake).toHaveBeenCalledWith(mode);
@@ -61,10 +61,10 @@ describe("/shake dispatch (ACP)", () => {
 	it("is advertised to ACP clients with the mode hint", () => {
 		const advertised = ACP_BUILTIN_SLASH_COMMANDS.find(c => c.name === "shake");
 		expect(advertised).toBeDefined();
-		expect(advertised?.input?.hint).toBe("[elide|images]");
+		expect(advertised?.input?.hint).toBe("[elide|media]");
 	});
 
-	it("advertises /shake images as the image-stripping path and no longer advertises /drop-images", () => {
+	it("advertises /shake media as the media-stripping path and no longer advertises /drop-images", () => {
 		expect(ACP_BUILTIN_SLASH_COMMANDS.some(c => c.name === "shake")).toBe(true);
 		expect(ACP_BUILTIN_SLASH_COMMANDS.some(c => c.name === "drop-images")).toBe(false);
 	});
@@ -73,10 +73,10 @@ describe("/shake dispatch (ACP)", () => {
 describe("/shake dispatch (TUI)", () => {
 	it("routes the parsed mode to handleShakeCommand and clears the editor", async () => {
 		const h = tuiRuntime();
-		const handled = await executeBuiltinSlashCommand("/shake images", h.runtime);
+		const handled = await executeBuiltinSlashCommand("/shake media", h.runtime);
 		expect(handled).toBe(true);
 		expect(h.setText).toHaveBeenCalledWith("");
-		expect(h.handleShakeCommand).toHaveBeenCalledWith("images");
+		expect(h.handleShakeCommand).toHaveBeenCalledWith("media");
 	});
 
 	it("defaults to elide for a bare /shake", async () => {

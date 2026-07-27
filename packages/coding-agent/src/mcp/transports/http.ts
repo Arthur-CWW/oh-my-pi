@@ -4,7 +4,6 @@
  * Implements JSON-RPC 2.0 over HTTP POST with optional SSE streaming.
  * Based on MCP spec 2025-03-26.
  */
-import * as AIError from "@oh-my-pi/pi-ai/error";
 import { logger, readSseJson, Snowflake } from "@oh-my-pi/pi-utils";
 import type {
 	JsonRpcError,
@@ -187,8 +186,7 @@ export class HttpTransport implements MCPTransport {
 			return await this.#executeRequest<T>(method, params, options);
 		} catch (error) {
 			// Retry once on auth failure if onAuthError is wired
-			const status = error instanceof Error ? AIError.status(error) : undefined;
-			if (this.onAuthError && (status === 401 || status === 403)) {
+			if (this.onAuthError && error instanceof Error && /^HTTP (401|403):/.test(error.message)) {
 				const newHeaders = await this.onAuthError();
 				if (newHeaders) {
 					// Persist refreshed headers so subsequent requests use them directly
@@ -238,6 +236,8 @@ export class HttpTransport implements MCPTransport {
 				signal: operation.signal,
 			});
 
+			operation.clear();
+
 			// Check for session ID in response
 			const newSessionId = response.headers.get("Mcp-Session-Id");
 			if (newSessionId) {
@@ -274,12 +274,11 @@ export class HttpTransport implements MCPTransport {
 
 			return result.result as T;
 		} catch (error) {
+			operation.clear();
 			if (operation.isTimeoutAbort(error)) {
 				throw new Error(`Request timeout after ${timeout}ms`);
 			}
 			throw error;
-		} finally {
-			operation.clear();
 		}
 	}
 
@@ -372,7 +371,7 @@ export class HttpTransport implements MCPTransport {
 			headers["Mcp-Session-Id"] = this.#sessionId;
 		}
 		const timeout = resolveMCPTimeoutMs(this.config.timeout);
-		const operation = createMCPTimeout(timeout);
+		let operation = createMCPTimeout(timeout);
 		try {
 			const resp = await fetch(this.config.url, {
 				method: "POST",
@@ -380,6 +379,7 @@ export class HttpTransport implements MCPTransport {
 				body: JSON.stringify(body),
 				signal: operation.signal,
 			});
+			operation.clear();
 			// Retry once on auth failure if onAuthError is wired
 			if (this.onAuthError && (resp.status === 401 || resp.status === 403)) {
 				await resp.body?.cancel();
@@ -388,27 +388,22 @@ export class HttpTransport implements MCPTransport {
 					this.config.headers ??= {};
 					Object.assign(this.config.headers, newHeaders);
 					Object.assign(headers, newHeaders);
+					operation = createMCPTimeout(timeout);
+					const retry = await fetch(this.config.url, {
+						method: "POST",
+						headers,
+						body: JSON.stringify(body),
+						signal: operation.signal,
+					});
 					operation.clear();
-					const retryOperation = createMCPTimeout(timeout);
-					try {
-						const retry = await fetch(this.config.url, {
-							method: "POST",
-							headers,
-							body: JSON.stringify(body),
-							signal: retryOperation.signal,
-						});
-						await retry.body?.cancel();
-					} finally {
-						retryOperation.clear();
-					}
+					await retry.body?.cancel();
 					return;
 				}
 			}
 			await resp.body?.cancel();
 		} catch {
-			// Best-effort response delivery — server may have disconnected
-		} finally {
 			operation.clear();
+			// Best-effort response delivery — server may have disconnected
 		}
 	}
 
@@ -444,6 +439,8 @@ export class HttpTransport implements MCPTransport {
 				signal: operation.signal,
 			});
 
+			operation.clear();
+
 			// 202 Accepted is success for notifications
 			if (!response.ok && response.status !== 202) {
 				const text = await response.text();
@@ -466,12 +463,11 @@ export class HttpTransport implements MCPTransport {
 				await response.body?.cancel();
 			}
 		} catch (error) {
+			operation.clear();
 			if (operation.isTimeoutAbort(error)) {
 				throw new Error(`Notify timeout after ${timeout}ms`);
 			}
 			throw error;
-		} finally {
-			operation.clear();
 		}
 	}
 

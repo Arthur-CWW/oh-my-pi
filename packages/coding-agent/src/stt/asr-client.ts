@@ -1,24 +1,28 @@
-import { logger } from "@oh-my-pi/pi-utils";
-import {
-	createUnavailableWorker,
-	createWorkerHandle,
-	createWorkerSubprocess,
-	logWorkerMessage,
-	type RefCountedWorkerHandle,
-	resolveWorkerSpawnCmd,
-	SMOKE_TEST_TIMEOUT_MS,
-	type SpawnedSubprocess,
-	smokeTestWorker,
-	spawnWorkerOrUnavailable,
-} from "../subprocess/worker-client";
-import { tinyWorkerEnv } from "../tiny/title-client";
-import { safeSend } from "../utils/ipc";
+import * as path from "node:path";
+import { $env, isBunTestRuntime, isCompiledBinary, logger, workerHostEntry } from "@oh-my-pi/pi-utils";
+import type { Subprocess } from "bun";
+import { settings } from "../config/settings";
+import { tinyWorkerEnvOverlay } from "../tiny/title-client";
 import type { SttProgressEvent, SttWorkerInbound, SttWorkerOutbound } from "./asr-protocol";
 import type { SttModelKey } from "./models";
 
+/**
+ * Abstraction over the speech-recognition subprocess. Modelled as a worker
+ * interface so the parent composes lifecycle, ping/pong, and request/response
+ * correlation uniformly; the runtime implementation is a Bun child process so
+ * `onnxruntime-node`'s NAPI finalizer never runs inside the main agent address
+ * space — that destructor segfaults Bun on shutdown (issue #1606).
+ */
+interface WorkerHandle {
+	send(message: SttWorkerInbound): void;
+	onMessage(handler: (message: SttWorkerOutbound) => void): () => void;
+	onError(handler: (error: Error) => void): () => void;
+	terminate(): Promise<void>;
+}
+
 type PendingRequest =
 	| { kind: "transcribe"; modelKey: SttModelKey; resolve: (text: string) => void; reject: (error: Error) => void }
-	| { kind: "download"; modelKey: SttModelKey; resolve: (result: SttDownloadResult) => void };
+	| { kind: "download"; modelKey: SttModelKey; resolve: (ok: boolean) => void };
 
 export interface SttTranscribeOptions {
 	language?: string;
@@ -28,11 +32,6 @@ export interface SttTranscribeOptions {
 export interface SttDownloadOptions {
 	signal?: AbortSignal;
 	onProgress?: (event: SttProgressEvent) => void;
-}
-
-export interface SttDownloadResult {
-	ok: boolean;
-	error?: string;
 }
 
 /** Live streaming session handle returned by {@link SttClient.startStream}. */
@@ -64,40 +63,147 @@ interface StreamState {
 	finish: (apply: () => void) => void;
 }
 
+// Cold-starting the worker subprocess from a compiled binary (decompress +
+// module graph load) is slow on contended CI runners; the probe only needs to
+// prove the worker spawns and ponges, so a generous bound removes the flake.
+const SMOKE_TEST_TIMEOUT_MS = 30_000;
+
 /**
  * Hidden subcommand on the main CLI that boots the speech-recognition worker in
  * the spawned subprocess. Kept in sync with the dispatch in `cli.ts`.
  */
 export const STT_WORKER_ARG = "__omp_worker_stt";
 
+function readTinyModelSetting(key: "providers.tinyModelDevice" | "providers.tinyModelDtype"): string | undefined {
+	try {
+		const value = settings.get(key);
+		return typeof value === "string" ? value : undefined;
+	} catch {
+		// Settings may be uninitialized (e.g. `omp --smoke-test`); fall back to env/default.
+		return undefined;
+	}
+}
+
+/**
+ * Env handed to the speech subprocess. The `PI_TINY_DEVICE` / `PI_TINY_DTYPE`
+ * env vars win; otherwise the persisted `providers.tinyModelDevice` /
+ * `providers.tinyModelDtype` settings are mapped onto those vars so the
+ * subprocess's env-based resolution picks them up (shared with tiny models).
+ */
+function sttWorkerEnv(): Record<string, string> {
+	const overlay = tinyWorkerEnvOverlay(
+		$env,
+		readTinyModelSetting("providers.tinyModelDevice"),
+		readTinyModelSetting("providers.tinyModelDtype"),
+	);
+	const base = $env as Record<string, string | undefined>;
+	const merged: Record<string, string> = {};
+	for (const key in base) {
+		const value = base[key];
+		if (typeof value === "string") merged[key] = value;
+	}
+	for (const key in overlay) merged[key] = overlay[key];
+	return merged;
+}
+
+interface SttWorkerSpawnCommand {
+	cmd: string[];
+	cwd?: string;
+}
+
+/**
+ * Resolve the command used to relaunch the agent CLI into stt-worker mode. In a
+ * compiled binary the entry point is the binary itself; otherwise re-enter the
+ * declared worker-host entry with a cwd-relative script path (Bun's subprocess
+ * IPC is more reliable that way under `bun test`), falling back to this
+ * package's own `src/cli.ts` when no host entry is declared.
+ */
+function sttWorkerSpawnCmd(): SttWorkerSpawnCommand {
+	if (isCompiledBinary()) return { cmd: [process.execPath, STT_WORKER_ARG] };
+	const hostEntry = workerHostEntry();
+	if (hostEntry) {
+		return { cmd: [process.execPath, path.basename(hostEntry), STT_WORKER_ARG], cwd: path.dirname(hostEntry) };
+	}
+	const packageRoot = path.resolve(import.meta.dir, "..", "..");
+	return { cmd: [process.execPath, "src/cli.ts", STT_WORKER_ARG], cwd: packageRoot };
+}
+
+interface SpawnedSubprocess {
+	proc: Subprocess<"ignore", "ignore", "ignore">;
+	inbound: Set<(message: SttWorkerOutbound) => void>;
+	errors: Set<(error: Error) => void>;
+	/**
+	 * Flipped to `true` right before the parent SIGKILLs the child so `onExit`
+	 * can distinguish the expected hard-kill from a crash/OOM/external signal.
+	 */
+	intentionalExit: { value: boolean };
+}
+
 /**
  * Spawn the speech worker as a subprocess. Exported for tests and the smoke
  * probe; production callers go through {@link spawnSttWorker}.
  */
-export function createSttSubprocess(): SpawnedSubprocess<SttWorkerOutbound> {
-	return createWorkerSubprocess<SttWorkerOutbound>({
-		spawnCommand: resolveWorkerSpawnCmd(STT_WORKER_ARG),
-		env: tinyWorkerEnv(),
-		exitLabel: "stt subprocess",
+export function createSttSubprocess(): SpawnedSubprocess {
+	const inbound = new Set<(message: SttWorkerOutbound) => void>();
+	const errors = new Set<(error: Error) => void>();
+	const intentionalExit = { value: false };
+	const spawnCommand = sttWorkerSpawnCmd();
+	const proc = Bun.spawn({
+		cmd: spawnCommand.cmd,
+		cwd: spawnCommand.cwd,
+		env: sttWorkerEnv(),
+		stdin: "ignore",
+		stdout: "ignore",
+		stderr: "ignore",
+		serialization: "advanced",
+		windowsHide: true,
+		ipc(message) {
+			for (const handler of inbound) handler(message as SttWorkerOutbound);
+		},
+		onExit(_proc, exitCode, signalCode) {
+			if (exitCode === 0) return;
+			// Swallow only the expected SIGKILL from `terminate()`; every other
+			// signal exit is a real worker death that must fault in-flight
+			// requests so callers don't await forever.
+			if (exitCode === null && intentionalExit.value) return;
+			const reason = exitCode !== null ? `code ${exitCode}` : `signal ${signalCode ?? "unknown"}`;
+			const err = new Error(`stt subprocess exited with ${reason}`);
+			for (const handler of errors) handler(err);
+		},
 	});
+	// Don't keep the parent event loop alive on an idle worker; dispose calls
+	// `terminate()` explicitly. Bun's test runner can starve IPC delivery for
+	// unref'd subprocesses, so keep it referenced under tests.
+	if (!isBunTestRuntime()) proc.unref();
+	return { proc, inbound, errors, intentionalExit };
 }
 
-function wrapSubprocess(
-	spawned: SpawnedSubprocess<SttWorkerOutbound>,
-): RefCountedWorkerHandle<SttWorkerInbound, SttWorkerOutbound> {
-	const { proc } = spawned;
+function wrapSubprocess({ proc, inbound, errors, intentionalExit }: SpawnedSubprocess): WorkerHandle {
 	return {
-		...createWorkerHandle<SttWorkerInbound, SttWorkerOutbound>(spawned, message => safeSend(proc, message, "stt")),
-		ref() {
+		send(message) {
 			try {
-				proc.ref();
-			} catch {
-				// Already gone.
+				proc.send(message);
+			} catch (error) {
+				logger.debug("stt: send to subprocess failed", {
+					error: error instanceof Error ? error.message : String(error),
+				});
 			}
 		},
-		unref() {
+		onMessage(handler) {
+			inbound.add(handler);
+			return () => inbound.delete(handler);
+		},
+		onError(handler) {
+			errors.add(handler);
+			return () => errors.delete(handler);
+		},
+		async terminate() {
+			// SIGKILL: the whole point of subprocess isolation is that the parent
+			// never runs `onnxruntime-node`'s NAPI finalizer. Hard-kill instead —
+			// the model lives in process memory and the OS reclaims everything.
+			intentionalExit.value = true;
 			try {
-				proc.unref();
+				proc.kill("SIGKILL");
 			} catch {
 				// Already gone.
 			}
@@ -105,34 +211,63 @@ function wrapSubprocess(
 	};
 }
 
-function spawnInlineUnavailableWorker(error: unknown): RefCountedWorkerHandle<SttWorkerInbound, SttWorkerOutbound> {
+function spawnInlineUnavailableWorker(error: unknown): WorkerHandle {
+	const listeners = new Set<(message: SttWorkerOutbound) => void>();
+	const errorMessage = error instanceof Error ? error.message : String(error);
+	const emit = (message: SttWorkerOutbound): void => {
+		for (const listener of listeners) listener(message);
+	};
 	return {
-		...createUnavailableWorker<SttWorkerInbound, SttWorkerOutbound>(error),
-		ref() {},
-		unref() {},
+		send(message) {
+			queueMicrotask(() => {
+				if (message.type === "ping") {
+					emit({ type: "pong", id: message.id });
+					return;
+				}
+				emit({ type: "error", id: message.id, error: errorMessage });
+			});
+		},
+		onMessage(handler) {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		onError() {
+			return () => {};
+		},
+		async terminate() {
+			listeners.clear();
+		},
 	};
 }
 
-function spawnSttWorker(): RefCountedWorkerHandle<SttWorkerInbound, SttWorkerOutbound> {
-	return spawnWorkerOrUnavailable(
-		() => wrapSubprocess(createSttSubprocess()),
-		spawnInlineUnavailableWorker,
-		"stt worker spawn failed; speech-to-text disabled",
-	);
+function spawnSttWorker(): WorkerHandle {
+	try {
+		return wrapSubprocess(createSttSubprocess());
+	} catch (error) {
+		logger.warn("stt worker spawn failed; speech-to-text disabled", {
+			error: error instanceof Error ? error.message : String(error),
+		});
+		return spawnInlineUnavailableWorker(error);
+	}
+}
+
+function logWorkerMessage(message: Extract<SttWorkerOutbound, { type: "log" }>): void {
+	if (message.level === "debug") logger.debug(message.msg, message.meta);
+	else if (message.level === "warn") logger.warn(message.msg, message.meta);
+	else logger.error(message.msg, message.meta);
 }
 
 export class SttClient {
-	#worker: RefCountedWorkerHandle<SttWorkerInbound, SttWorkerOutbound> | null = null;
+	#worker: WorkerHandle | null = null;
 	#unsubscribeMessage: (() => void) | null = null;
 	#unsubscribeError: (() => void) | null = null;
 	#pending = new Map<string, PendingRequest>();
 	#streams = new Map<string, StreamState>();
 	#progressListeners = new Set<(event: SttProgressEvent) => void>();
 	#nextRequestId = 0;
-	#refed = false;
-	#spawnWorker: () => RefCountedWorkerHandle<SttWorkerInbound, SttWorkerOutbound>;
+	#spawnWorker: () => WorkerHandle;
 
-	constructor(spawnWorker: () => RefCountedWorkerHandle<SttWorkerInbound, SttWorkerOutbound> = spawnSttWorker) {
+	constructor(spawnWorker: () => WorkerHandle = spawnSttWorker) {
 		this.#spawnWorker = spawnWorker;
 	}
 
@@ -151,11 +286,11 @@ export class SttClient {
 		const worker = this.#ensureWorker();
 		const id = String(++this.#nextRequestId);
 		const { promise, resolve, reject } = Promise.withResolvers<string>();
-		this.#addPending(id, { kind: "transcribe", modelKey, resolve, reject });
+		this.#pending.set(id, { kind: "transcribe", modelKey, resolve, reject });
 		const abort = (): void => {
 			const pending = this.#pending.get(id);
 			if (pending?.kind !== "transcribe") return;
-			this.#deletePending(id);
+			this.#pending.delete(id);
 			pending.reject(new DOMException("The operation was aborted.", "AbortError"));
 		};
 		options.signal?.addEventListener("abort", abort, { once: true });
@@ -164,7 +299,7 @@ export class SttClient {
 			return await promise;
 		} finally {
 			options.signal?.removeEventListener("abort", abort);
-			this.#deletePending(id);
+			this.#pending.delete(id);
 		}
 	}
 
@@ -179,12 +314,6 @@ export class SttClient {
 		const worker = this.#ensureWorker();
 		const id = String(++this.#nextRequestId);
 		const { promise, resolve, reject } = Promise.withResolvers<string>();
-		// `stop()` is normally the only awaiter of `promise`, but with model loading
-		// now deferred to the stream, a load failure (or early worker error) can
-		// reject it before the caller stops — attach a benign handler so that never
-		// surfaces as an unhandled rejection. stop()/await still observes the
-		// rejection through the original promise.
-		void promise.catch(() => {});
 		const signal = options.signal;
 		let settled = false;
 		const onAbort = (): void => handle.cancel();
@@ -193,7 +322,6 @@ export class SttClient {
 			settled = true;
 			this.#streams.delete(id);
 			signal?.removeEventListener("abort", onAbort);
-			this.#syncWorkerRef();
 			apply();
 		};
 		this.#streams.set(id, {
@@ -204,7 +332,6 @@ export class SttClient {
 			reject,
 			finish,
 		});
-		this.#syncWorkerRef();
 		worker.send({ type: "stream_start", id, modelKey, language: options.language });
 		const handle: SttStreamHandle = {
 			pushAudio: audio => {
@@ -225,19 +352,19 @@ export class SttClient {
 		return handle;
 	}
 
-	async downloadModel(modelKey: SttModelKey, options: SttDownloadOptions = {}): Promise<SttDownloadResult> {
-		if (options.signal?.aborted) return { ok: false };
+	async downloadModel(modelKey: SttModelKey, options: SttDownloadOptions = {}): Promise<boolean> {
+		if (options.signal?.aborted) return false;
 		const unsubscribe = options.onProgress ? this.onProgress(options.onProgress) : undefined;
 		try {
 			const worker = this.#ensureWorker();
 			const id = String(++this.#nextRequestId);
-			const { promise, resolve } = Promise.withResolvers<SttDownloadResult>();
-			this.#addPending(id, { kind: "download", modelKey, resolve });
+			const { promise, resolve } = Promise.withResolvers<boolean>();
+			this.#pending.set(id, { kind: "download", modelKey, resolve });
 			const abort = (): void => {
 				const pending = this.#pending.get(id);
 				if (pending?.kind !== "download") return;
-				this.#deletePending(id);
-				pending.resolve({ ok: false });
+				this.#pending.delete(id);
+				pending.resolve(false);
 			};
 			options.signal?.addEventListener("abort", abort, { once: true });
 			try {
@@ -245,15 +372,14 @@ export class SttClient {
 				return await promise;
 			} finally {
 				options.signal?.removeEventListener("abort", abort);
-				this.#deletePending(id);
+				this.#pending.delete(id);
 			}
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
 			logger.debug("stt: local model download failed", {
 				modelKey,
-				error: message,
+				error: error instanceof Error ? error.message : String(error),
 			});
-			return { ok: false, error: message };
+			return false;
 		} finally {
 			unsubscribe?.();
 		}
@@ -269,10 +395,9 @@ export class SttClient {
 		for (const pending of this.#pending.values()) {
 			this.#emitProgress({ modelKey: pending.modelKey, status: "error" });
 			if (pending.kind === "transcribe") pending.reject(new Error("stt worker terminated"));
-			else pending.resolve({ ok: false });
+			else pending.resolve(false);
 		}
 		this.#pending.clear();
-		this.#refed = false;
 		this.#failStreams(new Error("stt worker terminated"));
 		try {
 			await worker?.terminate();
@@ -281,39 +406,13 @@ export class SttClient {
 		}
 	}
 
-	#ensureWorker(): RefCountedWorkerHandle<SttWorkerInbound, SttWorkerOutbound> {
+	#ensureWorker(): WorkerHandle {
 		if (this.#worker) return this.#worker;
 		const worker = this.#spawnWorker();
 		this.#worker = worker;
 		this.#unsubscribeMessage = worker.onMessage(message => this.#handleMessage(message));
 		this.#unsubscribeError = worker.onError(error => this.#handleWorkerError(error));
 		return worker;
-	}
-
-	/** Register a pending request and keep the worker referenced while work is in flight. */
-	#addPending(id: string, request: PendingRequest): void {
-		this.#pending.set(id, request);
-		this.#syncWorkerRef();
-	}
-
-	/** Drop a pending request and unref the worker once no request or stream is active. */
-	#deletePending(id: string): void {
-		if (this.#pending.delete(id)) this.#syncWorkerRef();
-	}
-
-	/**
-	 * STT workers start unreferenced so an idle warm model never blocks exit.
-	 * Setup/download commands must keep the worker alive while awaiting IPC, or
-	 * Bun can drain the event loop immediately after `Preparing Speech-to-Text`.
-	 */
-	#syncWorkerRef(): void {
-		const worker = this.#worker;
-		if (!worker) return;
-		const shouldRef = this.#pending.size > 0 || this.#streams.size > 0;
-		if (shouldRef === this.#refed) return;
-		this.#refed = shouldRef;
-		if (shouldRef) worker.ref();
-		else worker.unref();
 	}
 
 	#handleMessage(message: SttWorkerOutbound): void {
@@ -347,19 +446,19 @@ export class SttClient {
 			}
 			return;
 		}
-		this.#deletePending(message.id);
+		this.#pending.delete(message.id);
 		if (message.type === "transcription") {
 			if (pending.kind === "transcribe") pending.resolve(message.text);
 			return;
 		}
 		if (message.type === "downloaded") {
-			if (pending.kind === "download") pending.resolve({ ok: true });
+			if (pending.kind === "download") pending.resolve(true);
 			return;
 		}
 		// message.type === "error"
 		this.#emitProgress({ modelKey: pending.modelKey, status: "error" });
 		if (pending.kind === "transcribe") pending.reject(new Error(message.error));
-		else pending.resolve({ ok: false, error: message.error });
+		else pending.resolve(false);
 	}
 
 	#emitProgress(event: SttProgressEvent): void {
@@ -378,7 +477,7 @@ export class SttClient {
 		for (const pending of this.#pending.values()) {
 			this.#emitProgress({ modelKey: pending.modelKey, status: "error" });
 			if (pending.kind === "transcribe") pending.reject(error);
-			else pending.resolve({ ok: false, error: error.message });
+			else pending.resolve(false);
 		}
 		this.#pending.clear();
 		this.#failStreams(error);
@@ -397,5 +496,25 @@ export async function smokeTestSttWorker({
 }: {
 	timeoutMs?: number;
 } = {}): Promise<void> {
-	await smokeTestWorker(wrapSubprocess(createSttSubprocess()), "stt worker", timeoutMs);
+	const handle = wrapSubprocess(createSttSubprocess());
+	const { promise, resolve, reject } = Promise.withResolvers<void>();
+	const timer = setTimeout(() => reject(new Error(`stt worker did not pong within ${timeoutMs}ms`)), timeoutMs);
+	const unsubscribeMessage = handle.onMessage(message => {
+		if (message.type === "pong") {
+			resolve();
+			return;
+		}
+		if (message.type === "log") return;
+		reject(new Error(`stt worker: expected pong, got ${JSON.stringify(message)}`));
+	});
+	const unsubscribeError = handle.onError(reject);
+	try {
+		handle.send({ type: "ping", id: "smoke" } satisfies SttWorkerInbound);
+		await promise;
+	} finally {
+		clearTimeout(timer);
+		unsubscribeMessage();
+		unsubscribeError();
+		await handle.terminate();
+	}
 }

@@ -3,16 +3,16 @@
  */
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
-import * as arktype from "arktype";
-import * as zodModule from "zod/v4";
+import { z as zod } from "zod/v4";
 import { hookCapability } from "../../capability/hook";
 import type { Hook } from "../../discovery";
 import { loadCapability } from "../../discovery";
 // Runtime self-reference: dereference this namespace only inside loader functions to keep the index.ts cycle safe.
 import * as PiCodingAgent from "../../index";
-import type { CustomMessagePayload } from "../../session/messages";
+import type { HookMessage } from "../../session/messages";
+import type { SessionManager } from "../../session/session-manager";
 import * as typebox from "../typebox";
-import { resolvePath, withExitGuard } from "../utils";
+import { resolvePath } from "../utils";
 import { execCommand } from "./runner";
 import type { ExecOptions, HookAPI, HookFactory, HookMessageRenderer, RegisteredCommand } from "./types";
 
@@ -25,7 +25,7 @@ type HandlerFn = (...args: unknown[]) => Promise<unknown>;
  * Send message handler type for pi.sendMessage().
  */
 export type SendMessageHandler = <T = unknown>(
-	message: CustomMessagePayload<T>,
+	message: Pick<HookMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 	options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" },
 ) => void;
 
@@ -34,9 +34,26 @@ export type SendMessageHandler = <T = unknown>(
  */
 export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
 
-// Session-lifecycle handler types live once in session-handler-types; re-exported
-// here because hooks/runner.ts imports them from this module.
-export type { BranchHandler, NavigateTreeHandler, NewSessionHandler } from "../session-handler-types";
+/**
+ * New session handler type for ctx.newSession() in HookCommandContext.
+ */
+export type NewSessionHandler = (options?: {
+	parentSession?: string;
+	setup?: (sessionManager: SessionManager) => Promise<void>;
+}) => Promise<{ cancelled: boolean }>;
+
+/**
+ * Branch handler type for ctx.branch() in HookCommandContext.
+ */
+export type BranchHandler = (entryId: string) => Promise<{ cancelled: boolean }>;
+
+/**
+ * Navigate tree handler type for ctx.navigateTree() in HookCommandContext.
+ */
+export type NavigateTreeHandler = (
+	targetId: string,
+	options?: { summarize?: boolean },
+) => Promise<{ cancelled: boolean }>;
 
 /**
  * Registered handlers for a loaded hook.
@@ -97,7 +114,7 @@ async function createHookAPI(
 			handlers.get(event)!.push(handler);
 		},
 		sendMessage<T = unknown>(
-			message: CustomMessagePayload<T>,
+			message: HookMessage<T>,
 			options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" },
 		): void {
 			if (!sendMessageHandler) {
@@ -122,9 +139,7 @@ async function createHookAPI(
 		},
 		logger,
 		typebox,
-		// HookAPI.arktype is typed as the arktype `Type` constructor; expose it from the module namespace.
-		arktype: arktype.Type,
-		zod: zodModule,
+		zod,
 		pi: PiCodingAgent,
 	} as HookAPI;
 
@@ -149,7 +164,7 @@ async function loadHook(hookPath: string, cwd: string): Promise<{ hook: LoadedHo
 
 	try {
 		// Import the module using native Bun import
-		const module = await withExitGuard(() => import(resolvedPath));
+		const module = await import(resolvedPath);
 		const factory = module.default as HookFactory;
 
 		if (typeof factory !== "function") {
@@ -164,7 +179,7 @@ async function loadHook(hookPath: string, cwd: string): Promise<{ hook: LoadedHo
 		);
 
 		// Call factory to register handlers
-		await withExitGuard(async () => factory(api));
+		factory(api);
 
 		return {
 			hook: {

@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
-	ANTIGRAVITY_PRIMARY_ENDPOINT,
+	applyAntigravityNativeVideoInputOverride,
 	fetchAntigravityDiscoveryModels,
 } from "@oh-my-pi/pi-catalog/discovery/antigravity";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
@@ -17,9 +17,7 @@ import {
 	ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
 	collapseEffortVariants,
 	collapseEffortVariantsAcrossProviders,
-	DEVIN_VARIANT_COLLAPSE_TABLE,
 	deriveThinkingPairFamilies,
-	GEMINI_CLI_VARIANT_COLLAPSE_TABLE,
 	getVariantAliasSources,
 	isVariantCollapsedSpec,
 	resolveBareVariantAlias,
@@ -91,21 +89,15 @@ describe("collapseEffortVariants", () => {
 		// Capability union: max caps, image support from any member.
 		expect(flash?.maxTokens).toBe(65_535);
 		expect(flash?.input).toEqual(["text", "image"]);
-		expect(flash?.thinking?.mode).toBe("budget");
+		expect(flash?.thinking?.mode).toBe("google-level");
 		expect(flash?.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
-		expect(flash?.thinking?.effortBudgets).toEqual({
-			minimal: 1000,
-			low: 1000,
-			medium: 4000,
-			high: 10000,
-		});
 		expect(flash?.thinking?.suppressWhenOff).toBe(true);
 		expect(flash?.thinking?.effortRouting).toEqual({
 			off: "gemini-3.5-flash-extra-low",
-			minimal: "gemini-3.5-flash-extra-low",
+			minimal: "gemini-3-flash-agent",
 			low: "gemini-3.5-flash-extra-low",
-			medium: "gemini-3.5-flash-low",
-			high: "gemini-3-flash-agent",
+			medium: "gemini-3.5-flash-extra-low",
+			high: "gemini-3.5-flash-low",
 		});
 	});
 
@@ -118,148 +110,48 @@ describe("collapseEffortVariants", () => {
 		expect(out).toHaveLength(1);
 		expect(out[0]?.id).toBe("gemini-3.5-flash");
 		expect(out[0]?.requestModelId).toBe("gemini-3.5-flash-extra-low");
-		// minimal+low route to extra-low (present); medium (flash-low) and high
-		// (flash-agent) targets are absent and drop.
+		// minimal (gemini-3-flash-agent) and high (gemini-3.5-flash-low) targets are absent.
 		expect(out[0]?.thinking?.effortRouting).toEqual({
 			off: "gemini-3.5-flash-extra-low",
-			minimal: "gemini-3.5-flash-extra-low",
 			low: "gemini-3.5-flash-extra-low",
+			medium: "gemini-3.5-flash-extra-low",
 		});
 	});
 
-	it("routes both bare and -thinking sonnet 4.6 ids to the bare wire id (backend has no -thinking twin)", () => {
+	it("routes claude pairs off to the bare id and efforts to -thinking", () => {
 		const out = collapseEffortVariants(
 			[
 				memberSpec("claude-sonnet-4-6", { maxTokens: 64_000 }),
-				memberSpec("claude-sonnet-4-6-thinking", { maxTokens: 64_000 }),
+				memberSpec("claude-sonnet-4-6-thinking", { maxTokens: 128_000 }),
 			],
 			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
 		);
 
 		expect(out).toHaveLength(1);
-		const spec = out[0];
-		expect(spec?.id).toBe("claude-sonnet-4-6");
-		// Default wire id equals the logical id — requestModelId is omitted and
-		// no effortRouting is needed; the request-body `thinkingBudget` carries
-		// per-effort behavior on a single shared wire id.
-		expect(spec?.requestModelId).toBeUndefined();
-		expect(spec?.thinking?.effortRouting).toBeUndefined();
-		expect(spec?.thinking?.mode).toBe("budget");
-
-		const model = buildModel(spec as ModelSpec<"google-gemini-cli">);
-		expect(resolveWireModelId(model, undefined)).toBe("claude-sonnet-4-6");
-		expect(resolveWireModelId(model, Effort.High)).toBe("claude-sonnet-4-6");
+		expect(out[0]?.id).toBe("claude-sonnet-4-6");
+		// The default wire id equals the logical id — requestModelId is omitted.
+		expect(out[0]?.requestModelId).toBeUndefined();
+		expect(out[0]?.maxTokens).toBe(128_000);
+		expect(out[0]?.thinking?.mode).toBe("budget");
+		expect(out[0]?.thinking?.suppressWhenOff).toBeUndefined();
+		expect(out[0]?.thinking?.effortRouting).toEqual({
+			off: "claude-sonnet-4-6",
+			minimal: "claude-sonnet-4-6-thinking",
+			low: "claude-sonnet-4-6-thinking",
+			medium: "claude-sonnet-4-6-thinking",
+			high: "claude-sonnet-4-6-thinking",
+		});
 	});
 
-	it("collapses a bare-only sonnet 4.6 discovery to the bare wire id", () => {
-		const out = collapseEffortVariants(
-			[memberSpec("claude-sonnet-4-6", { maxTokens: 64_000 })],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
-
-		expect(out).toHaveLength(1);
-		const spec = out[0];
-		expect(spec?.id).toBe("claude-sonnet-4-6");
-		expect(spec?.requestModelId).toBeUndefined();
-		expect(spec?.thinking?.effortRouting).toBeUndefined();
-
-		const model = buildModel(spec as ModelSpec<"google-gemini-cli">);
-		// Regression: previously this routed thinking efforts to a non-existent
-		// `claude-sonnet-4-6-thinking` wire id and 404'd on the backend.
-		expect(resolveWireModelId(model, Effort.High)).toBe("claude-sonnet-4-6");
-		expect(resolveWireModelId(model, undefined)).toBe("claude-sonnet-4-6");
-	});
-
-	it("routes every opus 4.6 request to the -thinking wire id (the only one the backend exposes)", () => {
+	it("keeps the thinking backing id for a -thinking-only claude family", () => {
 		const out = collapseEffortVariants([memberSpec("claude-opus-4-6-thinking")], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
 
-		expect(out).toHaveLength(1);
-		const spec = out[0];
-		expect(spec?.id).toBe("claude-opus-4-6");
-		expect(spec?.requestModelId).toBe("claude-opus-4-6-thinking");
-		expect(spec?.thinking?.effortRouting).toBeUndefined();
-
-		const model = buildModel(spec as ModelSpec<"google-gemini-cli">);
-		// Thinking-off and every effort fall back through requestModelId to
-		// the only wire id the backend actually serves.
-		expect(resolveWireModelId(model, undefined)).toBe("claude-opus-4-6-thinking");
-		expect(resolveWireModelId(model, Effort.High)).toBe("claude-opus-4-6-thinking");
-	});
-
-	it("reconciles a stale Sonnet 4.6 snapshot whose routing still targets the dead -thinking wire id", () => {
-		// Bundled `models.json` and SQLite cache rows written before #3071
-		// route every effort to `claude-sonnet-4-6-thinking` (a wire id
-		// `daily-cloudcode-pa` does not expose). The `retiredMembers` entry
-		// triggers `reconcileRetiredRouting`, which re-points every retired
-		// route to the live bare wire id.
-		const stale: ModelSpec<"google-gemini-cli"> = {
-			...memberSpec("claude-sonnet-4-6", { maxTokens: 64_000 }),
-			requestModelId: "claude-sonnet-4-6",
-			thinking: {
-				mode: "budget",
-				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
-				effortRouting: {
-					off: "claude-sonnet-4-6",
-					[Effort.Minimal]: "claude-sonnet-4-6-thinking",
-					[Effort.Low]: "claude-sonnet-4-6-thinking",
-					[Effort.Medium]: "claude-sonnet-4-6-thinking",
-					[Effort.High]: "claude-sonnet-4-6-thinking",
-				},
-			},
-		};
-		const out = collapseEffortVariants([stale], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
-
-		expect(out).toHaveLength(1);
-		const spec = out[0];
-		expect(spec?.id).toBe("claude-sonnet-4-6");
-		expect(spec?.thinking?.effortRouting).toEqual({
-			off: "claude-sonnet-4-6",
-			minimal: "claude-sonnet-4-6",
-			low: "claude-sonnet-4-6",
-			medium: "claude-sonnet-4-6",
-			high: "claude-sonnet-4-6",
-		});
-
-		const model = buildModel(spec as ModelSpec<"google-gemini-cli">);
-		expect(resolveWireModelId(model, Effort.High)).toBe("claude-sonnet-4-6");
-	});
-
-	it("reconciles a stale Opus 4.6 snapshot whose routing still targets the dead bare wire id", () => {
-		// Defensive: a stale snapshot with `off`/efforts pointing at the bare
-		// `claude-opus-4-6` (never exposed by Antigravity) is re-pointed to
-		// the live `-thinking` wire id by `reconcileRetiredRouting`.
-		const stale: ModelSpec<"google-gemini-cli"> = {
-			...memberSpec("claude-opus-4-6"),
-			requestModelId: "claude-opus-4-6",
-			thinking: {
-				mode: "budget",
-				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
-				effortRouting: {
-					off: "claude-opus-4-6",
-					[Effort.Minimal]: "claude-opus-4-6",
-					[Effort.Low]: "claude-opus-4-6",
-					[Effort.Medium]: "claude-opus-4-6",
-					[Effort.High]: "claude-opus-4-6",
-				},
-			},
-		};
-		const out = collapseEffortVariants([stale], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
-
-		expect(out).toHaveLength(1);
-		const spec = out[0];
-		expect(spec?.id).toBe("claude-opus-4-6");
-		expect(spec?.requestModelId).toBe("claude-opus-4-6-thinking");
-		expect(spec?.thinking?.effortRouting).toEqual({
-			off: "claude-opus-4-6-thinking",
-			minimal: "claude-opus-4-6-thinking",
-			low: "claude-opus-4-6-thinking",
-			medium: "claude-opus-4-6-thinking",
-			high: "claude-opus-4-6-thinking",
-		});
-
-		const model = buildModel(spec as ModelSpec<"google-gemini-cli">);
-		expect(resolveWireModelId(model, undefined)).toBe("claude-opus-4-6-thinking");
-		expect(resolveWireModelId(model, Effort.High)).toBe("claude-opus-4-6-thinking");
+		expect(out[0]?.id).toBe("claude-opus-4-6");
+		expect(out[0]?.requestModelId).toBe("claude-opus-4-6-thinking");
+		// The off route targeted the absent bare id — dropped; off falls back
+		// to requestModelId, preserving today's served default.
+		expect(out[0]?.thinking?.effortRouting?.off).toBeUndefined();
+		expect(out[0]?.thinking?.effortRouting?.[Effort.High]).toBe("claude-opus-4-6-thinking");
 	});
 
 	it("renames single-member families through requestModelId with no routing", () => {
@@ -283,95 +175,6 @@ describe("collapseEffortVariants", () => {
 		const mixed = [...once, memberSpec("gemini-3.5-flash-low"), memberSpec("gemini-3-flash-agent")];
 		const deduped = collapseEffortVariants(mixed, ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
 		expect(deduped).toEqual(once);
-	});
-
-	it("keeps gemini-cli flash on the level transport with the original routing", () => {
-		const out = collapseEffortVariants(FLASH_TRIPLET(), GEMINI_CLI_VARIANT_COLLAPSE_TABLE);
-		const flash = out.find(m => m.id === "gemini-3.5-flash");
-		expect(flash?.thinking?.mode).toBe("google-level");
-		expect(flash?.thinking?.effortBudgets).toBeUndefined();
-		expect(flash?.thinking?.effortRouting).toEqual({
-			off: "gemini-3.5-flash-extra-low",
-			minimal: "gemini-3-flash-agent",
-			low: "gemini-3.5-flash-extra-low",
-			medium: "gemini-3.5-flash-extra-low",
-			high: "gemini-3.5-flash-low",
-		});
-	});
-
-	it("collapses the 3.1-pro family on the budget transport with the +1 budgets", () => {
-		const out = collapseEffortVariants(
-			[memberSpec("gemini-3.1-pro-low"), memberSpec("gemini-pro-agent")],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
-		const pro = out.find(m => m.id === "gemini-3.1-pro");
-		expect(pro?.thinking?.mode).toBe("budget");
-		expect(pro?.thinking?.effortBudgets).toEqual({ low: 1001, high: 10001 });
-		expect(pro?.thinking?.effortRouting).toEqual({
-			off: "gemini-3.1-pro-low",
-			low: "gemini-3.1-pro-low",
-			high: "gemini-pro-agent",
-		});
-	});
-
-	it("refreshes a stale alias-keyed flash snapshot in place to the budget contract", () => {
-		// Bundled snapshots key the flash family under the recycled `gemini-3-flash`
-		// id on the old level transport. That exact id is load-bearing, so it is
-		// refreshed in place (same id) rather than re-keyed to `gemini-3.5-flash`.
-		const stale: ModelSpec<"google-gemini-cli"> = {
-			...memberSpec("gemini-3-flash"),
-			reasoning: true,
-			thinking: { mode: "google-level", efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High] },
-		};
-		const out = collapseEffortVariants([stale], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
-		const flash = out.find(m => m.id === "gemini-3-flash");
-		expect(flash).toBeDefined();
-		expect(flash?.thinking?.mode).toBe("budget");
-		expect(flash?.thinking?.effortBudgets).toEqual({ minimal: 1000, low: 1000, medium: 4000, high: 10000 });
-		expect(flash?.thinking?.effortRouting?.high).toBe("gemini-3-flash-agent");
-		expect(flash?.requestModelId).toBe("gemini-3.5-flash-extra-low");
-	});
-
-	it("heals a stale alias row alongside the canonical row (merge coexistence)", () => {
-		// The model-manager merge keeps both the bundled exact `gemini-3-flash`
-		// and the discovered canonical `gemini-3.5-flash` (exact-id merge); both
-		// must land on the budget transport and neither is dropped.
-		const stale: ModelSpec<"google-gemini-cli"> = {
-			...memberSpec("gemini-3-flash"),
-			reasoning: true,
-			thinking: { mode: "google-level", efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High] },
-		};
-		const canonical = collapseEffortVariants(FLASH_TRIPLET(), ANTIGRAVITY_VARIANT_COLLAPSE_TABLE).find(
-			m => m.id === "gemini-3.5-flash",
-		);
-		expect(canonical).toBeDefined();
-		const out = collapseEffortVariants(
-			[stale, canonical as ModelSpec<"google-gemini-cli">],
-			ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-		);
-		expect(out.map(m => m.id).sort()).toEqual(["gemini-3-flash", "gemini-3.5-flash"]);
-		expect(out.find(m => m.id === "gemini-3-flash")?.thinking?.mode).toBe("budget");
-		expect(out.find(m => m.id === "gemini-3.5-flash")?.thinking?.mode).toBe("budget");
-	});
-
-	it("refreshes a stale family.id-keyed 3.1-pro snapshot in place to the budget contract", () => {
-		// Pass-through branch: a bundled collapsed `gemini-3.1-pro` on the old level
-		// transport with no live members refreshes from the hand table.
-		const stale: ModelSpec<"google-gemini-cli"> = {
-			...memberSpec("gemini-3.1-pro"),
-			reasoning: true,
-			requestModelId: "gemini-3.1-pro-low",
-			thinking: {
-				mode: "google-level",
-				efforts: [Effort.Low, Effort.High],
-				effortRouting: { off: "gemini-3.1-pro-low", low: "gemini-3.1-pro-low", high: "gemini-pro-agent" },
-				suppressWhenOff: true,
-			},
-		};
-		const out = collapseEffortVariants([stale], ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
-		const pro = out.find(m => m.id === "gemini-3.1-pro");
-		expect(pro?.thinking?.mode).toBe("budget");
-		expect(pro?.thinking?.effortBudgets).toEqual({ low: 1001, high: 10001 });
 	});
 });
 
@@ -527,45 +330,6 @@ describe("collapseEffortVariantsAcrossProviders", () => {
 	});
 });
 
-describe("Devin tier routing", () => {
-	const family = (id: string) => {
-		const found = DEVIN_VARIANT_COLLAPSE_TABLE.families.find(f => f.id === id);
-		if (!found) throw new Error(`Devin family ${id} missing`);
-		return found;
-	};
-
-	it("routes user efforts 1:1 onto per-tier siblings including max", () => {
-		const opus = family("claude-opus-4-8");
-		expect(opus.routing).toEqual({
-			[Effort.Low]: "claude-opus-4-8-low",
-			[Effort.Medium]: "claude-opus-4-8-medium",
-			[Effort.High]: "claude-opus-4-8-high",
-			[Effort.XHigh]: "claude-opus-4-8-xhigh",
-			[Effort.Max]: "claude-opus-4-8-max",
-		});
-		expect(opus.thinking.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max]);
-		expect(opus.thinking.requiresEffort).toBe(true);
-
-		const sol = family("gpt-5-6-sol");
-		expect(sol.routing[Effort.Max]).toBe("gpt-5-6-sol-max");
-		expect(sol.routing[Effort.Low]).toBe("gpt-5-6-sol-low");
-		expect(sol.routing.off).toBe("gpt-5-6-sol-none");
-		expect(sol.routing[Effort.Minimal]).toBeUndefined();
-	});
-
-	it("keeps families without a -max sibling on the xhigh ceiling", () => {
-		const solFast = family("gpt-5-6-sol-fast");
-		expect(solFast.thinking.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
-		expect(solFast.routing[Effort.Max]).toBeUndefined();
-		expect(solFast.routing[Effort.XHigh]).toBe("gpt-5-6-sol-xhigh-priority");
-
-		const gpt55 = family("gpt-5-5");
-		expect(gpt55.thinking.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
-		expect(gpt55.routing[Effort.Minimal]).toBeUndefined();
-		expect(gpt55.routing[Effort.Max]).toBeUndefined();
-	});
-});
-
 describe("variant aliases", () => {
 	it("resolves members and recycled ids per provider", () => {
 		expect(resolveVariantAlias("google-antigravity", "gemini-3.5-flash-low")).toBe("gemini-3.5-flash");
@@ -616,9 +380,8 @@ describe("resolveWireModelId", () => {
 
 		expect(model.thinking?.effortRouting).toEqual(collapsed?.thinking?.effortRouting);
 		expect(model.thinking?.suppressWhenOff).toBe(true);
-		expect(resolveWireModelId(model, Effort.High)).toBe("gemini-3-flash-agent");
-		expect(resolveWireModelId(model, Effort.Medium)).toBe("gemini-3.5-flash-low");
-		expect(resolveWireModelId(model, Effort.Minimal)).toBe("gemini-3.5-flash-extra-low");
+		expect(resolveWireModelId(model, Effort.High)).toBe("gemini-3.5-flash-low");
+		expect(resolveWireModelId(model, Effort.Minimal)).toBe("gemini-3-flash-agent");
 		expect(resolveWireModelId(model, undefined)).toBe("gemini-3.5-flash-extra-low");
 
 		// Dropped route (partial family) falls back to requestModelId.
@@ -702,6 +465,35 @@ describe("merge-point collapsing (resolveProviderModels)", () => {
 });
 
 describe("antigravity discovery collapsing", () => {
+	it("keeps the logical override only while every routed backing id is proven", () => {
+		const routed = {
+			off: "gemini-3.5-flash-extra-low",
+			minimal: "gemini-3-flash-agent",
+			low: "gemini-3.5-flash-extra-low",
+			medium: "gemini-3.5-flash-extra-low",
+			high: "gemini-3.5-flash-low",
+		};
+		const proven = memberSpec("gemini-3.5-flash", {
+			requestModelId: "gemini-3.5-flash-extra-low",
+			thinking: {
+				mode: "google-level",
+				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
+				effortRouting: routed,
+			},
+		});
+		expect(applyAntigravityNativeVideoInputOverride(proven).input).toEqual(["text", "image", "video"]);
+
+		const unproven = memberSpec("gemini-3.5-flash", {
+			requestModelId: "gemini-3.5-flash-extra-low",
+			thinking: {
+				mode: "google-level",
+				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
+				effortRouting: { ...routed, high: "gemini-3.5-flash-preview" },
+			},
+		});
+		expect(applyAntigravityNativeVideoInputOverride(unproven).input).toEqual(["text", "image"]);
+	});
+
 	const payload = {
 		models: {
 			"gemini-3.5-flash-extra-low": {
@@ -724,6 +516,11 @@ describe("antigravity discovery collapsing", () => {
 				supportsImages: true,
 				thinkingBudget: 10_000,
 			},
+			"gemini-3.5-flash-preview": {
+				displayName: "Gemini 3.5 Flash Preview",
+				supportsThinking: true,
+				supportsImages: true,
+			},
 			"claude-sonnet-4-6": { displayName: "Claude Sonnet 4.6", supportsThinking: true, supportsImages: true },
 			"claude-sonnet-4-6-thinking": {
 				displayName: "Claude Sonnet 4.6 Thinking",
@@ -742,17 +539,27 @@ describe("antigravity discovery collapsing", () => {
 		{ preconnect: fetch.preconnect },
 	);
 
-	it("returns collapsed logical entries and keeps the denylist", async () => {
+	it("promotes video only for the exact proven Antigravity family when discovery omits it", async () => {
 		const models = await fetchAntigravityDiscoveryModels({ token: "t", endpoint: "https://cca.test", fetcher });
 
-		expect(models?.map(m => m.id).sort()).toEqual(["claude-sonnet-4-6", "gemini-2.5-flash", "gemini-3.5-flash"]);
+		expect(models?.map(m => m.id).sort()).toEqual([
+			"claude-sonnet-4-6",
+			"gemini-2.5-flash",
+			"gemini-3.5-flash",
+			"gemini-3.5-flash-preview",
+		]);
 		const flash = models?.find(m => m.id === "gemini-3.5-flash");
+		expect(flash?.input).toEqual(["text", "image", "video"]);
 		expect(flash?.requestModelId).toBe("gemini-3.5-flash-extra-low");
-		expect(flash?.thinking?.effortRouting?.[Effort.High]).toBe("gemini-3-flash-agent");
-		expect(flash?.thinking?.effortRouting?.[Effort.Medium]).toBe("gemini-3.5-flash-low");
+		expect(flash?.thinking?.effortRouting?.[Effort.High]).toBe("gemini-3.5-flash-low");
+		expect(flash?.thinking?.effortRouting?.[Effort.Minimal]).toBe("gemini-3-flash-agent");
 		expect(flash?.thinking?.suppressWhenOff).toBe(true);
+		// The override is an exact wire-id list, not a family-name heuristic.
+		expect(models?.find(m => m.id === "gemini-3.5-flash-preview")?.input).toEqual(["text", "image"]);
+		expect(models?.find(m => m.id === "claude-sonnet-4-6")?.input).not.toContain("video");
 		// The 2.5 pair collapses instead of denylisting the -thinking twin.
 		const flash25 = models?.find(m => m.id === "gemini-2.5-flash");
+		expect(flash25?.input).not.toContain("video");
 		expect(flash25?.thinking?.effortRouting?.[Effort.High]).toBe("gemini-2.5-flash-thinking");
 		expect(flash25?.thinking?.effortRouting?.off).toBe("gemini-2.5-flash");
 	});
@@ -770,24 +577,6 @@ describe("antigravity discovery collapsing", () => {
 		expect(flash?.baseUrl).toBe("https://cca.test");
 		expect(flash?.requestModelId).toBe("gemini-3.5-flash-extra-low");
 		expect(flash?.thinking?.effortRouting?.off).toBe("gemini-3.5-flash-extra-low");
-	});
-
-	it("uses the primary daily endpoint by default", async () => {
-		const requestedUrls: string[] = [];
-		const defaultFetcher = Object.assign(
-			(input: string | URL | Request, _init?: RequestInit) => {
-				requestedUrls.push(String(input));
-				return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
-			},
-			{ preconnect: fetch.preconnect },
-		);
-
-		const models = await fetchAntigravityDiscoveryModels({
-			token: "t",
-			fetcher: defaultFetcher,
-		});
-
-		expect(requestedUrls[0]).toContain(ANTIGRAVITY_PRIMARY_ENDPOINT);
-		expect(models?.[0]?.baseUrl).toBe(ANTIGRAVITY_PRIMARY_ENDPOINT);
+		expect(flash?.input).toEqual(["text", "image"]);
 	});
 });

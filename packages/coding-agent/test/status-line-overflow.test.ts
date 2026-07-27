@@ -35,7 +35,6 @@ function createCtx(overrides?: { pathMaxLength?: number; branch?: string | null 
 			sessionManager: undefined,
 		} as unknown as SegmentContext["session"],
 		width: 120,
-		compactThinkingLevel: false,
 		options: {
 			path: {
 				abbreviate: false,
@@ -52,22 +51,14 @@ function createCtx(overrides?: { pathMaxLength?: number; branch?: string | null 
 			output: 0,
 			cacheRead: 0,
 			cacheWrite: 0,
-			totalTokens: 0,
-			orchestrationInput: 0,
-			orchestrationOutput: 0,
-			orchestrationCacheRead: 0,
 			premiumRequests: 0,
 			cost: 0,
-			tokensPerSecond: null,
 		},
 		contextPercent: 0,
-		contextTokens: 0,
 		contextWindow: 0,
 		autoCompactEnabled: false,
 		subagentCount: 0,
-		activeMs: 0,
-		activeRepo: null,
-		worktree: null,
+		sessionStartTime: Date.now(),
 		git: {
 			branch: overrides?.branch ?? null,
 			status: null,
@@ -77,27 +68,13 @@ function createCtx(overrides?: { pathMaxLength?: number; branch?: string | null 
 	};
 }
 
-function createStatusLineSession(sessionName: string, modelName?: string) {
-	const model = modelName ? { name: modelName, contextWindow: 128000 } : undefined;
+function createStatusLineSession(sessionName: string) {
 	return {
-		state: { messages: [], model },
-		messages: [],
-		model: model ?? { contextWindow: 128000 },
-		contextUsageRevision: 0,
-		systemPrompt: [],
-		agent: { state: { tools: [] } },
-		skills: [],
+		state: { messages: [] },
 		isStreaming: false,
-		isAutoThinking: false,
-		autoResolvedThinkingLevel: () => undefined,
-		isAdvisorActive: () => false,
-		isFastModeActive: () => false,
 		getAsyncJobSnapshot: () => ({ running: [] }),
 		getCurrentModel: () => undefined,
 		isFastModeEnabled: () => false,
-		getContextUsage: () => ({ tokens: 0, contextWindow: 128000 }),
-		getGoalModeState: () => null,
-		modelRegistry: { isUsingOAuth: () => false },
 		sessionManager: {
 			getSessionName: () => sessionName,
 			getUsageStatistics: () => ({
@@ -105,19 +82,11 @@ function createStatusLineSession(sessionName: string, modelName?: string) {
 				output: 0,
 				cacheRead: 0,
 				cacheWrite: 0,
-				totalTokens: 0,
-				orchestrationInput: 0,
-				orchestrationOutput: 0,
-				orchestrationCacheRead: 0,
 				premiumRequests: 0,
 				cost: 0,
 			}),
 		},
 	} as unknown as ConstructorParameters<typeof StatusLineComponent>[0];
-}
-
-function stripAnsi(value: string): string {
-	return value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 describe("status line session accent", () => {
@@ -139,23 +108,18 @@ describe("status line session accent", () => {
 			getSessionAccentHex("Named session", theme.getMajorThemeColorHexes(), theme.accentSurfaceLuminance),
 		);
 
-	it("paints the gap with the session accent when enabled", () => {
-		const ansi = accentAnsi();
-		expect(ansi).toBeDefined();
+	it("fills the gap with plain spaces and no horizontal rule", () => {
 		const border = buildComponent(true).getTopBorder(80).content;
-		expect(border).toContain(`${ansi}${theme.boxRound.horizontal}`);
+		// Borderless status line: no box-drawing horizontal rule in the gap.
+		expect(border).not.toContain(theme.boxRound.horizontal);
+		// The gap itself is not accent-painted (the session-name segment may be).
+		const ansi = accentAnsi();
+		if (ansi) expect(border).not.toContain(`${ansi}${theme.boxRound.horizontal}`);
 	});
 
-	it("paints the gap with the border color and omits the session accent when disabled", () => {
-		const ansi = accentAnsi();
-		expect(ansi).toBeDefined();
+	it("keeps the gap free of box chrome when the session accent is disabled", () => {
 		const border = buildComponent(false).getTopBorder(80).content;
-		// Positive: gap is rendered with the theme border color.
-		expect(border).toContain(`${theme.getFgAnsi("border")}${theme.boxRound.horizontal}`);
-		// Negative: the gap-painting pattern (accent ANSI directly followed by a horizontal
-		// glyph) must not appear. The session_name segment may still emit the accent ANSI
-		// for its own text — we only care that the gap is not accent-painted.
-		expect(border).not.toContain(`${ansi}${theme.boxRound.horizontal}`);
+		expect(border).not.toContain(theme.boxRound.horizontal);
 	});
 });
 
@@ -262,17 +226,10 @@ describe("overflow: path shrinks before git is dropped", () => {
 			}
 		}
 
-		// Left-segment fallback loop.
-		const leftOverflowDropIndex = (): number => {
-			for (let i = leftSegIds.length - 1; i >= 0; i--) {
-				if (leftSegIds[i] !== "path") return i;
-			}
-			return left.length - 1;
-		};
+		// Left-pop loop (fallback)
 		while (groupWidth() > width && left.length > 0) {
-			const dropIdx = leftOverflowDropIndex();
-			left.splice(dropIdx, 1);
-			leftSegIds.splice(dropIdx, 1);
+			left.pop();
+			leftSegIds.pop();
 		}
 
 		return { surviving: [...leftSegIds], contents: [...left] };
@@ -310,20 +267,18 @@ describe("overflow: path shrinks before git is dropped", () => {
 	});
 
 	it("shrinks a short path when maxLength exceeds actual path length", () => {
-		// Short dir name — rendered path is well under the configured maxLength.
+		// Short dir name — rendered path is well under maxLength=80
 		const shortDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-short-"));
 		setProjectDir(shortDir);
 		try {
-			const maxLength = 160;
-			const ctx = createCtx({ pathMaxLength: maxLength, branch: "feat/long-branch-name" });
+			const ctx = createCtx({ pathMaxLength: 80, branch: "feat/long-branch-name" });
 			const fullPath = renderSegment("path", ctx);
 			const fullGit = renderSegment("git", ctx);
 			const pathVW = visibleWidth(fullPath.content);
 			const gitVW = visibleWidth(fullGit.content);
 
-			// Sanity: path is shorter than maxLength — this is the bug scenario.
-			// macOS temp paths can exceed 80 columns once the path icon is included.
-			expect(pathVW).toBeLessThan(maxLength);
+			// Sanity: path is shorter than maxLength — this is the bug scenario
+			expect(pathVW).toBeLessThan(80);
 
 			// Width that fits a shrunken path + git but not the full path + git
 			const tightWidth = Math.floor(pathVW * 0.5) + gitVW + 10;
@@ -363,63 +318,5 @@ describe("overflow: path shrinks before git is dropped", () => {
 		} finally {
 			setProjectDir(tmpDir);
 		}
-	});
-});
-
-describe("overflow: path survives before model", () => {
-	it("drops the model segment before the cwd path when both cannot fit", () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-statusline-overflow-"));
-		const cwd = path.join(root, "cwdxyz");
-		fs.mkdirSync(cwd);
-		setProjectDir(cwd);
-
-		const modelName = `MODEL_SHOULD_DROP_${"x".repeat(24)}`;
-		const session = createStatusLineSession("overflow test", modelName);
-		const component = new StatusLineComponent(session);
-		const pathOptions = {
-			abbreviate: false,
-			maxLength: 32,
-			stripWorkPrefix: false,
-		};
-		component.updateSettings({
-			preset: "custom",
-			leftSegments: ["pi", "model", "path"],
-			rightSegments: [],
-			separator: "none",
-			sessionAccent: false,
-			transparent: true,
-			segmentOptions: {
-				model: { showThinkingLevel: false },
-				path: pathOptions,
-			},
-		});
-
-		const ctx = {
-			...createCtx({ pathMaxLength: pathOptions.maxLength }),
-			session,
-			options: {
-				model: { showThinkingLevel: false },
-				path: pathOptions,
-			},
-		} as SegmentContext;
-		const pi = renderSegment("pi", ctx).content;
-		const model = renderSegment("model", ctx).content;
-		const minPath = renderSegment("path", {
-			...ctx,
-			options: { ...ctx.options, path: { ...pathOptions, maxLength: 4 } },
-		}).content;
-		const separatorWidth = visibleWidth(theme.sep.space);
-		const groupWidth = (parts: string[]) =>
-			parts.reduce((sum, part) => sum + visibleWidth(part), 0) +
-			Math.max(0, parts.length - 1) * (separatorWidth + 2) +
-			2;
-		const width = groupWidth([pi, model]) + 1;
-
-		expect(groupWidth([pi, model, minPath])).toBeGreaterThan(width);
-		expect(groupWidth([pi, minPath])).toBeLessThanOrEqual(width);
-
-		const rendered = stripAnsi(component.getTopBorder(width).content);
-		expect(rendered).toContain("xyz");
-		expect(rendered).not.toContain("MODEL_SHOULD_DROP");
 	});
 });

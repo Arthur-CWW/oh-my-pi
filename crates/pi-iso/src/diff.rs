@@ -24,7 +24,7 @@ use std::{
 
 use tokio::process::Command;
 
-use crate::{IsoError, IsoResult, command_failed};
+use crate::{IsoError, IsoResult};
 
 /// Captured changes between a `lower` baseline and a `merged` view.
 #[derive(Debug, Clone, Default)]
@@ -147,22 +147,18 @@ const fn git_null_path() -> &'static str {
 	"/dev/null"
 }
 
-/// Format a failed `git` invocation, rendering a signal death as `exit ?`.
-fn git_failure(args: &[&str], output: &std::process::Output) -> IsoError {
-	command_failed(
-		format_args!("git {}", args.join(" ")),
-		output
-			.status
-			.code()
-			.map_or_else(|| "?".into(), |c| c.to_string()),
-		&output.stderr,
-	)
-}
-
 async fn git_run(cwd: &Path, args: &[&str]) -> IsoResult<Vec<u8>> {
 	let output = git_spawn(cwd, args).await?;
 	if !output.status.success() {
-		return Err(git_failure(args, &output));
+		let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+		return Err(IsoError::other(format!(
+			"git {} (exit {}): {stderr}",
+			args.join(" "),
+			output
+				.status
+				.code()
+				.map_or_else(|| "?".into(), |c| c.to_string())
+		)));
 	}
 	Ok(output.stdout)
 }
@@ -174,7 +170,15 @@ async fn git_run_allow_exit1(cwd: &Path, args: &[&str]) -> IsoResult<Vec<u8>> {
 	if output.status.success() || output.status.code() == Some(1) {
 		return Ok(output.stdout);
 	}
-	Err(git_failure(args, &output))
+	let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+	Err(IsoError::other(format!(
+		"git {} (exit {}): {stderr}",
+		args.join(" "),
+		output
+			.status
+			.code()
+			.map_or_else(|| "?".into(), |c| c.to_string())
+	)))
 }
 
 async fn git_spawn(cwd: &Path, args: &[&str]) -> IsoResult<std::process::Output> {

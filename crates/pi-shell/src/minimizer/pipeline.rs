@@ -95,6 +95,7 @@ pub struct MatchOutputDef {
 /// `[[tests.NAME]]`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code, reason = "test-only API surface")]
 pub struct PipelineTest {
 	pub name:     String,
 	pub input:    String,
@@ -131,7 +132,9 @@ pub struct CompiledMatchOutput {
 /// A pipeline with every regex pre-compiled.
 #[derive(Debug)]
 pub struct CompiledPipeline {
+	#[allow(dead_code, reason = "test-only API surface")]
 	pub name:              String,
+	#[allow(dead_code, reason = "test-only API surface")]
 	pub description:       Option<String>,
 	pub match_command:     Regex,
 	pub match_subcommand:  Option<Regex>,
@@ -374,6 +377,7 @@ pub type ParsedPipelineFile = (Vec<CompiledPipeline>, Vec<(String, Vec<PipelineT
 #[derive(Debug, Default)]
 pub struct PipelineRegistry {
 	pub pipelines: Vec<CompiledPipeline>,
+	#[allow(dead_code, reason = "test-only API surface")]
 	pub tests:     Vec<(String, Vec<PipelineTest>)>,
 }
 
@@ -421,6 +425,7 @@ pub fn parse_file(contents: &str, source_label: &str) -> Result<ParsedPipelineFi
 
 /// Outcome for a single inline test.
 #[derive(Debug, Clone)]
+#[allow(dead_code, reason = "test-only API surface")]
 pub struct TestOutcome {
 	pub filter_name: String,
 	pub test_name:   String,
@@ -430,6 +435,7 @@ pub struct TestOutcome {
 }
 
 /// Run every inline test in `registry` and return the outcomes.
+#[allow(dead_code, reason = "test-only API surface")]
 #[must_use]
 pub fn run_tests(registry: &PipelineRegistry) -> Vec<TestOutcome> {
 	let mut out = Vec::new();

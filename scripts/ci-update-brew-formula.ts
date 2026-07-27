@@ -23,7 +23,7 @@ interface ReleaseAsset {
 function parseArgs(argv: readonly string[]): { tag: string; out: string | null } {
 	const rest = [...argv];
 	let out: string | null = null;
-	const outIdx = rest.indexOf("--out");
+	const outIdx = rest.findIndex(a => a === "--out");
 	if (outIdx >= 0) {
 		out = rest[outIdx + 1] ?? null;
 		if (!out) throw new Error("--out requires a path");

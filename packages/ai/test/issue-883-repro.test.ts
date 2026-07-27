@@ -4,23 +4,6 @@ import type { AssistantMessage, Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 
-interface OpenAICompletionAssistantWireMessage {
-	role: "assistant";
-	content?: unknown;
-	reasoning_content?: unknown;
-}
-
-function isOpenAICompletionAssistantWireMessage(message: unknown): message is OpenAICompletionAssistantWireMessage {
-	if (typeof message !== "object" || message === null) return false;
-	return (message as { role?: unknown }).role === "assistant";
-}
-
-function findOpenAICompletionAssistantWireMessage(
-	messages: readonly unknown[] | undefined,
-): OpenAICompletionAssistantWireMessage | undefined {
-	return messages?.find(isOpenAICompletionAssistantWireMessage);
-}
-
 function deepseekModel(overrides: Partial<ModelSpec<"openai-completions">>): Model<"openai-completions"> {
 	const base = getBundledModel("openai", "gpt-4o-mini");
 	return buildModel({
@@ -87,9 +70,9 @@ describe("issue #883 / #810 — DeepSeek V4 reasoning_content tool-call replay",
 		});
 		const compat = model.compat;
 		const messages = convertMessages(model, { messages: [assistantWithToolCall(model)] }, compat);
-		const assistant = findOpenAICompletionAssistantWireMessage(messages);
+		const assistant = messages.find(m => m.role === "assistant");
 		expect(assistant).toBeDefined();
-		const reasoningContent = assistant?.reasoning_content;
+		const reasoningContent = Reflect.get(assistant as object, "reasoning_content");
 		expect(reasoningContent).toBeDefined();
 		// DeepSeek rejects synthetic "." — when no thinking blocks exist, we emit empty string
 		expect(reasoningContent).toBe("");
@@ -130,8 +113,8 @@ describe("issue #883 / #810 — DeepSeek V4 reasoning_content tool-call replay",
 			timestamp: Date.now(),
 		};
 		const messages = convertMessages(model, { messages: [toolOnly] }, compat);
-		const assistant = findOpenAICompletionAssistantWireMessage(messages);
+		const assistant = messages.find(m => m.role === "assistant");
 		expect(assistant).toBeDefined();
-		expect(assistant?.content).toBe("");
+		expect((assistant as { content: unknown }).content).toBe("");
 	});
 });

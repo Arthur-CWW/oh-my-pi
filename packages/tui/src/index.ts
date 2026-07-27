@@ -2,6 +2,7 @@
 
 // Autocomplete support
 export * from "./autocomplete";
+export * from "./completion-behavior";
 // Components
 export * from "./components/box";
 export * from "./components/cancellable-loader";
@@ -19,8 +20,6 @@ export * from "./components/text";
 export * from "./components/truncated-text";
 // DECCARA rectangular-SGR background-fill optimizer
 export * from "./deccara";
-// Desktop notifications via D-Bus (Linux freedesktop notifications)
-export * from "./desktop-notify";
 // Editor component interface (for custom editors)
 export type * from "./editor-component";
 // Fuzzy matching
@@ -29,11 +28,9 @@ export * from "./fuzzy";
 export * from "./keybindings";
 // Kitty keyboard protocol helpers
 export * from "./keys";
+export * from "./vim-grammar";
 // Kitty graphics: Unicode placeholders
 export * from "./kitty-graphics";
-// LaTeX → Unicode/ANSI math rendering
-export * from "./latex-block";
-export * from "./latex-to-unicode";
 // SGR mouse report parsing
 export * from "./mouse";
 // Mermaid diagram support

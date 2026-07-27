@@ -47,6 +47,7 @@ const commonFonts = [
   "Wingdings 3",
   "Apple Color Emoji",
   "Apple SD Gothic Neo",
+  "Helvetica Neue",
   "Hoefler Text",
   "Menlo",
   "Monaco",
@@ -55,31 +56,32 @@ const commonFonts = [
   "SF Pro Text",
 ];
 
+// Override queryLocalFonts if present (Local Font Access API)
 if ("queryLocalFonts" in window) {
-  const queryLocalFonts = async function queryLocalFonts() {
-    return commonFonts.map((family) => ({
-      family,
-      fullName: family,
-      postscriptName: family.replace(/\s+/g, ""),
-      style: "Regular",
-      blob: () => Promise_resolve(new Window_Blob([])),
-    }));
-  };
-  patchToString(queryLocalFonts, "queryLocalFonts");
   Object_defineProperty(window, "queryLocalFonts", {
-    value: queryLocalFonts,
+    value: async () => {
+      return commonFonts.map((family) => ({
+        family,
+        fullName: family,
+        postscriptName: family.replace(/\s+/g, ""),
+        style: "Regular",
+        blob: () => Promise_resolve(new Window_Blob([])),
+      }));
+    },
     writable: true,
     configurable: true,
     enumerable: true,
   });
 }
 
+// Hide fonts-unique tracking via canvas
 const originalGetContext = HTMLCanvasElement.prototype.getContext;
-const patchedGetContext = function getContext(type, options) {
+HTMLCanvasElement.prototype.getContext = function (type, options) {
   const ctx = originalGetContext.call(this, type, options);
   if (ctx && type === "2d") {
     const originalFillText = ctx.fillText;
-    const patchedFillText = function fillText(text, x, y, maxWidth) {
+    ctx.fillText = function (text, x, y, maxWidth) {
+      // Add tiny imperceptible noise to text rendering
       const noiseX = (Math_random() - 0.5) * 0.02;
       const noiseY = (Math_random() - 0.5) * 0.02;
       return originalFillText.call(
@@ -90,10 +92,6 @@ const patchedGetContext = function getContext(type, options) {
         maxWidth,
       );
     };
-    patchToString(patchedFillText, "fillText");
-    ctx.fillText = patchedFillText;
   }
   return ctx;
 };
-patchToString(patchedGetContext, "getContext");
-HTMLCanvasElement.prototype.getContext = patchedGetContext;

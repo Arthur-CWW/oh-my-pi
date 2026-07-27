@@ -13,7 +13,6 @@
  */
 
 import type {
-	AgentTypeStats,
 	AggregatedStats,
 	CostTimeSeriesPoint,
 	ModelPerformancePoint,
@@ -65,7 +64,6 @@ export type TimeRange = "1h" | "24h" | "7d" | "30d" | "90d" | "all";
 
 export interface OverviewStats {
 	overall: AggregatedStats;
-	byAgentType: AgentTypeStats[];
 	timeSeries: TimeSeriesPoint[];
 }
 

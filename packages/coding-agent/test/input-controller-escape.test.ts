@@ -1,16 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
 import type { InteractiveModeContext, SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
+import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { vocalizer } from "@oh-my-pi/pi-coding-agent/tts/vocalizer";
-import * as logger from "@oh-my-pi/pi-utils/logger";
 
 type Spy = Mock<(...args: unknown[]) => unknown>;
 type StartPendingSubmissionSpy = Mock<InteractiveModeContext["startPendingSubmission"]>;
 type FakeEditor = {
-	onEscape?: () => void;
+	onEscape?: (key?: string) => void;
+	onInterrupt?: (key?: string) => void;
 	onSubmit?: (text: string) => Promise<void>;
 	onClear?: () => void;
 	onExit?: () => void;
@@ -35,18 +34,16 @@ type FakeEditor = {
 	setActionKeys(action: string, keys: string[]): void;
 	setCustomKeyHandler(key: string, handler: () => void): void;
 	clearCustomKeyHandlers(): void;
-	pendingImages: ImageContent[];
-	pendingImageLinks: (string | undefined)[];
 };
 
 function createSubmission(input: {
 	text: string;
-	images?: ImageContent[];
-	imageLinks?: (string | undefined)[];
+	attachments?: SubmittedUserInput["attachments"];
+	imageLinks?: InteractiveModeContext["pendingImageLinks"];
 }): SubmittedUserInput {
 	return {
 		text: input.text,
-		images: input.images,
+		attachments: input.attachments,
 		imageLinks: input.imageLinks,
 		cancelled: false,
 		started: false,
@@ -77,16 +74,15 @@ function createContext(): {
 		prompt: Spy;
 		requestRender: Spy;
 		resetDisplay: Spy;
+		showHookSelector: Spy;
 		shutdown: Spy;
-		showStatus: Spy;
 		startPendingSubmission: StartPendingSubmissionSpy;
 		updatePendingMessagesDisplay: Spy;
 	};
 	inputListeners: Array<(data: string) => { consume?: boolean; data?: string } | undefined>;
-	sessionListeners: Array<(event: { type: string }) => void>;
 } {
 	let editorText = "";
-	const abort = vi.fn();
+	const abort = vi.fn(async () => {});
 	const abortBash = vi.fn();
 	const abortEval = vi.fn();
 	const abortHandoff = vi.fn();
@@ -97,18 +93,21 @@ function createContext(): {
 	const onInputCallback = vi.fn();
 	const requestRender = vi.fn();
 	const resetDisplay = vi.fn();
-	const showStatus = vi.fn();
 	const inputListeners: Array<(data: string) => { consume?: boolean; data?: string } | undefined> = [];
-	const sessionListeners: Array<(event: { type: string }) => void> = [];
 	const handleBtwCommand = vi.fn(async () => {});
 	const handleBtwEscape = vi.fn(() => true);
 	const hasActiveBtw = vi.fn(() => false);
 	const handleOmfgEscape = vi.fn(() => true);
 	const hasActiveOmfg = vi.fn(() => false);
 	const updatePendingMessagesDisplay = vi.fn();
+	const showHookSelector = vi.fn();
 	const prompt = vi.fn();
 	const startPendingSubmission = vi.fn(
-		(input: { text: string; images?: ImageContent[]; imageLinks?: (string | undefined)[] }) => {
+		(input: {
+			text: string;
+			attachments?: SubmittedUserInput["attachments"];
+			imageLinks?: InteractiveModeContext["pendingImageLinks"];
+		}) => {
 			ensureLoadingAnimation();
 			return createSubmission(input);
 		},
@@ -124,8 +123,6 @@ function createContext(): {
 		setActionKeys: vi.fn(),
 		setCustomKeyHandler: vi.fn(),
 		clearCustomKeyHandlers: vi.fn(),
-		pendingImages: [],
-		pendingImageLinks: [],
 	};
 
 	let ctx!: InteractiveModeContext;
@@ -164,13 +161,8 @@ function createContext(): {
 			clearQueue,
 			getQueuedMessages,
 			prompt,
-			subscribe: vi.fn((listener: (event: { type: string }) => void) => {
-				sessionListeners.push(listener);
-				return () => {
-					const index = sessionListeners.indexOf(listener);
-					if (index >= 0) sessionListeners.splice(index, 1);
-				};
-			}),
+			getQueuedInputProjection: () => [],
+			cancelQueuedInput: vi.fn(),
 		} as unknown as InteractiveModeContext["session"],
 		viewSession: {
 			isCompacting: false,
@@ -182,11 +174,14 @@ function createContext(): {
 		} as unknown as InteractiveModeContext["viewSession"],
 		sessionManager: {
 			getSessionName: () => "existing session",
+			getSessionFile: () => undefined,
 			flushSync: vi.fn(),
 		} as unknown as InteractiveModeContext["sessionManager"],
 		keybindings: {
 			getKeys: () => [],
 		} as unknown as InteractiveModeContext["keybindings"],
+		pendingImages: [],
+		pendingImageLinks: [],
 		compactionQueuedMessages: [],
 		isBashMode: false,
 		isPythonMode: false,
@@ -202,12 +197,14 @@ function createContext(): {
 		startPendingSubmission,
 		updatePendingMessagesDisplay,
 		updateEditorBorderColor: vi.fn(),
+		closeUnpinnedErrorsPanel: vi.fn(),
 		showDebugSelector: vi.fn(),
 		toggleTodoExpansion: vi.fn(),
 		showAgentHub: vi.fn(),
 		unfocusSession: vi.fn(async () => {}),
 		focusParentSession: vi.fn(async () => {}),
 		handleSTTToggle: vi.fn(),
+		returnToAgentHubPreview: vi.fn(() => false),
 		handleBtwEscape,
 		handleBtwCommand,
 		hasActiveBtw,
@@ -216,9 +213,9 @@ function createContext(): {
 		showTreeSelector: vi.fn(),
 		showUserMessageSelector: vi.fn(),
 		showSessionSelector: vi.fn(),
+		showHookSelector,
 		shutdown: vi.fn(async () => {}),
 		clearEditor: vi.fn(),
-		showStatus,
 	} as unknown as InteractiveModeContext;
 
 	return {
@@ -245,51 +242,27 @@ function createContext(): {
 			prompt,
 			requestRender,
 			resetDisplay,
-			showStatus,
+			showHookSelector,
 			shutdown: ctx.shutdown as Spy,
 			startPendingSubmission,
 			updatePendingMessagesDisplay,
 		},
 		inputListeners,
-		sessionListeners,
 	};
 }
-
-type AbortViewSession = {
-	isCompacting: boolean;
-	isGeneratingHandoff: boolean;
-	isRetrying: boolean;
-	abortCompaction: Spy;
-	abortHandoff: Spy;
-	abortRetry: Spy;
-};
-
-function abortViewSession(ctx: InteractiveModeContext): AbortViewSession {
-	// Test harness installs a mutable fake AgentSession; keep the unchecked cast named
-	// so property access is explicit.
-	return ctx.viewSession as unknown as AbortViewSession;
-}
-
-type MutableSessionState = InteractiveModeContext["session"] & {
-	isStreaming: boolean;
-};
-
-function mutableSessionState(ctx: InteractiveModeContext): MutableSessionState {
-	// Test harness installs a mutable fake AgentSession; keep the unchecked cast named
-	// so state mutations are explicit.
-	return ctx.session as MutableSessionState;
-}
 beforeEach(async () => {
+	AgentRegistry.resetGlobalForTests();
 	await Settings.init({ inMemory: true });
 });
 
 afterEach(() => {
+	AgentRegistry.resetGlobalForTests();
 	vi.restoreAllMocks();
 	resetSettingsForTest();
 });
 
 describe("InputController escape behavior", () => {
-	it("prefers canceling a pending optimistic submission before aborting the session", async () => {
+	it("prefers canceling a pending optimistic submission before aborting on interrupt", async () => {
 		const { ctx, editor, spies } = createContext();
 		const submission = createSubmission({ text: "hello" });
 		spies.startPendingSubmission.mockReturnValue(submission);
@@ -303,13 +276,13 @@ describe("InputController escape behavior", () => {
 
 		expect(spies.startPendingSubmission).toHaveBeenCalledWith({
 			text: "hello",
-			images: undefined,
+			attachments: undefined,
 			imageLinks: undefined,
-			streamingBehavior: "steer",
+			streamingBehavior: "followUp",
 		});
 		expect(spies.onInputCallback).toHaveBeenCalledWith(submission);
 
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 		expect(spies.cancelPendingSubmission).toHaveBeenCalledTimes(1);
 		expect(spies.clearQueue).not.toHaveBeenCalled();
 		expect(spies.abort).not.toHaveBeenCalled();
@@ -347,33 +320,33 @@ describe("InputController escape behavior", () => {
 
 		expect(spies.handleBtwCommand).toHaveBeenCalledWith("why is it doing that?");
 		expect(spies.prompt).not.toHaveBeenCalled();
-		expect(editor.addToHistory).toHaveBeenCalledWith("/btw why is it doing that?");
+		expect(editor.addToHistory).not.toHaveBeenCalled();
 		expect(editor.getText()).toBe("");
 	});
 
-	it("falls back to aborting the active session when no pending optimistic submission exists", () => {
+	it("falls back to aborting the active session when no pending optimistic submission exists", async () => {
 		const { ctx, editor, spies } = createContext();
 		ctx.loadingAnimation = {} as InteractiveModeContext["loadingAnimation"];
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onInterrupt?.();
+		await Promise.resolve();
+		await Promise.resolve();
 
 		expect(spies.cancelPendingSubmission).toHaveBeenCalledTimes(1);
-		expect(spies.clearQueue).toHaveBeenCalledTimes(1);
+		expect(spies.clearQueue).not.toHaveBeenCalled();
 		expect(spies.abort).toHaveBeenCalledTimes(1);
-		// The Esc interrupt threads a user-facing reason so the aborted turn and its
-		// synthetic tool results read as a deliberate interrupt, not "Request was aborted".
 		expect(spies.abort).toHaveBeenCalledWith({ reason: USER_INTERRUPT_LABEL });
 	});
 
-	it("aborts active handoff generation before default Esc handling", () => {
+	it("interrupts active handoff generation before the default turn cancel", () => {
 		const { ctx, editor, spies } = createContext();
 		(ctx.viewSession as { isGeneratingHandoff: boolean }).isGeneratingHandoff = true;
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 
 		expect(spies.abortHandoff).toHaveBeenCalledTimes(1);
 		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
@@ -387,7 +360,7 @@ describe("InputController escape behavior", () => {
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 
 		expect(spies.abortBash).toHaveBeenCalledTimes(1);
 		expect(spies.abort).not.toHaveBeenCalled();
@@ -400,7 +373,7 @@ describe("InputController escape behavior", () => {
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 
 		expect(spies.abortEval).toHaveBeenCalledTimes(1);
 		expect(spies.abort).not.toHaveBeenCalled();
@@ -448,37 +421,29 @@ describe("InputController escape behavior", () => {
 		expect(spies.abort).not.toHaveBeenCalled();
 	});
 
-	it("aborts an active streaming turn on the first Esc without asking for confirmation", () => {
+	it("interrupts streaming even when the working loader is no longer present", () => {
 		const { ctx, editor, spies } = createContext();
-		mutableSessionState(ctx).isStreaming = true;
+		(ctx.session as { isStreaming: boolean }).isStreaming = true;
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onInterrupt?.();
 
+		expect(spies.cancelPendingSubmission).toHaveBeenCalledTimes(1);
+		expect(spies.clearQueue).not.toHaveBeenCalled();
 		expect(spies.abort).toHaveBeenCalledTimes(1);
-		expect(spies.abort).toHaveBeenCalledWith({ reason: USER_INTERRUPT_LABEL });
-		expect(spies.showStatus).not.toHaveBeenCalledWith("Press Esc again within 2s to cancel streaming.");
 	});
 
-	it("aborts the submitted turn on the first Esc once the main session starts streaming", async () => {
+	it("dismisses editor UI without interrupting a streaming turn", () => {
 		const { ctx, editor, spies } = createContext();
-		const submission = createSubmission({ text: "fix issue #4921" });
-		spies.startPendingSubmission.mockReturnValue(submission);
+		(ctx.session as { isStreaming: boolean }).isStreaming = true;
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		controller.setupEditorSubmitHandler();
-		await editor.onSubmit?.("fix issue #4921");
-		mutableSessionState(ctx).isStreaming = true;
-		ctx.loadingAnimation = undefined;
-
 		editor.onEscape?.();
 
+		expect(spies.abort).not.toHaveBeenCalled();
 		expect(spies.cancelPendingSubmission).not.toHaveBeenCalled();
-		expect(spies.abort).toHaveBeenCalledTimes(1);
-		expect(spies.abort).toHaveBeenCalledWith({ reason: USER_INTERRUPT_LABEL });
-		expect(spies.showStatus).not.toHaveBeenCalledWith("Press Esc again within 2s to cancel streaming.");
 	});
 
 	it("returns focused subagent view to main on Esc instead of aborting", () => {
@@ -490,77 +455,6 @@ describe("InputController escape behavior", () => {
 		editor.onEscape?.();
 
 		expect(ctx.unfocusSession).toHaveBeenCalledTimes(1);
-		expect(spies.abort).not.toHaveBeenCalled();
-	});
-
-	it("returns focused subagent view to main on Esc without aborting its active maintenance (#2819)", () => {
-		const { ctx, editor, spies } = createContext();
-		Object.defineProperty(ctx, "focusedAgentId", { value: "Worker", configurable: true });
-		(ctx.viewSession as { isCompacting: boolean }).isCompacting = true;
-		(ctx.viewSession as { isGeneratingHandoff: boolean }).isGeneratingHandoff = true;
-		(ctx.viewSession as { isRetrying: boolean }).isRetrying = true;
-		(ctx.viewSession as unknown as { abortCompaction: Spy }).abortCompaction = vi.fn();
-		(ctx.viewSession as unknown as { abortHandoff: Spy }).abortHandoff = spies.abortHandoff;
-		(ctx.viewSession as unknown as { abortRetry: Spy }).abortRetry = vi.fn();
-		const controller = new InputController(ctx);
-
-		controller.setupKeyHandlers();
-		editor.onEscape?.();
-
-		expect(ctx.unfocusSession).toHaveBeenCalledTimes(1);
-		expect(ctx.viewSession.abortCompaction as unknown as Spy).not.toHaveBeenCalled();
-		expect(spies.abortHandoff).not.toHaveBeenCalled();
-		expect(ctx.viewSession.abortRetry as unknown as Spy).not.toHaveBeenCalled();
-	});
-
-	it("aborts main-view maintenance on Esc normally", () => {
-		const { ctx, editor, spies } = createContext();
-		// Not focused:
-		expect(ctx.focusedAgentId).toBeUndefined();
-		(ctx.viewSession as { isCompacting: boolean }).isCompacting = true;
-		(ctx.viewSession as { isGeneratingHandoff: boolean }).isGeneratingHandoff = true;
-		(ctx.viewSession as { isRetrying: boolean }).isRetrying = true;
-		(ctx.viewSession as unknown as { abortCompaction: Spy }).abortCompaction = vi.fn();
-		(ctx.viewSession as unknown as { abortHandoff: Spy }).abortHandoff = spies.abortHandoff;
-		(ctx.viewSession as unknown as { abortRetry: Spy }).abortRetry = vi.fn();
-		const controller = new InputController(ctx);
-
-		controller.setupKeyHandlers();
-		editor.onEscape?.();
-
-		expect(ctx.unfocusSession).not.toHaveBeenCalled();
-		expect(ctx.viewSession.abortCompaction as unknown as Spy).toHaveBeenCalledTimes(1);
-		expect(spies.abortHandoff).toHaveBeenCalledTimes(1);
-		expect(ctx.viewSession.abortRetry as unknown as Spy).toHaveBeenCalledTimes(1);
-	});
-
-	it("logs abort failures while treating maintenance Esc as handled", () => {
-		const debugSpy = vi.spyOn(logger, "debug").mockImplementation(() => {});
-		const { ctx, editor, spies } = createContext();
-		const viewSession = abortViewSession(ctx);
-		viewSession.isCompacting = true;
-		viewSession.isGeneratingHandoff = true;
-		viewSession.isRetrying = true;
-		viewSession.abortCompaction = vi.fn(() => {
-			throw new Error("compaction boom");
-		});
-		viewSession.abortHandoff = vi.fn(() => {
-			throw new Error("handoff boom");
-		});
-		viewSession.abortRetry = vi.fn(() => {
-			throw new Error("retry boom");
-		});
-		const controller = new InputController(ctx);
-
-		controller.setupKeyHandlers();
-		editor.onEscape?.();
-
-		expect(viewSession.abortCompaction).toHaveBeenCalledTimes(1);
-		expect(viewSession.abortHandoff).toHaveBeenCalledTimes(1);
-		expect(viewSession.abortRetry).toHaveBeenCalledTimes(1);
-		expect(debugSpy).toHaveBeenCalledWith("Failed to abort compaction", { error: "compaction boom" });
-		expect(debugSpy).toHaveBeenCalledWith("Failed to abort handoff", { error: "handoff boom" });
-		expect(debugSpy).toHaveBeenCalledWith("Failed to abort retry", { error: "retry boom" });
 		expect(spies.abort).not.toHaveBeenCalled();
 	});
 
@@ -609,7 +503,7 @@ describe("InputController escape behavior", () => {
 		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
 		expect(spies.resetDisplay).toHaveBeenCalledTimes(1);
 	});
-	it("preserves typed editor text on Esc without opening selectors or aborting", () => {
+	it("clears typed editor text on Esc without opening selectors or aborting", () => {
 		const { ctx, editor, spies } = createContext();
 		const controller = new InputController(ctx);
 
@@ -617,48 +511,139 @@ describe("InputController escape behavior", () => {
 		editor.setText("draft message");
 		editor.onEscape?.();
 
-		expect(editor.getText()).toBe("draft message");
-		expect(spies.requestRender).not.toHaveBeenCalled();
+		expect(editor.getText()).toBe("");
+		expect(spies.requestRender).toHaveBeenCalledTimes(1);
 		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
 		expect(ctx.showUserMessageSelector).not.toHaveBeenCalled();
 		expect(spies.resetDisplay).not.toHaveBeenCalled();
 		expect(spies.abort).not.toHaveBeenCalled();
 	});
 
-	it("does not treat the Esc after a text-preserving Esc as a double-Esc", () => {
+	it("does not treat the Esc after a text-clearing Esc as a double-Esc", () => {
 		const { ctx, editor } = createContext();
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
 		editor.onEscape?.(); // empty editor: arms double-Esc timer
 		editor.setText("draft");
-		editor.onEscape?.(); // preserves text, must also reset the timer
-		editor.setText("");
+		editor.onEscape?.(); // clears text, must also reset the timer
 		editor.onEscape?.(); // empty again: should only re-arm, not trigger
 
-		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
 		expect(ctx.showUserMessageSelector).not.toHaveBeenCalled();
 	});
+});
 
-	it("silences a still-audible vocalizer on Esc instead of opening the tree selector (#4521)", () => {
-		const clear = vi.spyOn(vocalizer, "clear").mockImplementation(() => {});
-		const isSpeaking = vi.spyOn(vocalizer, "isSpeaking").mockReturnValue(true);
+describe("InputController interactive quit behavior", () => {
+	it("exits immediately when no revivable child is registered", async () => {
 		const { ctx, editor, spies } = createContext();
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
-		editor.onEscape?.();
+		editor.onExit?.();
+		await Promise.resolve();
 
-		expect(clear).toHaveBeenCalledTimes(1);
-		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
-		expect(ctx.showUserMessageSelector).not.toHaveBeenCalled();
-		expect(spies.resetDisplay).not.toHaveBeenCalled();
+		expect(spies.showHookSelector).not.toHaveBeenCalled();
+		expect(spies.shutdown).toHaveBeenCalledWith({ childPolicy: "detach" });
+	});
+	it("exits without a warning and preserves parked child descriptors", async () => {
+		const { ctx, editor, spies } = createContext();
+		for (let index = 0; index < 43; index++) {
+			AgentRegistry.global().register({
+				id: `Parked${index}`,
+				displayName: `Parked ${index}`,
+				kind: "sub",
+				parentId: MAIN_AGENT_ID,
+				session: null,
+				status: "parked",
+			});
+		}
+		const controller = new InputController(ctx);
 
-		// A second Esc after silence must NOT immediately fire the double-Esc
-		// gesture — the first press consumed the arm.
-		isSpeaking.mockReturnValue(false);
-		editor.onEscape?.();
-		expect(ctx.showTreeSelector).not.toHaveBeenCalled();
+		controller.setupKeyHandlers();
+		editor.onExit?.();
+		await Promise.resolve();
+
+		expect(spies.showHookSelector).not.toHaveBeenCalled();
+		expect(spies.shutdown).toHaveBeenCalledWith({ childPolicy: "detach" });
+	});
+
+	it("offers detach, destructive stop, and cancel for running child work", async () => {
+		const { ctx, editor, spies } = createContext();
+		const registry = AgentRegistry.global();
+		registry.register({
+			id: "Worker",
+			displayName: "Worker",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+		});
+		registry.register({
+			id: "Reviewer",
+			displayName: "Reviewer",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			status: "idle",
+		});
+		registry.register({
+			id: "Sleeper",
+			displayName: "Sleeper",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			status: "parked",
+		});
+		const firstAnswer = Promise.withResolvers<string | undefined>();
+		spies.showHookSelector.mockReturnValueOnce(firstAnswer.promise);
+		const controller = new InputController(ctx);
+
+		controller.setupKeyHandlers();
+		editor.onExit?.();
+		editor.onExit?.();
+		await Promise.resolve();
+
+		expect(spies.showHookSelector).toHaveBeenCalledTimes(1);
+		expect(spies.showHookSelector.mock.calls[0]?.[0]).toBe(
+			"Exit OMP?\n1 running child agent: Worker. 1 parked and 1 idle child agents have recoverable sessions.",
+		);
+		expect(spies.shutdown).not.toHaveBeenCalled();
+
+		firstAnswer.resolve("Cancel");
+		await Promise.resolve();
+		expect(spies.shutdown).not.toHaveBeenCalled();
+
+		ctx.showHookSelector = async () => "Detach & exit";
+		editor.onExit?.();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(spies.shutdown).toHaveBeenLastCalledWith({ childPolicy: "detach" });
+
+		spies.shutdown.mockClear();
+		ctx.showHookSelector = async () => "Stop children & exit";
+		editor.onExit?.();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(spies.shutdown).toHaveBeenCalledWith({ childPolicy: "stop" });
+	});
+
+	it("keeps a quit command draft when confirmation is canceled", async () => {
+		const { ctx, editor, spies } = createContext();
+		AgentRegistry.global().register({
+			id: "Worker",
+			displayName: "Worker",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+		});
+		ctx.showHookSelector = async () => "Cancel";
+		const controller = new InputController(ctx);
+
+		editor.setText("/quit");
+		controller.setupEditorSubmitHandler();
+		await editor.onSubmit?.("/quit");
+
+		expect(spies.shutdown).not.toHaveBeenCalled();
+		expect(editor.getText()).toBe("/quit");
 	});
 });
 
@@ -675,13 +660,14 @@ describe("InputController Ctrl+C behavior", () => {
 		expect(spies.shutdown).not.toHaveBeenCalled();
 	});
 
-	it("sync-flushes the session JSONL on second Ctrl+C (shutdown)", () => {
+	it("sync-flushes the session JSONL on second Ctrl+C (shutdown)", async () => {
 		const { ctx, editor, spies } = createContext();
 		const controller = new InputController(ctx);
 
 		controller.setupKeyHandlers();
 		editor.onClear?.(); // first Ctrl+C
 		editor.onClear?.(); // second Ctrl+C within 500ms → shutdown
+		await Promise.resolve();
 
 		expect(spies.shutdown).toHaveBeenCalledTimes(1);
 		// flushSync fires on both presses; the first-press flush is the

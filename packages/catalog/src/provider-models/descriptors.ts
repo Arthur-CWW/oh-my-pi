@@ -12,10 +12,8 @@ import {
 	aimlApiModelManagerOptions,
 	alibabaCodingPlanModelManagerOptions,
 	anthropicModelManagerOptions,
-	basetenModelManagerOptions,
 	cerebrasModelManagerOptions,
 	cloudflareAiGatewayModelManagerOptions,
-	coreWeaveModelManagerOptions,
 	deepseekModelManagerOptions,
 	firepassModelManagerOptions,
 	fireworksModelManagerOptions,
@@ -29,7 +27,6 @@ import {
 	mistralModelManagerOptions,
 	moonshotModelManagerOptions,
 	nanoGptModelManagerOptions,
-	novitaModelManagerOptions,
 	nvidiaModelManagerOptions,
 	ollamaModelManagerOptions,
 	openaiModelManagerOptions,
@@ -38,13 +35,13 @@ import {
 	openrouterModelManagerOptions,
 	qianfanModelManagerOptions,
 	qwenPortalModelManagerOptions,
-	sakanaModelManagerOptions,
 	syntheticModelManagerOptions,
 	togetherModelManagerOptions,
 	umansModelManagerOptions,
 	veniceModelManagerOptions,
 	vercelAiGatewayModelManagerOptions,
 	vllmModelManagerOptions,
+	waferPassModelManagerOptions,
 	waferServerlessModelManagerOptions,
 	xaiModelManagerOptions,
 	xaiOAuthModelManagerOptions,
@@ -52,12 +49,7 @@ import {
 	zenmuxModelManagerOptions,
 	zhipuCodingPlanModelManagerOptions,
 } from "./openai-compat";
-import {
-	cursorModelManagerOptions,
-	devinModelManagerOptions,
-	gitLabDuoWorkflowModelManagerOptions,
-	zaiModelManagerOptions,
-} from "./special";
+import { cursorModelManagerOptions, zaiModelManagerOptions } from "./special";
 
 export const CATALOG_PROVIDERS = [
 	{
@@ -76,23 +68,13 @@ export const CATALOG_PROVIDERS = [
 		catalogDiscovery: { label: "Alibaba Coding Plan" },
 	},
 	{
-		id: "baseten",
-		defaultModel: "moonshotai/Kimi-K2.7-Code",
-		envVars: ["BASETEN_API_KEY"],
-		createModelManagerOptions: (config: ModelManagerConfig) => basetenModelManagerOptions(config),
-		dynamicModelsAuthoritative: true,
-		catalogDiscovery: { label: "Baseten" },
-	},
-	{
 		id: "amazon-bedrock",
 		defaultModel: "us.anthropic.claude-opus-4-8",
 	},
 	{
 		id: "anthropic",
 		defaultModel: "claude-opus-4-8",
-		envVars: ["ANTHROPIC_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => anthropicModelManagerOptions(config),
-		catalogDiscovery: { label: "Anthropic" },
 	},
 	{
 		id: "azure",
@@ -128,14 +110,6 @@ export const CATALOG_PROVIDERS = [
 		catalogDiscovery: { label: "DeepSeek" },
 	},
 	{
-		id: "devin",
-		defaultModel: "swe-1-6",
-		envVars: ["DEVIN_API_KEY"],
-		createModelManagerOptions: (config: ModelManagerConfig) => devinModelManagerOptions(config),
-		dynamicModelsAuthoritative: true,
-		catalogDiscovery: { label: "Devin", envVars: ["DEVIN_API_KEY"], oauthProvider: "devin" },
-	},
-	{
 		id: "firepass",
 		defaultModel: "kimi-k2.6-turbo",
 		envVars: ["FIREPASS_API_KEY"],
@@ -158,13 +132,6 @@ export const CATALOG_PROVIDERS = [
 		id: "gitlab-duo",
 		defaultModel: "duo-chat-opus-4-6",
 		envVars: ["GITLAB_TOKEN"],
-	},
-	{
-		id: "gitlab-duo-agent",
-		defaultModel: "claude_sonnet_4_6_vertex",
-		envVars: ["GITLAB_TOKEN"],
-		createModelManagerOptions: (config: ModelManagerConfig) => gitLabDuoWorkflowModelManagerOptions(config),
-		dynamicModelsAuthoritative: true,
 	},
 	{
 		id: "google",
@@ -252,9 +219,7 @@ export const CATALOG_PROVIDERS = [
 	{
 		id: "moonshot",
 		defaultModel: "kimi-k2.7-code",
-		// KIMI_API_KEY is the most intuitive name for a Kimi/Moonshot key; accept it
-		// as a fallback so China users need not learn MOONSHOT_API_KEY. (#2883)
-		envVars: ["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+		envVars: ["MOONSHOT_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => moonshotModelManagerOptions(config),
 		catalogDiscovery: { label: "Moonshot" },
 	},
@@ -271,14 +236,6 @@ export const CATALOG_PROVIDERS = [
 		envVars: ["NVIDIA_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => nvidiaModelManagerOptions(config),
 		catalogDiscovery: { label: "NVIDIA" },
-	},
-	{
-		id: "novita",
-		defaultModel: "moonshotai/kimi-k2.7-code",
-		envVars: ["NOVITA_API_KEY"],
-		createModelManagerOptions: (config: ModelManagerConfig) => novitaModelManagerOptions(config),
-		dynamicModelsAuthoritative: true,
-		catalogDiscovery: { label: "Novita", allowUnauthenticated: true },
 	},
 	{
 		id: "ollama",
@@ -343,14 +300,6 @@ export const CATALOG_PROVIDERS = [
 		},
 	},
 	{
-		id: "sakana",
-		defaultModel: "fugu",
-		envVars: ["SAKANA_API_KEY", "FUGU_API_KEY"],
-		createModelManagerOptions: (config: ModelManagerConfig) => sakanaModelManagerOptions(config),
-		dynamicModelsAuthoritative: true,
-		catalogDiscovery: { label: "Sakana AI" },
-	},
-	{
 		id: "synthetic",
 		defaultModel: "hf:zai-org/GLM-5.1",
 		envVars: ["SYNTHETIC_API_KEY"],
@@ -399,6 +348,13 @@ export const CATALOG_PROVIDERS = [
 		catalogDiscovery: { label: "vLLM", allowUnauthenticated: true },
 	},
 	{
+		id: "wafer-pass",
+		defaultModel: "GLM-5.1",
+		envVars: ["WAFER_PASS_API_KEY"],
+		createModelManagerOptions: (config: ModelManagerConfig) => waferPassModelManagerOptions(config),
+		catalogDiscovery: { label: "Wafer Pass", oauthProvider: "wafer-pass" },
+	},
+	{
 		id: "wafer-serverless",
 		defaultModel: "GLM-5.1",
 		envVars: ["WAFER_SERVERLESS_API_KEY"],
@@ -407,13 +363,6 @@ export const CATALOG_PROVIDERS = [
 			label: "Wafer Serverless",
 			oauthProvider: "wafer-serverless",
 		},
-	},
-	{
-		id: "coreweave",
-		defaultModel: "openai/gpt-oss-120b",
-		envVars: ["COREWEAVE_API_KEY", "WANDB_API_KEY"],
-		createModelManagerOptions: (config: ModelManagerConfig) => coreWeaveModelManagerOptions(config),
-		catalogDiscovery: { label: "CoreWeave Serverless Inference" },
 	},
 	{
 		id: "xai",
@@ -433,7 +382,7 @@ export const CATALOG_PROVIDERS = [
 	},
 	{
 		id: "xiaomi",
-		defaultModel: "mimo-v2.5",
+		defaultModel: "mimo-v2-flash",
 		envVars: ["XIAOMI_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => xiaomiModelManagerOptions(config),
 		catalogDiscovery: { label: "Xiaomi" },
@@ -471,15 +420,13 @@ export const CATALOG_PROVIDERS = [
 		defaultModel: "anthropic/claude-opus-4.8",
 		envVars: ["ZENMUX_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => zenmuxModelManagerOptions(config),
-		allowUnauthenticated: true,
-		catalogDiscovery: { label: "ZenMux", allowUnauthenticated: true },
+		catalogDiscovery: { label: "ZenMux" },
 	},
 	{
 		id: "zhipu-coding-plan",
-		defaultModel: "glm-5.1",
+		defaultModel: "glm-5.2",
 		envVars: ["ZHIPU_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => zhipuCodingPlanModelManagerOptions(config),
-		dynamicModelsAuthoritative: true,
 		catalogDiscovery: { label: "Zhipu Coding Plan" },
 	},
 ] as const satisfies readonly ProviderCatalogEntry[];

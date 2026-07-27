@@ -212,8 +212,7 @@ describe("issue #2080 - MiniMax multi-chunk object tool arguments", () => {
 				},
 			},
 		]);
-		const objectPrototype = Object.prototype as { polluted?: unknown };
-		expect(objectPrototype.polluted).toBeUndefined();
+		expect(Reflect.get(Object.prototype, "polluted")).toBeUndefined();
 	});
 
 	it("emits a concat-safe `toolcall_delta` sequence — accumulated deltas parse to the merged args", async () => {

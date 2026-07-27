@@ -8,6 +8,25 @@ import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { type Component, Text } from "@oh-my-pi/pi-tui";
 
+function withEnvPatch<T>(patch: Record<string, string | undefined>, run: () => T): T {
+	const saved: Record<string, string | undefined> = {};
+	for (const key in patch) {
+		saved[key] = Bun.env[key];
+		const value = patch[key];
+		if (value === undefined) delete Bun.env[key];
+		else Bun.env[key] = value;
+	}
+	try {
+		return run();
+	} finally {
+		for (const key in saved) {
+			const value = saved[key];
+			if (value === undefined) delete Bun.env[key];
+			else Bun.env[key] = value;
+		}
+	}
+}
+
 // Models a transcript block that re-lays-out (tool preview collapsing, assistant
 // message finalizing, late async result) after newer blocks were appended below
 // it — the window must always reflect its current content.
@@ -53,22 +72,12 @@ class StreamingBlock implements Component {
 	}
 }
 
-// A still-live block that can declare a byte-stable rendered prefix. The
-// transcript container may commit only those declared rows before finalization.
-class DeclaredSettledStreamingBlock extends StreamingBlock {
-	#settledRows: number;
-
-	constructor(lines: string[], settledRows: number) {
-		super(lines);
-		this.#settledRows = settledRows;
-	}
-
-	setSettledRows(rows: number): void {
-		this.#settledRows = rows;
-	}
-
-	getTranscriptBlockSettledRows(): number {
-		return this.#settledRows;
+// A still-live block whose render is provisional (a tool call's tail-window
+// streaming preview): the result render replaces it wholesale, so its settled
+// rows must never be offered for native-scrollback commit.
+class ProvisionalStreamingBlock extends StreamingBlock {
+	isTranscriptBlockCommitStable(): boolean {
+		return false;
 	}
 }
 
@@ -97,8 +106,10 @@ class CountingFinalizedBlock implements Component {
 // and reports each mutation through the transcript block version protocol.
 class VersionedFinalizedBlock implements Component {
 	renderCount = 0;
+	versionReadCount = 0;
 	#lines: string[];
 	#version = 0;
+	#invalidator: (() => void) | undefined;
 
 	constructor(lines: string[]) {
 		this.#lines = lines;
@@ -107,6 +118,7 @@ class VersionedFinalizedBlock implements Component {
 	mutate(lines: string[]): void {
 		this.#lines = lines;
 		this.#version++;
+		this.#invalidator?.();
 	}
 
 	isTranscriptBlockFinalized(): boolean {
@@ -114,7 +126,12 @@ class VersionedFinalizedBlock implements Component {
 	}
 
 	getTranscriptBlockVersion(): number {
+		this.versionReadCount++;
 		return this.#version;
+	}
+
+	setTranscriptBlockInvalidator(invalidator: (() => void) | undefined): void {
+		this.#invalidator = invalidator;
 	}
 
 	invalidate(): void {}
@@ -191,7 +208,7 @@ describe("TranscriptContainer", () => {
 		expect(container.render(80)).toEqual(["a-reflowed", "", "b2"]);
 	});
 
-	it("reports undefined as the native scrollback boundary when every block is finalized", () => {
+	it("reports the live block start that gates native scrollback commits", () => {
 		const container = new TranscriptContainer();
 		const a = new MutableBlock(["a1", "a2"]);
 		const b = new MutableBlock(["b1"]);
@@ -199,11 +216,11 @@ describe("TranscriptContainer", () => {
 		container.addChild(b);
 
 		expect(container.render(40)).toEqual(["a1", "a2", "", "b1"]);
-		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
+		expect(container.getNativeScrollbackLiveRegionStart()).toBe(3);
 
 		b.set(["b1", "b2"]);
 		expect(container.render(40)).toEqual(["a1", "a2", "", "b1", "b2"]);
-		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
+		expect(container.getNativeScrollbackLiveRegionStart()).toBe(3);
 	});
 
 	it("keeps an unfinalized block below the seam when a finalized block is appended below it", () => {
@@ -224,8 +241,8 @@ describe("TranscriptContainer", () => {
 		// The tool's result lands after the card is already below it.
 		tool.finalize(["✔ write: 4 lines"]);
 		expect(container.render(40)).toEqual(["✔ write: 4 lines", "", "rule card"]);
-		// All blocks are finalized; the whole rendered frame is committable.
-		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
+		// The seam moves past the now-finalized tool.
+		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
 
 		// Even after finalizing, a late re-layout still repaints in the window.
 		tool.set(["collapsed"]);
@@ -261,8 +278,9 @@ describe("TranscriptContainer", () => {
 
 		const rendered = plain(container.render(80));
 		expect(rendered).toContain("The config file write went through despite the interruption.");
+		expect(rendered).not.toContain(USER_INTERRUPT_LABEL);
 		expect(rendered).toContain("Copied raw SSE stream");
-		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
+		expect(container.getNativeScrollbackLiveRegionStart()).not.toBe(0);
 	});
 
 	it("starts the live region at the earliest of several unfinalized blocks", () => {
@@ -287,66 +305,56 @@ describe("TranscriptContainer", () => {
 		// The pending block updates freely while live.
 		pending.finalize(["pending-final"]);
 		expect(container.render(40)).toEqual(["done-collapsed", "", "pending-final", "", "card"]);
-		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
-	});
-
-	it("stops the boundary at the first unfinalized block's first content row when no rows are settled", () => {
-		const container = new TranscriptContainer();
-		container.addChild(new MutableBlock(["history"]));
-		const live = new StreamingBlock(["live-0", "live-1"]);
-		container.addChild(live);
-		container.addChild(new MutableBlock(["below"]));
-
-		expect(container.render(40)).toEqual(["history", "", "live-0", "live-1", "", "below"]);
-		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
-
-		live.set(["live-0 updated", "live-1"]);
-		expect(container.render(40)).toEqual(["history", "", "live-0 updated", "live-1", "", "below"]);
-		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
-	});
-
-	it("extends the boundary through declared settled rows after stripping leading blank padding", () => {
-		const container = new TranscriptContainer();
-		container.addChild(new MutableBlock(["history"]));
-		const live = new DeclaredSettledStreamingBlock(["", "settled-a", "settled-b", "live-tail", ""], 3);
-		container.addChild(live);
-
-		expect(container.render(40)).toEqual(["history", "", "settled-a", "settled-b", "live-tail"]);
 		expect(container.getNativeScrollbackLiveRegionStart()).toBe(4);
 	});
 
-	it("returns undefined after the first unfinalized block finalizes", () => {
+	it("never offers a commit-unstable live block's settled rows for native scrollback", () => {
 		const container = new TranscriptContainer();
 		container.addChild(new MutableBlock(["history"]));
-		const live = new StreamingBlock(["live"]);
-		container.addChild(live);
+		// A pending collapsed tool preview: byte-static while the tool executes
+		// (the spinner stops once args complete), but replaced wholesale by the
+		// result render — committing any of it would strand a stale call-box
+		// fragment in terminal history above the final block.
+		const preview = new ProvisionalStreamingBlock([
+			"┌ Edit: foo.ts",
+			"… (2 more hunks above)",
+			"-old-a",
+			"+new-a",
+			"-old-b",
+			"+new-b",
+			"└ (streaming)",
+		]);
+		container.addChild(preview);
 
-		expect(container.render(40)).toEqual(["history", "", "live"]);
+		// Far past STABLE_PREFIX_COMMIT_FRAMES: a durable block's settled head
+		// would have been promoted long ago.
+		for (let frame = 0; frame < 40; frame++) container.render(40);
 		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
+		expect(container.getNativeScrollbackCommitSafeEnd()).toBeUndefined();
 
-		live.finalize(["done"]);
-		expect(container.render(40)).toEqual(["history", "", "done"]);
-		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
+		// The result render re-anchors the block top-first; nothing of the stale
+		// preview was committed, so nothing can be duplicated. Finalizing makes
+		// the full body commit-safe like any settled block.
+		preview.finalize(["✔ Edit: foo.ts (+2/-2)", "-old-a", "+new-a", "context"]);
+		container.render(40);
+		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
+		expect(container.getNativeScrollbackCommitSafeEnd()).toBe(6);
 	});
 
-	it("pins the boundary at an empty unfinalized block's row position", () => {
+	it("still promotes a durable live block's settled head after the stability window", () => {
 		const container = new TranscriptContainer();
 		container.addChild(new MutableBlock(["history"]));
-		container.addChild(new StreamingBlock([]));
-		container.addChild(new MutableBlock(["below"]));
+		// Default contract (no isTranscriptBlockCommitStable): settled leading
+		// rows are durable — a streaming assistant message, a top-anchored
+		// expanded tool stream — and promote once they sit visibly unchanged for
+		// the whole stability window, holding back only the volatile tail.
+		const streaming = new StreamingBlock(["head-0", "head-1", "head-2", "head-3", "head-4", "head-5", "tail"]);
+		container.addChild(streaming);
 
-		expect(container.render(40)).toEqual(["history", "", "below"]);
-		expect(container.getNativeScrollbackLiveRegionStart()).toBe(1);
-	});
-
-	it("does not let finalized blocks below the first unfinalized block extend the boundary", () => {
-		const container = new TranscriptContainer();
-		container.addChild(new MutableBlock(["history"]));
-		container.addChild(new StreamingBlock(["live"]));
-		container.addChild(new StreamingBlock(["finalized-below-0", "finalized-below-1"], true));
-
-		expect(container.render(40)).toEqual(["history", "", "live", "", "finalized-below-0", "finalized-below-1"]);
+		for (let frame = 0; frame < 40; frame++) container.render(40);
 		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
+		// blockStart 2 + (7 rows - TAIL_VOLATILITY_ROWS holdback of 4) = 5.
+		expect(container.getNativeScrollbackCommitSafeEnd()).toBe(5);
 	});
 	it("does not re-render finalized rows already committed to native scrollback", () => {
 		const container = new TranscriptContainer();
@@ -415,6 +423,177 @@ describe("TranscriptContainer", () => {
 		const rendersAfterTransition = block.renderCount;
 		expect(container.render(40)).toEqual(["streaming", "done", "", "tail"]);
 		expect(block.renderCount).toBe(rendersAfterTransition);
+	});
+	it("reuses versioned finalized history behind a live tail and invalidates it on mutation", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const container = new TranscriptContainer();
+			const first = new VersionedFinalizedBlock(["first"]);
+			const second = new VersionedFinalizedBlock(["second"]);
+			const tail = new StreamingBlock(["tail-0"]);
+			container.addChild(first);
+			container.addChild(second);
+			container.addChild(tail);
+
+			expect(container.render(40)).toEqual(["first", "", "second", "", "tail-0"]);
+			expect([first.renderCount, second.renderCount]).toEqual([1, 1]);
+
+			// The finalized prefix is neither re-rendered nor re-concatenated while
+			// the streaming tail changes; the visible bytes remain exact.
+			tail.set(["tail-1"]);
+			expect(container.render(40)).toEqual(["first", "", "second", "", "tail-1"]);
+			expect([first.renderCount, second.renderCount]).toEqual([1, 1]);
+			expect(container.getNativeScrollbackLiveRegionStart()).toBe(4);
+			expect(container.getNativeScrollbackCommitSafeEnd()).toBeUndefined();
+
+			// A post-finalize version bump must abandon the cached prefix immediately,
+			// rather than leaving the old history bytes above the live seam.
+
+			first.mutate(["first-updated"]);
+			expect(container.render(40)).toEqual(["first-updated", "", "second", "", "tail-1"]);
+			expect([first.renderCount, second.renderCount]).toEqual([2, 2]);
+		});
+	});
+	it("keeps finalized-prefix scans bounded across tail streaming and invalidates on width and insertion", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const container = new TranscriptContainer();
+			const history = Array.from(
+				{ length: 5_000 },
+				(_, index) => new VersionedFinalizedBlock([`history-${index}`]),
+			);
+			const tail = new VersionedFinalizedBlock(["tail-0"]);
+			for (const block of history) container.addChild(block);
+			container.addChild(tail);
+			container.render(80);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(1);
+			for (const block of history) block.versionReadCount = 0;
+
+			for (let frame = 1; frame <= 2_000; frame++) {
+				tail.mutate([`tail-${frame}`]);
+				container.render(80);
+			}
+
+			expect(history.reduce((total, block) => total + block.versionReadCount, 0)).toBe(0);
+			expect(container.render(80).at(-1)).toBe("tail-2000");
+			expect(container.getRetentionMetrics()).toMatchObject({
+				dirtyVersionedBlocks: 0,
+				finalizedPrefixScans: 1,
+			});
+
+			container.render(100);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(2);
+
+			const inserted = new VersionedFinalizedBlock(["inserted"]);
+			container.addChild(inserted);
+			expect(container.render(100).at(-1)).toBe("inserted");
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(3);
+		});
+	});
+
+	it("retains no duplicate finalized prefix cache or finalized diff snapshots at 10k", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const container = new TranscriptContainer();
+			for (let i = 0; i < 10_000; i++) container.addChild(new VersionedFinalizedBlock([`history-${i}`]));
+			container.addChild(new StreamingBlock(["tail"]));
+
+			container.render(80);
+			const retention = container.getRetentionMetrics();
+			// The full-frame rows and per-child segments are the sole canonical render
+			// representation required by the TUI compose contract. The prefix cache is
+			// scalar and finalized children retain no per-component diff array.
+			expect(retention.segments).toBe(10_001);
+			expect(retention.assembledRows).toBeGreaterThan(10_000);
+			expect(retention.historyPrefixSegmentRefs).toBe(0);
+			expect(retention.liveSnapshotRowRefs).toBe(1);
+			expect(retention.liveSnapshots).toBe(1);
+			expect(retention.historyPrefixCacheEntries).toBe(1);
+		});
+	});
+
+	it("invalidates finalized-prefix reuse on width and explicit history invalidation", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const container = new TranscriptContainer();
+			const history = new VersionedFinalizedBlock(["history"]);
+			const tail = new StreamingBlock(["tail"]);
+			container.addChild(history);
+			container.addChild(tail);
+
+			container.render(40);
+			container.render(40);
+			expect(history.renderCount).toBe(1);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(1);
+
+			container.render(80);
+			expect(history.renderCount).toBe(2);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(2);
+			container.invalidate();
+			expect(container.render(80)).toEqual(["history", "", "tail"]);
+
+			expect(history.renderCount).toBe(3);
+			expect(container.getRetentionMetrics().finalizedPrefixScans).toBe(3);
+		});
+	});
+
+	it("reuses committed versionless history behind a live tail", () => {
+		const container = new TranscriptContainer();
+		const history = new CountingFinalizedBlock(["committed history"]);
+		const tail = new StreamingBlock(["tail-0"]);
+		container.addChild(history);
+		container.addChild(tail);
+
+		container.render(40);
+		container.setNativeScrollbackCommittedRows(1);
+		container.render(40); // establish cache after native commitment
+		expect(history.renderCount).toBe(1);
+
+		tail.set(["tail-1"]);
+		expect(container.render(40)).toEqual(["committed history", "", "tail-1"]);
+		expect(history.renderCount).toBe(1);
+	});
+
+	it("enables finalized-prefix reuse by default", () => {
+		const container = new TranscriptContainer();
+		for (let i = 0; i < 10; i++) container.addChild(new VersionedFinalizedBlock([`history-${i}`]));
+		container.addChild(new StreamingBlock(["tail"]));
+
+		container.render(80);
+		const retention = container.getRetentionMetrics();
+		expect(retention.historyPrefixCacheEntries).toBe(1);
+	});
+
+	it("keeps ANSI-rendered assistant history byte-identical behind a changing tail", () => {
+		withEnvPatch({ PI_TRANSCRIPT_VIRTUALIZATION: "true" }, () => {
+			const width = 48;
+			const historyMessage = makeAssistantMessage({
+				content: [{ type: "text", text: "## Finalized\n\n**bold** and `code`" }],
+			});
+			const tailMessage = makeAssistantMessage({ content: [{ type: "text", text: "streaming tail" }] });
+			const changedTailMessage = makeAssistantMessage({
+				content: [{ type: "text", text: "streaming tail changed" }],
+			});
+			const container = new TranscriptContainer();
+			const history = new AssistantMessageComponent();
+			const tail = new AssistantMessageComponent();
+			history.updateContent(historyMessage);
+			history.markTranscriptBlockFinalized();
+			tail.updateContent(tailMessage);
+			container.addChild(history);
+			container.addChild(tail);
+			container.render(width); // establish the finalized-prefix cache
+
+			tail.updateContent(changedTailMessage);
+			const cached = [...container.render(width)];
+
+			// A fresh composition is the exact byte-level oracle, including SGR bytes.
+			const control = new TranscriptContainer();
+			const controlHistory = new AssistantMessageComponent();
+			const controlTail = new AssistantMessageComponent();
+			controlHistory.updateContent(historyMessage);
+			controlHistory.markTranscriptBlockFinalized();
+			controlTail.updateContent(changedTailMessage);
+			control.addChild(controlHistory);
+			control.addChild(controlTail);
+			expect(cached).toEqual([...control.render(width)]);
+		});
 	});
 	it("reports a new assistant block version after post-finalize error unpinning", () => {
 		const message: AssistantMessage = {
@@ -632,43 +811,6 @@ describe("TranscriptContainer isBlockInLiveRegion", () => {
 	});
 });
 
-describe("TranscriptContainer isBlockUncommitted", () => {
-	it("returns true for a block that has never rendered", () => {
-		const container = new TranscriptContainer();
-		const block = new MutableBlock(["not painted yet"]);
-		container.addChild(block);
-
-		expect(container.isBlockUncommitted(block)).toBe(true);
-	});
-
-	it("tracks whether committed rows have reached a rendered block", () => {
-		const container = new TranscriptContainer();
-		container.addChild(new MutableBlock(["history"]));
-		const block = new MutableBlock(["target-0", "target-1"]);
-		container.addChild(block);
-
-		expect(container.render(40)).toEqual(["history", "", "target-0", "target-1"]);
-		container.setNativeScrollbackCommittedRows(1);
-		expect(container.isBlockUncommitted(block)).toBe(true);
-
-		container.setNativeScrollbackCommittedRows(3);
-		expect(container.isBlockUncommitted(block)).toBe(false);
-	});
-
-	it("keeps empty-render blocks uncommitted after committed rows advance", () => {
-		const container = new TranscriptContainer();
-		container.addChild(new MutableBlock(["history"]));
-		const empty = new MutableBlock([]);
-		container.addChild(empty);
-		container.addChild(new MutableBlock(["tail"]));
-
-		expect(container.render(40)).toEqual(["history", "", "tail"]);
-		expect(container.isBlockUncommitted(empty)).toBe(true);
-		container.setNativeScrollbackCommittedRows(100);
-		expect(container.isBlockUncommitted(empty)).toBe(true);
-	});
-});
-
 describe("TranscriptContainer renderViewportTail", () => {
 	const W = 40;
 	// Four two-row blocks. A full render joins them with one blank separator:
@@ -726,164 +868,32 @@ describe("TranscriptContainer renderViewportTail", () => {
 		const { container } = fourBlocks();
 		expect([...container.renderViewportTail(W, 0)]).toEqual([]);
 	});
-});
-
-// A displaceable snapshot (todo/poll card): kept unfinalized only so a matching
-// follow-up call can retract it. Mirrors ToolExecutionComponent.seal — sealing
-// finalizes the block in place and it stops reporting displaceable. A pending
-// tool starts non-displaceable and becomes a displaceable snapshot only when
-// its successful result arrives (`makeDisplaceable`).
-class DisplaceableBlock implements Component {
-	sealCount = 0;
-	#sealed = false;
-	#displaceable: boolean;
-	#lines: string[];
-	constructor(lines: string[], displaceable = true) {
-		this.#lines = lines;
-		this.#displaceable = displaceable;
-	}
-	makeDisplaceable(): void {
-		this.#displaceable = true;
-	}
-	isTranscriptBlockFinalized(): boolean {
-		return this.#sealed;
-	}
-	isDisplaceableBlock(): boolean {
-		return this.#displaceable && !this.#sealed;
-	}
-	seal(): void {
-		this.sealCount++;
-		this.#sealed = true;
-	}
-	invalidate(): void {}
-	render(_width: number): string[] {
-		return [...this.#lines];
-	}
-}
-
-// Seal-on-commit: rows on the native-scrollback tape are immutable, so once the
-// commit boundary covers any of a displaceable snapshot's rows the container
-// must seal it in place — retracting it would strand an orphaned copy in
-// terminal history, and left unfinalized it would pin the live-region seam
-// open. setNativeScrollbackCommittedRows is a pure store; the seal walk runs at
-// the start of the NEXT render, over the previous frame's segments (the
-// geometry the committed count was computed against), before the seam scan so
-// the seam unpins in that same frame.
-describe("TranscriptContainer seal-on-commit", () => {
-	const W = 40;
-
-	// history(0) | sep(1) | todo-header(2) | todo-body(3); the leading
-	// separator row belongs to the card's segment (segment.startRow = 1).
-	function cardAfterHistory(displaceable = true): { container: TranscriptContainer; card: DisplaceableBlock } {
+	it("retains only canonical history state across thousands of finalized blocks", () => {
 		const container = new TranscriptContainer();
-		container.addChild(new MutableBlock(["history"]));
-		const card = new DisplaceableBlock(["todo-header", "todo-body"], displaceable);
-		container.addChild(card);
-		expect(container.render(W)).toEqual(["history", "", "todo-header", "todo-body"]);
-		return { container, card };
-	}
+		for (let index = 0; index < 5_000; index++) {
+			container.addChild(new CountingFinalizedBlock([`message ${index}`]));
+		}
 
-	it("seals on the next render once the boundary covers the block's rows", () => {
-		const { container, card } = cardAfterHistory();
-		// The unsealed card pins the live-region seam at its own rows.
-		expect(container.getNativeScrollbackLiveRegionStart()).toBe(2);
-		// Rows 0..2 (through the card's header) are immutable history now.
-		container.setNativeScrollbackCommittedRows(3);
-		// The setter is a pure store: sealing waits for the next compose.
-		expect(card.sealCount).toBe(0);
-		container.render(W);
-		expect(card.sealCount).toBe(1);
-		expect(container.isBlockUncommitted(card)).toBe(false);
-		// The seal pre-pass ran before the seam scan: the SAME render already
-		// reports the seam unpinned (no still-mutating block left).
-		expect(container.getNativeScrollbackLiveRegionStart()).toBeUndefined();
-	});
+		const lines = container.render(W);
+		expect(lines[0]).toBe("message 0");
+		expect(lines.at(-1)).toBe("message 4999");
 
-	it("does not seal while the boundary stays above the block", () => {
-		const { container, card } = cardAfterHistory();
-		// Only "history" committed; the card's rows are all still retractable.
-		container.setNativeScrollbackCommittedRows(1);
-		container.render(W);
-		expect(card.sealCount).toBe(0);
-		expect(container.isBlockUncommitted(card)).toBe(true);
-	});
-
-	it("never seals across same-value or decreasing republishes above the block", () => {
-		const { container, card } = cardAfterHistory();
-		// The engine republishes the committed count every frame (compose and
-		// post-emit): repeated same-value and decreasing stores above the
-		// card's rows never accumulate into a seal.
-		container.setNativeScrollbackCommittedRows(1);
-		container.render(W);
-		container.setNativeScrollbackCommittedRows(1);
-		container.render(W);
-		container.setNativeScrollbackCommittedRows(0);
-		container.render(W);
-		expect(card.sealCount).toBe(0);
-		expect(container.isBlockUncommitted(card)).toBe(true);
-	});
-
-	it("seals exactly once as the boundary sweeps past the block in stages", () => {
-		const container = new TranscriptContainer();
-		container.addChild(new MutableBlock(["history"]));
-		const card = new DisplaceableBlock(["todo-header", "todo-body"]);
-		container.addChild(card);
-		container.addChild(new MutableBlock(["tail"]));
-		expect(container.render(W)).toEqual(["history", "", "todo-header", "todo-body", "", "tail"]);
-		// First crossing (through the header) seals; the sealed block stops
-		// reporting displaceable.
-		container.setNativeScrollbackCommittedRows(3);
-		container.render(W);
-		expect(card.sealCount).toBe(1);
-		// A later sweep past the whole block, and every subsequent render at
-		// that boundary, must not seal again.
-		container.setNativeScrollbackCommittedRows(6);
-		container.render(W);
-		container.render(W);
-		expect(card.sealCount).toBe(1);
-	});
-
-	it("never seals a displaceable block with an empty contribution", () => {
-		const container = new TranscriptContainer();
-		container.addChild(new MutableBlock(["history"]));
-		const empty = new DisplaceableBlock([]);
-		container.addChild(empty);
-		container.addChild(new MutableBlock(["tail"]));
-		expect(container.render(W)).toEqual(["history", "", "tail"]);
-		// None of the block's rows are on the tape: nothing to seal, ever.
-		container.setNativeScrollbackCommittedRows(3);
-		container.render(W);
-		expect(empty.sealCount).toBe(0);
-		expect(container.isBlockUncommitted(empty)).toBe(true);
-	});
-
-	it("walks past blocks without the displaceable protocol", () => {
-		const container = new TranscriptContainer();
-		const plain = new MutableBlock(["plain-block"]);
-		container.addChild(plain);
-		const card = new DisplaceableBlock(["todo-header"]);
-		container.addChild(card);
-		expect(container.render(W)).toEqual(["plain-block", "", "todo-header"]);
-		container.setNativeScrollbackCommittedRows(3);
-		// The pre-pass visits the plain block first (its rows also committed);
-		// absent duck-typed methods are a no-op and the card below still seals.
-		container.render(W);
-		expect(card.sealCount).toBe(1);
-		expect(container.isBlockUncommitted(plain)).toBe(false);
-	});
-
-	it("seals a block that became displaceable after its rows committed", () => {
-		// A pending tool's preview rows scroll into native scrollback before
-		// its successful result arrives; only then does the block become a
-		// displaceable snapshot. The walk runs every render, so the flip is
-		// caught on the next compose — not only when the boundary moves.
-		const { container, card } = cardAfterHistory(false);
-		container.setNativeScrollbackCommittedRows(3);
-		container.render(W);
-		// Rows committed while not displaceable: nothing to seal yet.
-		expect(card.sealCount).toBe(0);
-		card.makeDisplaceable();
-		container.render(W);
-		expect(card.sealCount).toBe(1);
+		// Full-frame rows and one segment per child are durable render history:
+		// the TUI compose contract still returns the complete transcript, and the
+		// segments preserve per-child invalidation boundaries. The redundant
+		// live-diff and prefix-cache state must stay constant instead of scaling
+		// with finalized history.
+		expect(container.getRetentionMetrics()).toEqual({
+			assembledRows: 9_999,
+			segments: 5_000,
+			segmentRawRowRefs: 5_000,
+			segmentContributionRowRefs: 5_000,
+			liveSnapshots: 0,
+			liveSnapshotRowRefs: 0,
+			historyPrefixCacheEntries: 0,
+			historyPrefixSegmentRefs: 0,
+			dirtyVersionedBlocks: 0,
+			finalizedPrefixScans: 1,
+		});
 	});
 });

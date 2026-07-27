@@ -1,36 +1,36 @@
 #!/usr/bin/env bun
 
-import * as path from "node:path";
 import { $, Glob } from "bun";
+import * as path from "node:path";
 
 const CHANGELOG_GLOB = "packages/*/CHANGELOG.md";
 const ORDERED_SECTION_TITLES = ["Breaking Changes", "Added", "Changed", "Fixed", "Removed"] as const;
 const CHANGELOG_BASELINE_REF = "refs/clog";
 const CHANGELOG_BASELINE_NAME = "clog";
 
-export interface NumberedLine {
+interface NumberedLine {
 	text: string;
 	lineNumber: number;
 }
 
-export interface Subsection {
+interface Subsection {
 	title: string;
 	lines: NumberedLine[];
 }
 
-export interface ReleaseSection {
+interface ReleaseSection {
 	heading: string;
 	title: string;
 	leadingLines: NumberedLine[];
 	subsections: Subsection[];
 }
 
-export interface ChangelogDocument {
+interface ChangelogDocument {
 	prefixLines: NumberedLine[];
 	sections: ReleaseSection[];
 }
 
-export interface ParsedItem {
+interface ParsedItem {
 	startLine: number;
 	endLine: number;
 	lines: string[];
@@ -97,6 +97,7 @@ interface HistoricalReleaseRecovery {
 	sectionsByTitle: Map<string, ReleaseSection>;
 }
 
+
 function isReleaseHeading(line: string): boolean {
 	return /^## \[[^\]]+\]/.test(line);
 }
@@ -134,7 +135,7 @@ function createNumberedLine(text: string, lineNumber: number): NumberedLine {
 	return { text, lineNumber };
 }
 
-export function parseChangelog(content: string): ChangelogDocument {
+function parseChangelog(content: string): ChangelogDocument {
 	const lines = splitContentLines(content);
 	const numberedLines = lines.map((text, index) => createNumberedLine(text, index + 1));
 	const prefixLines: NumberedLine[] = [];
@@ -231,7 +232,7 @@ function appendSubsectionLines(target: Subsection, sourceLines: readonly string[
 	target.lines = syntheticLines([...existing, ...separator, ...trimmedSource]);
 }
 
-export function parseItems(lines: readonly NumberedLine[]): ParsedItem[] {
+function parseItems(lines: readonly NumberedLine[]): ParsedItem[] {
 	const items: ParsedItem[] = [];
 	let index = 0;
 
@@ -263,7 +264,7 @@ export function parseItems(lines: readonly NumberedLine[]): ParsedItem[] {
 	return items;
 }
 
-export function lineRangeSet(items: readonly ParsedItem[]): Set<number> {
+function lineRangeSet(items: readonly ParsedItem[]): Set<number> {
 	const lines = new Set<number>();
 	for (const item of items) {
 		for (let line = item.startLine; line <= item.endLine; line++) {
@@ -376,6 +377,7 @@ function compactAdjacentListSpacing(lines: readonly string[]): string[] {
 	return flattenedItems;
 }
 
+
 function normalizeSection(section: ReleaseSection): FixCounters {
 	const counters: FixCounters = {
 		promotedItems: 0,
@@ -454,6 +456,7 @@ function sortReleaseSections(document: ChangelogDocument): void {
 	document.sections = [...unreleasedSections, ...releasedSections];
 }
 
+
 function rebuildReleasedSectionsFromHistory(
 	content: string,
 	historicalSectionsByTitle: ReadonlyMap<string, ReleaseSection>,
@@ -499,7 +502,8 @@ function rebuildReleasedSectionsFromHistory(
 	return renderChangelog(document);
 }
 
-export function renderChangelog(document: ChangelogDocument): string {
+
+function renderChangelog(document: ChangelogDocument): string {
 	const output: string[] = [];
 	const prefix = trimBlankLines(numberedText(document.prefixLines));
 	if (prefix.length > 0) {
@@ -586,6 +590,7 @@ function isAddedReleaseHeadingLine(line: string): boolean {
 	return line.startsWith("+## [");
 }
 
+
 function itemKey(pathName: string, text: string): string {
 	return `${pathName}\0${normalizeItemText(text)}`;
 }
@@ -595,6 +600,7 @@ export function collectPromotableAddedItemLines(diffText: string): Map<string, S
 	const removals: RemovedItemOccurrence[] = [];
 	const addedReleaseHeadingHunks = new Set<string>();
 	let currentPath = "";
+	let oldLine = 0;
 	let newLine = 0;
 	let hunkIndex = -1;
 	for (const rawLine of diffText.replace(/\r\n/g, "\n").split("\n")) {
@@ -611,6 +617,7 @@ export function collectPromotableAddedItemLines(diffText: string): Map<string, S
 
 		const hunkMatch = rawLine.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
 		if (hunkMatch) {
+			oldLine = Number(hunkMatch[1]);
 			newLine = Number(hunkMatch[2]);
 			hunkIndex++;
 			continue;
@@ -648,10 +655,12 @@ export function collectPromotableAddedItemLines(diffText: string): Map<string, S
 					pairedWithAddition: false,
 				});
 			}
+			oldLine++;
 			continue;
 		}
 
 		if (marker === " ") {
+			oldLine++;
 			newLine++;
 		}
 	}
@@ -711,7 +720,7 @@ async function git(args: readonly string[], cwd: string): Promise<string> {
 	return result.text();
 }
 
-export async function resolveRepoRoot(repoRoot: string | undefined): Promise<string> {
+async function resolveRepoRoot(repoRoot: string | undefined): Promise<string> {
 	if (repoRoot) return path.resolve(repoRoot);
 	return (await git(["rev-parse", "--show-toplevel"], process.cwd())).trim();
 }
@@ -756,7 +765,9 @@ async function resolveSince(repoRoot: string, since: string | undefined): Promis
  */
 async function recoveryTags(repoRoot: string): Promise<string[]> {
 	const baseline = await changelogBaselineCommit(repoRoot);
-	const listArgs = baseline ? ["tag", "--contains", baseline, "--sort=v:refname"] : ["tag", "--sort=v:refname"];
+	const listArgs = baseline
+		? ["tag", "--contains", baseline, "--sort=v:refname"]
+		: ["tag", "--sort=v:refname"];
 	return (await git(listArgs, repoRoot))
 		.split("\n")
 		.map(tag => tag.trim())
@@ -814,8 +825,9 @@ async function collectHistoricalReleaseRecovery(
 
 	return recoveryByPath;
 }
+ 
 
-export async function changelogPaths(repoRoot: string): Promise<string[]> {
+async function changelogPaths(repoRoot: string): Promise<string[]> {
 	const glob = new Glob(CHANGELOG_GLOB);
 	const paths: string[] = [];
 	for await (const changelogPath of glob.scan(repoRoot)) {

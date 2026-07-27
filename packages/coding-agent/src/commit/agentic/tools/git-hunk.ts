@@ -1,14 +1,12 @@
-import { type } from "arktype";
+import { z } from "zod/v4";
 import type { DiffHunk, FileHunks } from "../../../commit/types";
 import type { CustomTool } from "../../../extensibility/custom-tools/types";
 import * as git from "../../../utils/git";
 
-const hunkIndexType = type("number").describe("1-based hunk index");
-
-const gitHunkSchema = type({
-	file: type("string").describe("file path"),
-	"hunks?": hunkIndexType.array().atLeastLength(1),
-	"staged?": type("boolean").describe("use staged changes (default true)"),
+const gitHunkSchema = z.object({
+	file: z.string().describe("file path"),
+	hunks: z.array(z.number().describe("1-based hunk index")).min(1).optional(),
+	staged: z.boolean().describe("use staged changes (default true)").optional(),
 });
 
 function selectHunks(fileHunks: FileHunks, requested?: number[]): DiffHunk[] {

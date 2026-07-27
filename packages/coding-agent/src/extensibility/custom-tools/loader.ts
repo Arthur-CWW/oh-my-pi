@@ -7,8 +7,7 @@
 import * as path from "node:path";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { logger } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
-import * as zodModule from "zod/v4";
+import { z } from "zod/v4";
 import { toolCapability } from "../../capability/tool";
 import { type CustomTool, loadCapability } from "../../discovery";
 import type { ExecOptions } from "../../exec/exec";
@@ -18,7 +17,7 @@ import { getAllPluginToolPaths } from "../../extensibility/plugins/loader";
 // Runtime self-reference: dereference this namespace only inside loader functions to keep the index.ts cycle safe.
 import * as PiCodingAgent from "../../index";
 import * as typebox from "../typebox";
-import { createNoOpUIContext, resolvePath, withExitGuard } from "../utils";
+import { createNoOpUIContext, resolvePath } from "../utils";
 import type { CustomToolAPI, CustomToolFactory, LoadedCustomTool, ToolLoadError } from "./types";
 
 /**
@@ -45,14 +44,14 @@ async function loadTool(
 	}
 
 	try {
-		const module = await withExitGuard(() => import(resolvedPath));
+		const module = await import(resolvedPath);
 		const factory = (module.default ?? module) as CustomToolFactory;
 
 		if (typeof factory !== "function") {
 			return { tools: null, error: { path: toolPath, error: "Tool must export a default function", source } };
 		}
 
-		const toolResult = await withExitGuard(async () => factory(sharedApi));
+		const toolResult = await factory(sharedApi);
 		const toolsArray = Array.isArray(toolResult) ? toolResult : [toolResult];
 
 		const loadedTools: LoadedCustomTool[] = toolsArray.map(tool => ({
@@ -109,8 +108,7 @@ export class CustomToolLoader {
 			hasUI: false,
 			logger,
 			typebox,
-			arktype: type,
-			zod: zodModule,
+			zod: z,
 			pi,
 			pushPendingAction: action => {
 				if (!pushPendingAction) {

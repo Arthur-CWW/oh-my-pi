@@ -1,4 +1,4 @@
-import type { ImageContent, MessageAttribution, ServiceTierByFamily, TextContent } from "@oh-my-pi/pi-ai";
+import type { MessageAttribution, ServiceTier, UserContent } from "@oh-my-pi/pi-ai";
 import type { AgentMessage } from "../types";
 
 export interface SessionEntryBase {
@@ -28,7 +28,7 @@ export interface ModelChangeEntry extends SessionEntryBase {
 
 export interface ServiceTierChangeEntry extends SessionEntryBase {
 	type: "service_tier_change";
-	serviceTier: ServiceTierByFamily | null;
+	serviceTier: ServiceTier | null;
 }
 
 export interface CompactionEntry<T = unknown> extends SessionEntryBase {
@@ -58,7 +58,7 @@ export interface BranchSummaryEntry<T = unknown> extends SessionEntryBase {
 export interface CustomMessageEntry<T = unknown> extends SessionEntryBase {
 	type: "custom_message";
 	customType: string;
-	content: string | (TextContent | ImageContent)[];
+	content: string | UserContent[];
 	details?: T;
 	display: boolean;
 	/** Who initiated this message for billing/attribution semantics. */
@@ -75,14 +75,6 @@ export interface LabelEntry extends SessionEntryBase {
 	type: "label";
 	targetId: string;
 	label: string | undefined;
-}
-
-export interface TitleChangeEntry extends SessionEntryBase {
-	type: "title_change";
-	title: string;
-	previousTitle?: string;
-	source: "auto" | "user";
-	trigger?: string;
 }
 
 export interface TtsrInjectionEntry extends SessionEntryBase {
@@ -117,6 +109,13 @@ export interface ModeChangeEntry extends SessionEntryBase {
 	data?: Record<string, unknown>;
 }
 
+/** Persisted active leaf selection. Not a conversation tree node. */
+export interface LeafChangeEntry extends SessionEntryBase {
+	type: "leaf_change";
+	/** Null means root/no active leaf; unknown non-null targets are ignored on replay. */
+	target: string | null;
+}
+
 export interface CustomCompactionSessionEntries {}
 
 export type SessionEntry =
@@ -129,11 +128,11 @@ export type SessionEntry =
 	| CustomEntry
 	| CustomMessageEntry
 	| LabelEntry
-	| TitleChangeEntry
 	| TtsrInjectionEntry
 	| MCPToolSelectionEntry
 	| SessionInitEntry
 	| ModeChangeEntry
+	| LeafChangeEntry
 	| CustomCompactionSessionEntries[keyof CustomCompactionSessionEntries];
 
 export interface ReadonlySessionManager {

@@ -5,14 +5,17 @@ export const interactionFixtures: Record<string, GalleryFixture> = {
 	todo: {
 		label: "Todo",
 		streamingArgs: {
-			op: "init",
-			list: [{ phase: "Foundation", items: ["Scaffold crate"] }],
+			ops: [{ op: "init", list: [{ phase: "Foundation", items: ["Scaffold crate"] }] }],
 		},
 		args: {
-			op: "init",
-			list: [
-				{ phase: "Foundation", items: ["Scaffold crate", "Wire workspace"] },
-				{ phase: "Auth", items: ["Port credential store", "Wire OAuth providers"] },
+			ops: [
+				{
+					op: "init",
+					list: [
+						{ phase: "Foundation", items: ["Scaffold crate", "Wire workspace"] },
+						{ phase: "Auth", items: ["Port credential store", "Wire OAuth providers"] },
+					],
+				},
 			],
 		},
 		result: {

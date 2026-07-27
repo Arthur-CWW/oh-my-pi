@@ -3,8 +3,7 @@ import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { callSessionTool } from "@oh-my-pi/pi-coding-agent/eval/js/tool-bridge";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
-import { type } from "arktype";
+import { z } from "zod/v4";
 
 function createTool(
 	name: string,
@@ -14,7 +13,7 @@ function createTool(
 		name,
 		label: name,
 		description: `${name} tool`,
-		parameters: type({}),
+		parameters: z.object({}),
 		concurrency: "parallel",
 		execute,
 	} as unknown as AgentTool;
@@ -54,7 +53,7 @@ describe("callSessionTool", () => {
 		expect(result).toBe("hello");
 		expect(execute).toHaveBeenCalledWith(
 			expect.stringMatching(/^js-read-/),
-			{ path: "/tmp/demo.txt", [INTENT_FIELD]: "js prelude" },
+			{ path: "/tmp/demo.txt", _i: "js prelude" },
 			undefined,
 		);
 		expect(statuses).toEqual([expect.objectContaining({ op: "read", path: "/tmp/demo.txt", chars: 5 })]);

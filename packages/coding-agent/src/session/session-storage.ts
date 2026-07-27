@@ -2,7 +2,6 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { hasFsCode, isEnoent, logger, peekFileEnds, Snowflake, toError } from "@oh-my-pi/pi-utils";
-import { overlayTitleSlotContent, type SessionTitleUpdate, serializeTitleSlot } from "./session-title-slot";
 
 const utf8Decoder = new TextDecoder("utf-8");
 
@@ -28,30 +27,10 @@ export interface SessionStorageWriter {
 	getError(): Error | undefined;
 }
 
-/**
- * Optional guard applied by {@link SessionStorage.writeTextAtomic}. The
- * backend MUST call `commitGuard()` synchronously immediately before it makes
- * the staged content visible at `path`. If it returns `false`, the staged
- * write is discarded and the target is left untouched. Backends MUST NOT
- * yield between calling the guard and publishing the write, so a concurrent
- * synchronous rewrite that took over cannot be overwritten by a stale body.
- */
-export interface WriteTextAtomicOptions {
-	commitGuard?: () => boolean;
-}
-
 export interface SessionStorage {
 	ensureDirSync(dir: string): void;
 	existsSync(path: string): boolean;
 	writeTextSync(path: string, content: string): void;
-	/**
-	 * Update the current session title through the storage backend.
-	 *
-	 * File-like backends rewrite the fixed-width JSONL title slot; indexed
-	 * backends can store the semantic title fields and synthesize the slot when
-	 * reading.
-	 */
-	updateSessionTitle(path: string, update: SessionTitleUpdate): Promise<void>;
 	statSync(path: string): SessionStorageStat;
 	listFilesSync(dir: string, pattern: string): string[];
 
@@ -60,20 +39,12 @@ export interface SessionStorage {
 	/** Read the requested UTF-8 byte windows from the head and tail of the file. */
 	readTextSlices(path: string, prefixBytes: number, suffixBytes: number): Promise<[string, string]>;
 	writeText(path: string, content: string): Promise<void>;
-	writeTextAtomic(path: string, content: string, options?: WriteTextAtomicOptions): Promise<void>;
+	writeTextAtomic(path: string, content: string): Promise<void>;
+	writeTextAtomicSync(path: string, content: string): void;
 	rename(path: string, nextPath: string): Promise<void>;
 	unlink(path: string): Promise<void>;
 	deleteSessionWithArtifacts(sessionPath: string): Promise<void>;
 	openWriter(path: string, options?: { flags?: "a" | "w"; onError?: (err: Error) => void }): SessionStorageWriter;
-	/**
-	 * Wait for every backing write scheduled by this storage to become durably
-	 * visible. Sync backends (file, memory) return immediately because their
-	 * writes complete in-body; async backends (Redis/SQL via
-	 * {@link IndexedSessionStorage}) await their per-path queues so a caller
-	 * driving a graceful shutdown does not exit while a fire-and-forget
-	 * `writeTextSync` publish is still on the wire.
-	 */
-	drain(): Promise<void>;
 }
 
 // FinalizationRegistry to clean up leaked file descriptors
@@ -167,15 +138,26 @@ export class FileSessionStorage implements SessionStorage {
 	}
 
 	writeTextSync(fpath: string, content: string): void {
-		const dir = path.dirname(fpath);
-		this.ensureDirSync(dir);
+		this.ensureDirSync(path.dirname(fpath));
+		fs.writeFileSync(fpath, content);
+	}
+
+	writeTextAtomicSync(fpath: string, content: string): void {
+		const dir = path.resolve(fpath, "..");
 		const tempPath = path.join(dir, `.${path.basename(fpath)}.${Snowflake.next()}.tmp`);
+		this.ensureDirSync(dir);
 		try {
 			fs.writeFileSync(tempPath, content);
-			fs.renameSync(tempPath, fpath);
+			try {
+				fs.renameSync(tempPath, fpath);
+				return;
+			} catch (err) {
+				if (!hasFsCode(err, "EPERM")) throw toError(err);
+				this.#replaceSessionFileAfterEpermSync(tempPath, fpath, err);
+			}
 		} catch (err) {
 			try {
-				if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+				fs.unlinkSync(tempPath);
 			} catch (cleanupErr) {
 				if (!isEnoent(cleanupErr)) {
 					logger.warn("Failed to remove session rewrite temp file", {
@@ -185,30 +167,48 @@ export class FileSessionStorage implements SessionStorage {
 					});
 				}
 			}
-			if (hasFsCode(err, "EPERM")) {
-				fs.writeFileSync(fpath, content);
-				return;
-			}
 			throw toError(err);
 		}
 	}
 
-	async updateSessionTitle(fpath: string, update: SessionTitleUpdate): Promise<void> {
-		const fd = fs.openSync(fpath, "r+");
+	#replaceSessionFileAfterEpermSync(tempPath: string, targetPath: string, renameError: unknown): void {
+		const dir = path.resolve(targetPath, "..");
+		const backupPath = path.join(dir, `${path.basename(targetPath)}.${Snowflake.next()}.bak`);
 		try {
-			const buf = Buffer.from(serializeTitleSlot(update), "utf-8");
-			let offset = 0;
-			while (offset < buf.length) {
-				const written = fs.writeSync(fd, buf, offset, buf.length - offset, offset);
-				if (written === 0) {
-					throw new Error("Short write");
-				}
-				offset += written;
+			fs.renameSync(targetPath, backupPath);
+		} catch (moveAsideError) {
+			if (isEnoent(moveAsideError)) {
+				fs.renameSync(tempPath, targetPath);
+				return;
 			}
+			throw toError(renameError);
+		}
+		try {
+			fs.renameSync(tempPath, targetPath);
+		} catch (replaceError) {
+			try {
+				fs.renameSync(backupPath, targetPath);
+			} catch (rollbackErr) {
+				const rollbackError = toError(rollbackErr);
+				throw new Error(
+					`Failed to replace session file after EPERM (original: ${toError(renameError).message}; retry: ${
+						toError(replaceError).message
+					}; rollback: ${rollbackError.message})`,
+					{ cause: toError(renameError) },
+				);
+			}
+			throw toError(replaceError);
+		}
+		try {
+			fs.unlinkSync(backupPath);
 		} catch (err) {
-			throw toError(err);
-		} finally {
-			fs.closeSync(fd);
+			if (!isEnoent(err)) {
+				logger.warn("Failed to remove session rewrite backup", {
+					sessionFile: targetPath,
+					backupPath,
+					error: toError(err).message,
+				});
+			}
 		}
 	}
 
@@ -250,107 +250,53 @@ export class FileSessionStorage implements SessionStorage {
 		await Bun.write(path, content, { createPath: true });
 	}
 
-	async writeTextAtomic(fpath: string, content: string, options?: WriteTextAtomicOptions): Promise<void> {
+	async writeTextAtomic(fpath: string, content: string): Promise<void> {
 		const dir = path.resolve(fpath, "..");
 		const tempPath = path.join(dir, `.${path.basename(fpath)}.${Snowflake.next()}.tmp`);
 		await fs.promises.mkdir(dir, { recursive: true });
 		try {
 			await fs.promises.writeFile(tempPath, content);
+			try {
+				await this.rename(tempPath, fpath);
+				return;
+			} catch (err) {
+				if (!hasFsCode(err, "EPERM")) throw toError(err);
+				await this.#replaceSessionFileAfterEperm(tempPath, fpath, err);
+				return;
+			}
 		} catch (err) {
-			this.#discardTemp(tempPath, fpath);
+			try {
+				await this.unlink(tempPath);
+			} catch (cleanupErr) {
+				if (!isEnoent(cleanupErr)) {
+					logger.warn("Failed to remove session rewrite temp file", {
+						sessionFile: fpath,
+						tempPath,
+						error: toError(cleanupErr).message,
+					});
+				}
+			}
 			throw toError(err);
 		}
-		// Guard-check + rename MUST NOT be separated by an await. A concurrent
-		// synchronous rewrite (flushSync -> #rewriteSynchronously) can otherwise
-		// publish a fresh body between the check and the rename, and this stale
-		// staged body would overwrite it. Sync rename closes that window.
-		if (options?.commitGuard && !options.commitGuard()) {
-			this.#discardTemp(tempPath, fpath);
-			return;
-		}
-		try {
-			this.renameSync(tempPath, fpath);
-			return;
-		} catch (err) {
-			if (!hasFsCode(err, "EPERM")) {
-				this.#discardTemp(tempPath, fpath);
-				throw toError(err);
-			}
-			try {
-				this.#replaceSessionFileAfterEpermSync(tempPath, fpath, err, options?.commitGuard);
-			} catch (fallbackErr) {
-				this.#discardTemp(tempPath, fpath);
-				throw fallbackErr;
-			}
-		}
 	}
 
-	/**
-	 * Sync rename hook. Split from `rename` so `writeTextAtomic` can perform its
-	 * guard-then-publish step without a yield, and so tests can inject
-	 * Windows-style EPERM at the sync layer used by the atomic path.
-	 */
-	renameSync(source: string, target: string): void {
-		fs.renameSync(source, target);
-	}
-
-	#discardTemp(tempPath: string, targetPath: string): void {
-		try {
-			fs.unlinkSync(tempPath);
-		} catch (err) {
-			if (!isEnoent(err)) {
-				logger.warn("Failed to remove session rewrite temp file", {
-					sessionFile: targetPath,
-					tempPath,
-					error: toError(err).message,
-				});
-			}
-		}
-	}
-
-	#replaceSessionFileAfterEpermSync(
-		tempPath: string,
-		targetPath: string,
-		renameError: unknown,
-		commitGuard?: () => boolean,
-	): void {
+	async #replaceSessionFileAfterEperm(tempPath: string, targetPath: string, renameError: unknown): Promise<void> {
 		const dir = path.resolve(targetPath, "..");
 		const backupPath = path.join(dir, `${path.basename(targetPath)}.${Snowflake.next()}.bak`);
 		try {
-			this.renameSync(targetPath, backupPath);
+			await this.rename(targetPath, backupPath);
 		} catch (moveAsideError) {
 			if (isEnoent(moveAsideError)) {
-				if (commitGuard && !commitGuard()) {
-					this.#discardTemp(tempPath, targetPath);
-					return;
-				}
-				this.renameSync(tempPath, targetPath);
+				await this.rename(tempPath, targetPath);
 				return;
 			}
 			throw toError(renameError);
 		}
-		if (commitGuard && !commitGuard()) {
-			// A concurrent synchronous rewrite published a fresh body between the
-			// move-aside and this point. Restore the moved-aside file so we do
-			// not overwrite it with our staged (stale) body, and drop the temp
-			// so `writeTextAtomic`'s "discard on abandon" contract holds.
-			try {
-				this.renameSync(backupPath, targetPath);
-			} catch (restoreErr) {
-				logger.warn("Failed to restore backup after commitGuard rejection", {
-					sessionFile: targetPath,
-					backupPath,
-					error: toError(restoreErr).message,
-				});
-			}
-			this.#discardTemp(tempPath, targetPath);
-			return;
-		}
 		try {
-			this.renameSync(tempPath, targetPath);
+			await this.rename(tempPath, targetPath);
 		} catch (replaceError) {
 			try {
-				this.renameSync(backupPath, targetPath);
+				await this.rename(backupPath, targetPath);
 			} catch (rollbackErr) {
 				const rollbackError = toError(rollbackErr);
 				throw new Error(
@@ -363,7 +309,7 @@ export class FileSessionStorage implements SessionStorage {
 			throw toError(replaceError);
 		}
 		try {
-			fs.unlinkSync(backupPath);
+			await this.unlink(backupPath);
 		} catch (err) {
 			if (!isEnoent(err)) {
 				logger.warn("Failed to remove session rewrite backup", {
@@ -385,12 +331,6 @@ export class FileSessionStorage implements SessionStorage {
 
 	unlink(path: string): Promise<void> {
 		return fs.promises.unlink(path);
-	}
-
-	drain(): Promise<void> {
-		// File writes complete synchronously in-body via fs.writeFileSync /
-		// fs.renameSync, so there is no queued work to await.
-		return Promise.resolve();
 	}
 
 	openWriter(path: string, options?: { flags?: "a" | "w"; onError?: (err: Error) => void }): SessionStorageWriter {
@@ -635,12 +575,8 @@ export class MemorySessionStorage implements SessionStorage {
 		this.#files.set(path, createMemoryFileEntry(content, Date.now()));
 	}
 
-	async updateSessionTitle(path: string, update: SessionTitleUpdate): Promise<void> {
-		const entry = this.#requireEntry(path);
-		this.#files.set(
-			path,
-			createMemoryFileEntry(overlayTitleSlotContent(materializeMemoryEntry(entry), update), Date.now()),
-		);
+	writeTextAtomicSync(path: string, content: string): void {
+		this.writeTextSync(path, content);
 	}
 
 	/**
@@ -670,12 +606,14 @@ export class MemorySessionStorage implements SessionStorage {
 
 	listFilesSync(dir: string, pattern: string): string[] {
 		const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+		const recursive = pattern.includes("/") || pattern.includes("\\");
+		const glob = recursive ? new Bun.Glob(pattern) : undefined;
 		const files: string[] = [];
 		for (const path of this.#files.keys()) {
 			if (!path.startsWith(prefix)) continue;
 			const name = path.slice(prefix.length);
-			if (name.includes("/") || name.includes("\\")) continue;
-			if (!matchesPattern(name, pattern)) continue;
+			if (!recursive && (name.includes("/") || name.includes("\\"))) continue;
+			if (glob ? !glob.match(name) : !matchesPattern(name, pattern)) continue;
 			files.push(path);
 		}
 		return files;
@@ -702,8 +640,7 @@ export class MemorySessionStorage implements SessionStorage {
 		return Promise.resolve();
 	}
 
-	writeTextAtomic(path: string, content: string, options?: WriteTextAtomicOptions): Promise<void> {
-		if (options?.commitGuard && !options.commitGuard()) return Promise.resolve();
+	writeTextAtomic(path: string, content: string): Promise<void> {
 		this.writeTextSync(path, content);
 		return Promise.resolve();
 	}
@@ -721,10 +658,6 @@ export class MemorySessionStorage implements SessionStorage {
 		return Promise.resolve();
 	}
 	deleteSessionWithArtifacts(_sessionPath: string): Promise<void> {
-		return Promise.resolve();
-	}
-
-	drain(): Promise<void> {
 		return Promise.resolve();
 	}
 

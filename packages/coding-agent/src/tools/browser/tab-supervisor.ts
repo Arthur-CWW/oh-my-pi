@@ -1,8 +1,8 @@
-import { getPuppeteerDir, logger, postmortem, Snowflake, workerHostEntry } from "@oh-my-pi/pi-utils";
+import { getPuppeteerDir, logger, Snowflake, workerHostEntry } from "@oh-my-pi/pi-utils";
 import type { Page, Target } from "puppeteer-core";
 import { callSessionTool } from "../../eval/js/tool-bridge";
+import type { ToolSession } from "../../sdk";
 import { webpExclusionForModel } from "../../utils/image-loading";
-import type { ToolSession } from "../index";
 import { expandPath } from "../path-utils";
 import { ToolAbortError, ToolError } from "../tool-errors";
 import { pickElectronTarget } from "./attach";
@@ -17,6 +17,18 @@ import {
 	type PuppeteerBrowserHandle,
 	releaseBrowser,
 } from "./registry";
+import {
+	releaseOwnedBrowserTabLease,
+	reserveOwnedBrowserTabLease,
+	touchOwnedBrowserTabLease,
+} from "./process-ownership";
+import {
+	DEFAULT_MAX_GLOBAL_TABS,
+	DEFAULT_MAX_TABS_PER_SESSION,
+	enforceTabBudget,
+	type BrowserTabBudgetRecord,
+	normalizeTabBudgetCap,
+} from "./tab-budget";
 import type {
 	ReadyInfo,
 	RunErrorPayload,
@@ -48,16 +60,6 @@ export interface PendingRun {
 	session: ToolSession;
 	signal?: AbortSignal;
 	toolCalls: Map<string, AbortController>;
-	/**
-	 * Fires when `releaseTab` closes the tab out from under an in-flight run
-	 * (sibling `browser close --all`, session-scoped reap, etc.). Composed
-	 * into the cmux run's signal so `wait(...)`, cmux socket calls, and the
-	 * facade proxies unwind promptly instead of blocking to the run's
-	 * timeout. `pending.reject` still fires first so the awaiting caller
-	 * sees the tab-close error immediately; `closeAc` propagates the
-	 * cancellation into the still-running `runCmuxCode` body (issue #4499).
-	 */
-	closeAc?: AbortController;
 }
 
 interface TabSessionBase<TBrowser extends BrowserHandle = BrowserHandle> {
@@ -69,13 +71,38 @@ interface TabSessionBase<TBrowser extends BrowserHandle = BrowserHandle> {
 	pending: Map<string, PendingRun>;
 	dialogPolicy?: DialogPolicy;
 	kindTag: BrowserKindTag;
-	/**
-	 * Session id of the caller that CREATED the tab. Preserved across reuse so
-	 * that dispose of the creating session can reap browser resources without
-	 * yanking the tab out from under a subagent that only reused it.
-	 * Undefined when the acquirer did not identify itself.
-	 */
-	ownerSessionId?: string;
+	/** Durable ownership label for diagnostics and budget enforcement. */
+	ownerSessionId: string;
+	ownerAgentId: string;
+	purpose: string;
+	/** Wall-clock timestamps used by the lazy idle reaper. */
+	createdAt: number;
+	lastUsedAt: number;
+	/** Current URL identity under the acquisition's query-sensitivity policy. */
+	urlKey: string;
+}
+
+export interface TabPoolEntry {
+	readonly name: string;
+	readonly url: string;
+	readonly urlKey: string;
+	readonly backend: TabSession["backend"];
+	readonly kind: BrowserKindTag;
+	readonly state: TabSession["state"];
+	readonly busy: boolean;
+	readonly ownerSessionId: string;
+	readonly ownerAgentId: string;
+	readonly purpose: string;
+	readonly createdAt: number;
+	readonly lastUsedAt: number;
+	readonly idleMs: number;
+	readonly exempt?: "external";
+}
+
+export interface TabPoolOptions {
+	readonly tabIdleTtlMs?: number;
+	readonly urlQuerySensitive?: boolean;
+	readonly reuse?: boolean;
 }
 
 export interface WorkerTabSession extends TabSessionBase<PuppeteerBrowserHandle> {
@@ -92,7 +119,7 @@ export interface CmuxTabSession extends TabSessionBase<CmuxBrowserHandle> {
 
 export type TabSession = WorkerTabSession | CmuxTabSession;
 
-export interface AcquireTabOptions {
+export interface AcquireTabOptions extends TabPoolOptions {
 	url?: string;
 	waitUntil?: "load" | "domcontentloaded" | "networkidle0" | "networkidle2";
 	viewport?: { width: number; height: number; deviceScaleFactor?: number };
@@ -101,12 +128,14 @@ export interface AcquireTabOptions {
 	timeoutMs: number;
 	dialogs?: DialogPolicy;
 	cmuxSurface?: string;
-	/**
-	 * Session id of the acquirer. Recorded on the tab when created (never on
-	 * reuse) so `releaseTabsForOwner` can walk the shared tabs map on session
-	 * dispose. Optional — omitting it opts the tab out of session-scoped reap.
-	 */
+	/** Cap admission identity/options supplied by BrowserTool. */
+	sessionId?: string;
+	maxTabsPerSession?: number;
+	maxGlobalTabs?: number;
+	/** Ownership labels supplied by BrowserTool; test callers use defaults. */
 	ownerSessionId?: string;
+	ownerAgentId?: string;
+	purpose?: string;
 }
 
 export interface AcquireTabResult {
@@ -126,28 +155,203 @@ export interface ReleaseTabOptions {
 }
 
 const tabs = new Map<string, TabSession>();
+const tabAliases = new Map<string, string>();
+// A URL pool lookup spans names, so all acquisitions share one serialized gate.
+let acquirePoolTail: Promise<void> = Promise.resolve();
 // Per-name acquisition chain: serializes concurrent `acquireTab` calls for the
 // same tab name so the existence check and `tabs.set` (separated by several
 // awaits) cannot interleave and leak a worker + browser refCount.
 const acquireChains = new Map<string, Promise<void>>();
-const GRACE_MS = 750;
 
-export function getTab(name: string): TabSession | undefined {
-	return tabs.get(name);
+const ownedTabLeases = new WeakMap<TabSession, string>();
+
+function isBudgetedTab(tab: TabSession): boolean {
+	return tab.kindTag === "headless" && "browser" in tab.browser && tab.browser.ownership !== undefined;
 }
 
+function currentBudgetRecords(): readonly BrowserTabBudgetRecord[] {
+	return [...tabs.values()]
+		.filter(tab => isBudgetedTab(tab) && tab.ownerSessionId.length > 0)
+		.map(tab => ({
+			name: tab.name,
+			sessionId: tab.ownerSessionId,
+			createdAt: tab.createdAt,
+			lastUsedAt: tab.lastUsedAt,
+			idle: isIdle(tab),
+		}));
+}
+
+async function touchOwnedTabLease(tab: TabSession, idle: boolean): Promise<void> {
+	const leaseId = ownedTabLeases.get(tab);
+	if (leaseId) await touchOwnedBrowserTabLease(leaseId, idle).catch(() => undefined);
+}
+
+const GRACE_MS = 750;
+export const DEFAULT_TAB_IDLE_TTL_MS = 10 * 60 * 1000;
+export const DEFAULT_TAB_PURPOSE = "browser";
+
+function resolvedTabName(name: string): string | undefined {
+	if (tabs.has(name)) return name;
+	const alias = tabAliases.get(name);
+	return alias && tabs.has(alias) ? alias : undefined;
+}
+
+function resolvedTab(name: string): TabSession | undefined {
+	const canonical = resolvedTabName(name);
+	return canonical ? tabs.get(canonical) : undefined;
+}
+
+function removeTabAliases(canonical: string): void {
+	for (const [alias, target] of tabAliases) {
+		if (target === canonical) tabAliases.delete(alias);
+	}
+}
+
+function bindTabAlias(alias: string, canonical: string): void {
+	if (alias === canonical) return;
+	const existing = resolvedTabName(alias);
+	if (existing && existing !== canonical) {
+		removeTabAliases(existing);
+	}
+	tabAliases.set(alias, canonical);
+}
+
+function normalizeUrl(url: string, querySensitive = false): string {
+	try {
+		const parsed = new URL(url);
+		return `${parsed.origin}${parsed.pathname}${querySensitive ? parsed.search : ""}`;
+	} catch {
+		const withoutHash = url.split("#", 1)[0] ?? url;
+		if (!querySensitive) return withoutHash.split("?", 1)[0] ?? withoutHash;
+		return withoutHash;
+	}
+}
+
+function isIdle(tab: TabSession): boolean {
+	return tab.state === "alive" && tab.pending.size === 0;
+}
+
+function idleTtlMs(value: number | undefined): number {
+	return Number.isFinite(value) && value !== undefined && value >= 0 ? value : DEFAULT_TAB_IDLE_TTL_MS;
+}
+
+export function getTab(name: string): TabSession | undefined {
+	return resolvedTab(name);
+}
+
+export function listTabs(now = Date.now()): readonly TabPoolEntry[] {
+	return [...tabs.values()]
+		.filter(tab => tab.state === "alive")
+		.map(tab => {
+			const budgeted = isBudgetedTab(tab);
+			return {
+				name: tab.name,
+				url: tab.info.url,
+				urlKey: tab.urlKey,
+				backend: tab.backend,
+				kind: tab.kindTag,
+				state: tab.state,
+				busy: tab.pending.size > 0,
+				ownerSessionId: tab.ownerSessionId,
+				ownerAgentId: tab.ownerAgentId,
+				purpose: tab.purpose,
+				createdAt: tab.createdAt,
+				lastUsedAt: tab.lastUsedAt,
+				idleMs: Math.max(0, now - tab.lastUsedAt),
+				exempt: budgeted ? undefined : "external",
+			};
+		});
+}
+
+export function normalizeTabUrlForTest(url: string, querySensitive = false): string {
+	return normalizeUrl(url, querySensitive);
+}
+
+
 export function acquireTab(name: string, browser: BrowserHandle, opts: AcquireTabOptions): Promise<AcquireTabResult> {
-	const prior = acquireChains.get(name) ?? Promise.resolve();
-	const result = prior.then(() => acquireTabImpl(name, browser, opts));
+	const priorName = acquireChains.get(name) ?? Promise.resolve();
+	const priorPool = acquirePoolTail;
+	const result = priorName.then(() => priorPool).then(() => acquireTabImpl(name, browser, opts));
 	const tail = result.then(
 		() => undefined,
 		() => undefined,
 	);
 	acquireChains.set(name, tail);
+	acquirePoolTail = tail;
 	void tail.then(() => {
 		if (acquireChains.get(name) === tail) acquireChains.delete(name);
+		if (acquirePoolTail === tail) acquirePoolTail = Promise.resolve();
 	});
 	return result;
+}
+
+async function sweepExpiredTabs(ttlValue: number | undefined): Promise<void> {
+	const ttl = idleTtlMs(ttlValue);
+	const cutoff = Date.now() - ttl;
+	const expired = [...tabs.values()]
+		.filter(tab => isBudgetedTab(tab) && isIdle(tab) && tab.lastUsedAt < cutoff)
+		.map(tab => tab.name);
+	for (const name of expired) await releaseTab(name);
+}
+
+async function navigateAndTouchTab(
+	tab: TabSession,
+	opts: AcquireTabOptions,
+): Promise<void> {
+	const reuseSteps: string[] = [];
+	if (opts.viewport && tab.kindTag !== "cmux") {
+		const dsf = opts.viewport.deviceScaleFactor;
+		reuseSteps.push(
+			`await page.setViewport({ width: ${opts.viewport.width}, height: ${opts.viewport.height}, deviceScaleFactor: ${dsf === undefined ? "undefined" : String(dsf)} });`,
+		);
+	}
+	if (opts.url) {
+		reuseSteps.push(
+			`await tab.goto(${JSON.stringify(opts.url)}, { waitUntil: ${JSON.stringify(opts.waitUntil ?? "load")} });`,
+		);
+	}
+	if (reuseSteps.length) {
+		await runInTabWithSnapshot(
+			tab.name,
+			{ code: reuseSteps.join("\n"), timeoutMs: opts.timeoutMs, signal: opts.signal },
+			{ cwd: process.cwd() },
+		);
+	}
+	if (opts.url) tab.info = { ...tab.info, url: opts.url };
+	tab.urlKey = normalizeUrl(tab.info.url, opts.urlQuerySensitive);
+	tab.lastUsedAt = Date.now();
+	await touchOwnedTabLease(tab, true);
+}
+
+async function admitOwnedTab(name: string, browser: BrowserHandle, opts: AcquireTabOptions): Promise<string | undefined> {
+	if (
+		!opts.sessionId ||
+		browser.kind.kind !== "headless" ||
+		!("browser" in browser) ||
+		browser.ownership === undefined
+	) {
+		return undefined;
+	}
+	const maxTabsPerSession = normalizeTabBudgetCap(opts.maxTabsPerSession, DEFAULT_MAX_TABS_PER_SESSION);
+	const maxGlobalTabs = normalizeTabBudgetCap(opts.maxGlobalTabs, DEFAULT_MAX_GLOBAL_TABS);
+	await enforceTabBudget({
+		sessionId: opts.sessionId,
+		maxTabsPerSession,
+		// The persisted lease reservation below owns the machine-wide count and
+		// attribution; this local pass only reclaims the requesting session's tab.
+		maxGlobalTabs: Number.MAX_SAFE_INTEGER,
+		records: currentBudgetRecords,
+		reclaim: async record => {
+			if (tabs.has(record.name)) await releaseTab(record.name, { kill: false });
+		},
+	});
+	const lease = await reserveOwnedBrowserTabLease({
+		sessionId: opts.sessionId,
+		tabName: name,
+		maxTabsPerSession,
+		maxGlobalTabs,
+	});
+	return lease.leaseId;
 }
 
 async function acquireTabImpl(
@@ -155,19 +359,17 @@ async function acquireTabImpl(
 	browser: BrowserHandle,
 	opts: AcquireTabOptions,
 ): Promise<AcquireTabResult> {
-	// Serialized opens can sit behind a slow predecessor in the per-name
-	// chain; honor an abort at dequeue instead of spawning a worker and
-	// browser hold nobody is waiting for.
-	if (opts.signal?.aborted) {
-		throw new ToolAbortError("Browser tab open aborted");
-	}
+	// Serialized opens can sit behind a slow predecessor in the pool chain;
+	// honor an abort at dequeue instead of spawning an unowned worker.
+	if (opts.signal?.aborted) throw new ToolAbortError("Browser tab open aborted");
+	await sweepExpiredTabs(opts.tabIdleTtlMs);
+
 	// Temporary refCount hold so releasing an existing tab on the SAME browser
-	// below cannot drop it to refCount 0 and dispose the instance we are about
-	// to reuse (e.g. reopening the sole tab with a different dialogs policy).
+	// below cannot dispose the instance we are about to replace.
 	let tempHold = false;
-	const existing = tabs.get(name);
+	const existing = resolvedTab(name);
 	if (existing) {
-		if (existing.browser === browser && existing.state === "alive") {
+		if (opts.reuse !== false && existing.browser === browser && existing.state === "alive") {
 			const requestedCmuxSurface = "client" in browser ? (opts.cmuxSurface ?? browser.surface) : undefined;
 			if (existing.backend === "cmux" && existing.cmuxAttachedSurface !== requestedCmuxSurface) {
 				holdBrowser(browser);
@@ -178,30 +380,8 @@ async function acquireTabImpl(
 				tempHold = true;
 				await releaseTab(name, { kill: false });
 			} else {
-				const reuseSteps: string[] = [];
-				if (opts.viewport && browser.kind.kind !== "cmux") {
-					const dsf = opts.viewport.deviceScaleFactor;
-					reuseSteps.push(
-						`await page.setViewport({ width: ${opts.viewport.width}, height: ${opts.viewport.height}, deviceScaleFactor: ${dsf === undefined ? "undefined" : String(dsf)} });`,
-					);
-				}
-				if (opts.url) {
-					reuseSteps.push(
-						`await tab.goto(${JSON.stringify(opts.url)}, { waitUntil: ${JSON.stringify(opts.waitUntil ?? "load")} });`,
-					);
-				}
-				if (reuseSteps.length) {
-					await runInTabWithSnapshot(
-						name,
-						{
-							code: reuseSteps.join("\n"),
-							timeoutMs: opts.timeoutMs,
-							signal: opts.signal,
-						},
-						{ cwd: process.cwd() },
-					);
-				}
-				return { tab: tabs.get(name)!, created: false };
+				await navigateAndTouchTab(existing, opts);
+				return { tab: existing, created: false };
 			}
 		} else {
 			if (existing.browser === browser) {
@@ -212,12 +392,41 @@ async function acquireTabImpl(
 		}
 	}
 
+	// Reuse an idle tab by URL across caller-provided names. The browser handle
+	// must match too: a tab cannot be moved between cmux/CDP/worker backends.
+	const requestedUrlKey = opts.url ? normalizeUrl(opts.url, opts.urlQuerySensitive) : undefined;
+	if (opts.reuse !== false && requestedUrlKey) {
+		const byUrl = [...tabs.values()].find(
+			tab =>
+				tab.browser === browser &&
+				tab.ownerSessionId === (opts.ownerSessionId ?? opts.sessionId ?? "unknown") &&
+				isIdle(tab) &&
+				normalizeUrl(tab.info.url, opts.urlQuerySensitive) === requestedUrlKey,
+		);
+		if (byUrl) {
+			bindTabAlias(name, byUrl.name);
+			await navigateAndTouchTab(byUrl, opts);
+			if (tempHold) await releaseBrowser(browser, { kill: false });
+			return { tab: byUrl, created: false };
+		}
+	}
+
+	let ownedLeaseId: string | undefined;
+	try {
+		ownedLeaseId = await admitOwnedTab(name, browser, opts);
+	} catch (error) {
+		if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false });
+		throw error;
+	}
+
 	if ("client" in browser) {
 		try {
 			const result = await acquireCmuxTab(name, browser, opts);
 			if (tempHold) await releaseBrowser(browser, { kill: false });
+			if (ownedLeaseId) ownedTabLeases.set(result.tab, ownedLeaseId);
 			return result;
 		} catch (error) {
+			if (ownedLeaseId) await releaseOwnedBrowserTabLease(ownedLeaseId).catch(() => undefined);
 			if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false });
 			throw error;
 		}
@@ -230,6 +439,7 @@ async function acquireTabImpl(
 	} catch (error) {
 		// Failing before the worker took its own hold must release the
 		// temporary one, or the browser's refCount never reaches 0 again.
+		if (ownedLeaseId) await releaseOwnedBrowserTabLease(ownedLeaseId).catch(() => undefined);
 		if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false });
 		throw error;
 	}
@@ -242,6 +452,7 @@ async function acquireTabImpl(
 		// the inline worker here so module-resolution failures don't poison every tab open.
 		await worker.terminate().catch(() => undefined);
 		if (worker.mode === "inline") {
+			if (ownedLeaseId) await releaseOwnedBrowserTabLease(ownedLeaseId).catch(() => undefined);
 			if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false });
 			throw error;
 		}
@@ -253,6 +464,7 @@ async function acquireTabImpl(
 			info = await initializeTabWorker(worker, initPayload, opts.timeoutMs + GRACE_MS);
 		} catch (inlineError) {
 			await worker.terminate().catch(() => undefined);
+			if (ownedLeaseId) await releaseOwnedBrowserTabLease(ownedLeaseId).catch(() => undefined);
 			if (tempHold || browser.refCount === 0) await releaseBrowser(browser, { kill: false });
 			const finalError = new ToolError(
 				`Failed to start browser tab worker (inline fallback also failed): ${inlineError instanceof Error ? inlineError.message : String(inlineError)}`,
@@ -262,18 +474,9 @@ async function acquireTabImpl(
 		}
 	}
 
-	// If the caller aborted while we were spawning/initializing the worker,
-	// tear the freshly-built worker down before publishing the tab so the
-	// browser refCount (which `holdBrowser` below would take) never grows for
-	// a tab nobody is waiting for.
-	if (opts.signal?.aborted) {
-		await worker.terminate().catch(() => undefined);
-		if (tempHold) await releaseBrowser(browser, { kill: false }).catch(() => undefined);
-		throw new ToolAbortError("Browser tab open aborted");
-	}
-
 	holdBrowser(browser);
 	if (tempHold) await releaseBrowser(browser, { kill: false });
+	const now = Date.now();
 	const tab: WorkerTabSession = {
 		name,
 		browser,
@@ -285,10 +488,16 @@ async function acquireTabImpl(
 		pending: new Map(),
 		dialogPolicy: opts.dialogs,
 		kindTag: browser.kind.kind,
-		ownerSessionId: opts.ownerSessionId,
+		ownerSessionId: opts.ownerSessionId ?? opts.sessionId ?? "unknown",
+		ownerAgentId: opts.ownerAgentId ?? "unknown",
+		purpose: opts.purpose ?? DEFAULT_TAB_PURPOSE,
+		createdAt: now,
+		lastUsedAt: now,
+		urlKey: normalizeUrl(info.url, opts.urlQuerySensitive),
 	};
 	worker.onMessage(msg => handleTabMessage(tab, msg));
 	tabs.set(name, tab);
+	if (ownedLeaseId) ownedTabLeases.set(tab, ownedLeaseId);
 	return { tab, created: true };
 }
 
@@ -337,12 +546,8 @@ async function acquireCmuxTab(
 			await cmuxTab.goto(opts.url, { waitUntil: opts.waitUntil ?? "load", timeoutMs: opts.timeoutMs });
 		}
 		const info = await cmuxTab.readyInfo(opts.viewport ?? DEFAULT_VIEWPORT);
-		// If the caller aborted while we were opening the cmux surface, close the
-		// surface (if we own it) instead of taking a browser hold on it.
-		if (opts.signal?.aborted) {
-			throw new ToolAbortError("Browser tab open aborted");
-		}
 		holdBrowser(browser);
+		const now = Date.now();
 		const tab: CmuxTabSession = {
 			name,
 			browser,
@@ -356,7 +561,12 @@ async function acquireCmuxTab(
 			dialogPolicy: opts.dialogs,
 			kindTag: browser.kind.kind,
 			cmuxAttachedSurface: attachedSurface,
-			ownerSessionId: opts.ownerSessionId,
+			ownerSessionId: opts.ownerSessionId ?? opts.sessionId ?? "unknown",
+			ownerAgentId: opts.ownerAgentId ?? "unknown",
+			purpose: opts.purpose ?? DEFAULT_TAB_PURPOSE,
+			createdAt: now,
+			lastUsedAt: now,
+			urlKey: normalizeUrl(info.url, opts.urlQuerySensitive),
 		};
 		tabs.set(name, tab);
 		return { tab, created: true };
@@ -385,54 +595,34 @@ async function runInTabWithSnapshot(
 	opts: { code: string; timeoutMs: number; signal?: AbortSignal; session?: ToolSession },
 	snapshot: SessionSnapshot,
 ): Promise<RunResultOk> {
-	const tab = tabs.get(name);
+	const tab = resolvedTab(name);
 	if (!tab || tab.state === "dead") throw new ToolError(`Tab ${JSON.stringify(name)} is not alive. Reopen it.`);
 	if (tab.pending.size > 0) throw new ToolError(`Tab ${JSON.stringify(name)} is busy`);
+	tab.lastUsedAt = Date.now();
+	await touchOwnedTabLease(tab, false);
 	const id = Snowflake.next();
 	const { promise, resolve, reject } = Promise.withResolvers<RunResultOk>();
-	// `releaseTab` calls `pending.reject(closeError)` when the tab dies
-	// out from under an in-flight run (sibling `browser close --all`,
-	// session-scoped reap, etc.). Both backends below MUST end up awaiting
-	// this same `promise` so:
-	//   1. The caller sees `Tab ... was closed` immediately instead of
-	//      blocking to the run's timeout, and
-	//   2. `reject(...)` always has an attached handler — a zero-consumer
-	//      rejection would fire `unhandledRejection` and the CLI's
-	//      top-level handler would tear the whole session down, killing
-	//      every other tab and subagent sharing the process (issue #4499).
-	// The cmux branch also composes `closeAc.signal` into the run's abort
-	// signal so `wait(...)`, cmux socket calls, and the facade proxies
-	// unwind promptly when the tab is closed — otherwise a `wait(60_000)`
-	// with no in-flight socket request would keep `runCmuxCode` blocked
-	// until timeout even after the tab is gone.
-	const closeAc = new AbortController();
+	observeRunPromiseRejection(promise);
 	const pending: PendingRun = {
 		resolve,
 		reject,
 		session: opts.session ?? ({} as ToolSession),
 		signal: opts.signal,
 		toolCalls: new Map(),
-		closeAc,
 	};
 	tab.pending.set(id, pending);
 	if (tab.backend === "cmux") {
-		const runSignal = opts.signal ? AbortSignal.any([opts.signal, closeAc.signal]) : closeAc.signal;
 		try {
-			// `runCmuxCode.then(resolve, reject)` publishes the run's real
-			// outcome to `promise`, but `releaseTab` may have already
-			// rejected it — `Promise.withResolvers` settles on the first
-			// call and later resolve/reject are no-ops, so the tab-close
-			// error still wins the race.
-			runCmuxCode(tab.cmuxTab, {
+			return await runCmuxCode(tab.cmuxTab, {
 				code: opts.code,
 				timeoutMs: opts.timeoutMs,
-				signal: runSignal,
+				signal: opts.signal,
 				session: pending.session,
 				snapshot,
-			}).then(resolve, reject);
-			return await promise;
+			});
 		} finally {
 			tab.pending.delete(id);
+			await touchOwnedTabLease(tab, true);
 		}
 	}
 	const abort = (): void => {
@@ -450,60 +640,36 @@ async function runInTabWithSnapshot(
 			timeoutMs: opts.timeoutMs,
 			session: snapshot,
 		});
-		try {
-			return await raceWithTimeout(
-				promise,
-				opts.timeoutMs + GRACE_MS,
-				"Browser code execution hung past grace; tab killed",
-				async reason => await forceKillTab(name, reason),
-			);
-		} catch (error) {
-			if (error instanceof ToolError && error.message.startsWith("Browser code execution timed out after ")) {
-				try {
-					if (tab.worker.mode === "inline")
-						await forceKillTab(name, "Browser code execution timed out; tab killed");
-					else await recycleTimedOutWorkerTab(tab, opts.timeoutMs + GRACE_MS);
-				} catch (recycleError) {
-					logger.warn("Failed to recycle timed-out browser tab worker; killing tab", {
-						error: recycleError instanceof Error ? recycleError.message : String(recycleError),
-					});
-					await forceKillTab(name, "Browser code execution timed out; tab killed");
-				}
-			}
-			throw error;
-		}
+		return await raceWithTimeout(
+			promise,
+			opts.timeoutMs + GRACE_MS,
+			"Browser code execution hung past grace; tab killed",
+			async reason => await forceKillTab(name, reason),
+		);
 	} finally {
 		opts.signal?.removeEventListener("abort", abort);
 		tab.pending.delete(id);
+		await touchOwnedTabLease(tab, true);
 	}
 }
 
 export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Promise<boolean> {
-	const tab = tabs.get(name);
-	if (!tab) {
+	const canonical = resolvedTabName(name);
+	const tab = canonical ? tabs.get(canonical) : undefined;
+	if (!tab || !canonical) {
 		logger.debug("releaseTab: unknown tab", { name });
 		return false;
 	}
 	const wasAlive = tab.state === "alive";
 	tab.state = "dead";
-	const closeError = postmortem.markExpectedCleanupError(new ToolError(`Tab ${JSON.stringify(name)} was closed`));
+	const closeError = new ToolError(`Tab ${JSON.stringify(name)} was closed`);
 	for (const [id, pending] of tab.pending) {
 		if (tab.backend === "worker") {
 			try {
-				tab.worker.send({ type: "abort", id, expectedCleanup: true });
+				tab.worker.send({ type: "abort", id });
 			} catch {}
 		}
 		for (const ctrl of pending.toolCalls.values()) ctrl.abort(closeError);
-		// Propagate the closure into the cmux run's abort signal so
-		// `wait(...)`, in-flight cmux socket calls, and the facade proxies
-		// unwind promptly. Firing this BEFORE `pending.reject` means
-		// `runCmuxCode` finishes with `ToolAbortError` and its `.then(reject)`
-		// is a no-op — `promise` still settles with the tab-close error via
-		// the `reject` call below. Without it, a run that isn't currently
-		// making a socket request (e.g. `await wait(60_000)`) would keep
-		// `runCmuxCode` blocked until timeout even after `pending.reject`
-		// unblocked the caller (issue #4499 review feedback).
-		pending.closeAc?.abort(closeError);
 		pending.reject(closeError);
 	}
 	tab.pending.clear();
@@ -522,8 +688,12 @@ export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Pr
 				}
 			}
 		}
+		const leaseId = ownedTabLeases.get(tab);
+		if (leaseId) await releaseOwnedBrowserTabLease(leaseId).catch(() => undefined);
+		ownedTabLeases.delete(tab);
 		await releaseBrowser(tab.browser, { kill: opts.kill ?? false });
-		tabs.delete(name);
+		tabs.delete(canonical);
+		removeTabAliases(canonical);
 		if (nonLastCloseError) throw nonLastCloseError;
 		return true;
 	}
@@ -538,8 +708,12 @@ export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Pr
 	}
 	await tab.worker.terminate().catch(() => undefined);
 	if (forced && tab.kindTag === "headless") await closeOrphanTarget(tab);
+	const leaseId = ownedTabLeases.get(tab);
+	if (leaseId) await releaseOwnedBrowserTabLease(leaseId).catch(() => undefined);
+	ownedTabLeases.delete(tab);
 	await releaseBrowser(tab.browser, { kill: opts.kill ?? false });
-	tabs.delete(name);
+	tabs.delete(canonical);
+	removeTabAliases(canonical);
 	return true;
 }
 
@@ -555,34 +729,6 @@ export async function releaseAllTabs(opts: ReleaseTabOptions = {}): Promise<numb
 export async function dropHeadlessTabs(): Promise<void> {
 	const names = [...tabs.values()].filter(tab => tab.kindTag === "headless").map(tab => tab.name);
 	for (const name of names) await releaseTab(name);
-}
-
-/**
- * Release every tab created by the given session id. Invoked from
- * `AgentSession.dispose()` so headless/spawned Chromium and workers the
- * session opened do not leak into the long-lived process — the module-global
- * `tabs`/`browsers` maps that back this tool are not otherwise walked by
- * session teardown. (Issue #3963.)
- *
- * Ownership is recorded ONLY on tab creation (`acquireTab` with
- * `ownerSessionId`), never on reuse: a subagent re-driving a tab another
- * session opened will not yank teardown responsibility away from the
- * creator. Tabs opened with no owner (e.g. from an SDK caller that doesn't
- * identify a session) are skipped and must be released explicitly.
- */
-export async function releaseTabsForOwner(ownerId: string, opts: ReleaseTabOptions = {}): Promise<number> {
-	if (!ownerId) return 0;
-	const names = [...tabs.values()].filter(tab => tab.ownerSessionId === ownerId).map(tab => tab.name);
-	let count = 0;
-	for (const name of names) {
-		if (await releaseTab(name, opts)) count++;
-	}
-	return count;
-}
-
-/** Test-only accessor for the module-global tabs map. */
-export function getTabsMapForTest(): ReadonlyMap<string, TabSession> {
-	return tabs;
 }
 
 function isLastSurfaceCloseError(err: unknown): boolean {
@@ -701,61 +847,28 @@ function toErrorPayload(error: unknown): RunErrorPayload {
 	return { name: "Error", message: String(error), isAbort: false, isToolError: false };
 }
 
-async function recycleTimedOutWorkerTab(tab: WorkerTabSession, timeoutMs: number): Promise<void> {
-	const oldWorker = tab.worker;
-	await oldWorker.terminate().catch(() => undefined);
-	const browserWSEndpoint = tab.browser.browser.wsEndpoint();
-	if (!browserWSEndpoint) throw new ToolError("Browser websocket endpoint is unavailable");
-	const payload: WorkerInitPayload = {
-		mode: "attach",
-		browserWSEndpoint,
-		safeDir: getPuppeteerDir(),
-		targetId: tab.targetId,
-		dialogs: tab.dialogPolicy,
-	};
-	let worker = await spawnTabWorker();
-	try {
-		const info = await initializeTabWorker(worker, payload, timeoutMs);
-		tab.worker = worker;
-		tab.info = info;
-		tab.state = "alive";
-		worker.onMessage(msg => handleTabMessage(tab, msg));
-	} catch (error) {
-		await worker.terminate().catch(() => undefined);
-		worker = await spawnInlineWorker();
-		try {
-			const info = await initializeTabWorker(worker, payload, timeoutMs);
-			tab.worker = worker;
-			tab.info = info;
-			tab.state = "alive";
-			worker.onMessage(msg => handleTabMessage(tab, msg));
-		} catch (inlineError) {
-			await worker.terminate().catch(() => undefined);
-			const finalError = new ToolError(
-				`Failed to recycle timed-out browser tab worker (inline fallback also failed): ${inlineError instanceof Error ? inlineError.message : String(inlineError)}`,
-			);
-			Object.defineProperty(finalError, "cause", { value: error, configurable: true });
-			throw finalError;
-		}
-	}
-}
-
 async function forceKillTab(name: string, reason: string): Promise<void> {
-	const tab = tabs.get(name);
-	if (!tab) return;
+	const canonical = resolvedTabName(name);
+	const tab = canonical ? tabs.get(canonical) : undefined;
+	if (!tab || !canonical) return;
 	tab.state = "dead";
-	const error = postmortem.markExpectedCleanupError(new ToolError(reason));
+	const error = new ToolError(reason);
 	for (const pending of tab.pending.values()) pending.reject(error);
 	tab.pending.clear();
+	const leaseId = ownedTabLeases.get(tab);
+	if (leaseId) await releaseOwnedBrowserTabLease(leaseId).catch(() => undefined);
+	ownedTabLeases.delete(tab);
 	if (tab.backend === "cmux") {
 		await releaseBrowser(tab.browser, { kill: false });
-		tabs.delete(name);
+		tabs.delete(canonical);
+		removeTabAliases(canonical);
 		return;
 	}
 	await tab.worker.terminate().catch(() => undefined);
 	if (tab.kindTag === "headless") await closeOrphanTarget(tab);
 	await releaseBrowser(tab.browser, { kill: false });
-	tabs.delete(name);
+	tabs.delete(canonical);
+	removeTabAliases(canonical);
 }
 
 async function closeOrphanTarget(tab: WorkerTabSession): Promise<void> {
@@ -765,6 +878,10 @@ async function closeOrphanTarget(tab: WorkerTabSession): Promise<void> {
 		await page?.close().catch(() => undefined);
 		return;
 	}
+}
+
+function observeRunPromiseRejection(promise: Promise<RunResultOk>): void {
+	void promise.catch(() => undefined);
 }
 
 async function waitForClosed(tab: WorkerTabSession): Promise<void> {
@@ -947,6 +1064,22 @@ export function initializeTabWorkerForTest(
 	timeoutMs: number,
 ): Promise<ReadyInfo> {
 	return initializeTabWorker(worker, payload, timeoutMs);
+}
+
+export function observeRunPromiseRejectionForTest(promise: Promise<RunResultOk>): void {
+	observeRunPromiseRejection(promise);
+}
+
+export function registerTabForTest(tab: TabSession): () => void {
+	tabs.set(tab.name, tab);
+	const unsubscribe = tab.backend === "worker" ? tab.worker.onMessage(msg => handleTabMessage(tab, msg)) : undefined;
+	return () => {
+		unsubscribe?.();
+		if (tabs.get(tab.name) === tab) {
+			tabs.delete(tab.name);
+			removeTabAliases(tab.name);
+		}
+	};
 }
 
 function errorFromWorkerEvent(event: ErrorEvent): Error {

@@ -5,7 +5,6 @@
 
 import { getGeminiCliHeaders } from "@oh-my-pi/pi-catalog/wire/gemini-headers";
 import { $env } from "@oh-my-pi/pi-utils";
-import * as AIError from "../../error";
 import { runGoogleOAuthLogin } from "./google-oauth-shared";
 import type { OAuthController, OAuthCredentials } from "./types";
 
@@ -81,11 +80,7 @@ async function pollOperation(
 		});
 
 		if (!response.ok) {
-			throw new AIError.OAuthError(`Failed to poll operation: ${response.status} ${response.statusText}`, {
-				kind: "polling",
-				provider: "google-gemini-cli",
-				status: response.status,
-			});
+			throw new Error(`Failed to poll operation: ${response.status} ${response.statusText}`);
 		}
 
 		const data = (await response.json()) as LongRunningOperationResponse;
@@ -135,10 +130,7 @@ async function discoverProject(accessToken: string, onProgress?: (message: strin
 			data = { currentTier: { id: TIER_STANDARD } };
 		} else {
 			const errorText = await loadResponse.text();
-			throw new AIError.OAuthError(
-				`loadCodeAssist failed: ${loadResponse.status} ${loadResponse.statusText}: ${errorText}`,
-				{ kind: "discovery", provider: "google-gemini-cli", status: loadResponse.status },
-			);
+			throw new Error(`loadCodeAssist failed: ${loadResponse.status} ${loadResponse.statusText}: ${errorText}`);
 		}
 	} else {
 		data = (await loadResponse.json()) as LoadCodeAssistPayload;
@@ -151,10 +143,9 @@ async function discoverProject(accessToken: string, onProgress?: (message: strin
 		if (envProjectId) {
 			return envProjectId;
 		}
-		throw new AIError.OAuthError(
+		throw new Error(
 			"This account requires setting the GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_PROJECT_ID environment variable. " +
 				"See https://goo.gle/gemini-cli-auth-docs#workspace-gca",
-			{ kind: "configuration", provider: "google-gemini-cli" },
 		);
 	}
 
@@ -162,10 +153,9 @@ async function discoverProject(accessToken: string, onProgress?: (message: strin
 	const tierId = tier?.id ?? TIER_FREE;
 
 	if (tierId !== TIER_FREE && !envProjectId) {
-		throw new AIError.OAuthError(
+		throw new Error(
 			"This account requires setting the GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_PROJECT_ID environment variable. " +
 				"See https://goo.gle/gemini-cli-auth-docs#workspace-gca",
-			{ kind: "configuration", provider: "google-gemini-cli" },
 		);
 	}
 
@@ -193,10 +183,7 @@ async function discoverProject(accessToken: string, onProgress?: (message: strin
 
 	if (!onboardResponse.ok) {
 		const errorText = await onboardResponse.text();
-		throw new AIError.OAuthError(
-			`onboardUser failed: ${onboardResponse.status} ${onboardResponse.statusText}: ${errorText}`,
-			{ kind: "provisioning", provider: "google-gemini-cli", status: onboardResponse.status },
-		);
+		throw new Error(`onboardUser failed: ${onboardResponse.status} ${onboardResponse.statusText}: ${errorText}`);
 	}
 
 	let lroData = (await onboardResponse.json()) as LongRunningOperationResponse;
@@ -214,11 +201,10 @@ async function discoverProject(accessToken: string, onProgress?: (message: strin
 		return envProjectId;
 	}
 
-	throw new AIError.OAuthError(
+	throw new Error(
 		"Could not discover or provision a Google Cloud project. " +
 			"Try setting the GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_PROJECT_ID environment variable. " +
 			"See https://goo.gle/gemini-cli-auth-docs#workspace-gca",
-		{ kind: "validation", provider: "google-gemini-cli" },
 	);
 }
 
@@ -252,10 +238,7 @@ export async function refreshGoogleCloudToken(refreshToken: string, projectId: s
 
 	if (!response.ok) {
 		const error = await response.text();
-		throw new AIError.OAuthError(`Google Cloud token refresh failed: ${error}`, {
-			kind: "token-refresh",
-			provider: "google-gemini-cli",
-		});
+		throw new Error(`Google Cloud token refresh failed: ${error}`);
 	}
 
 	const data = (await response.json()) as {

@@ -12,15 +12,15 @@ import {
 	type ExtensionFactory,
 } from "@oh-my-pi/pi-coding-agent/sdk";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { Snowflake } from "@oh-my-pi/pi-utils";
+import { z } from "zod/v4";
 
 const toolActivationExtension: ExtensionFactory = pi => {
 	pi.registerTool({
 		name: "default_inactive_tool",
 		label: "Default Inactive Tool",
 		description: "Tool hidden from the initial active set unless explicitly requested.",
-		parameters: type({}),
+		parameters: z.object({}),
 		defaultInactive: true,
 		async execute() {
 			return { content: [{ type: "text", text: "inactive" }] };
@@ -30,7 +30,7 @@ const toolActivationExtension: ExtensionFactory = pi => {
 		name: "default_active_tool",
 		label: "Default Active Tool",
 		description: "Tool included in the initial active set.",
-		parameters: type({}),
+		parameters: z.object({}),
 		async execute() {
 			return { content: [{ type: "text", text: "active" }] };
 		},
@@ -88,14 +88,14 @@ describe("createAgentSession defaultInactive tool activation", () => {
 
 	afterEach(() => {
 		for (const tempDir of tempDirs.splice(0)) {
-			removeSyncWithRetries(tempDir);
+			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 
 		vi.restoreAllMocks();
 	});
 
 	afterAll(() => {
-		removeSyncWithRetries(registryAuthDir);
+		fs.rmSync(registryAuthDir, { recursive: true, force: true });
 	});
 
 	it("excludes defaultInactive extension tools from the initial active set unless explicitly requested", async () => {
@@ -140,7 +140,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 
 	it("activates the yield tool when requireYieldTool is set and toolNames is explicit", async () => {
 		// Regression for #1408: plan-mode subagents pass an explicit `toolNames` list
-		// (e.g. `["read", "grep", "glob", "lsp", "web_search"]`). Without this
+		// (e.g. `["read", "search", "find", "lsp", "web_search"]`). Without this
 		// invariant, `yield` ended up registered but not active, and the model
 		// could not satisfy the idle-reminder contract that demands a `yield` call.
 		const tempDir = makeTempDir();
@@ -148,32 +148,11 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
 			requireYieldTool: true,
-			toolNames: ["read", "grep", "glob", "web_search"],
+			toolNames: ["read", "search", "find", "web_search"],
 		});
 
 		try {
 			expect(session.getActiveToolNames()).toContain("yield");
-		} finally {
-			await session.dispose();
-		}
-	});
-
-	it("normalizes legacy builtin toolNames before selecting the active SDK tools", async () => {
-		const tempDir = makeTempDir();
-
-		const { session } = await createAgentSession({
-			...baseOptions(tempDir),
-			toolNames: ["read", "search", "find"],
-		});
-
-		try {
-			const activeToolNames = session.getActiveToolNames();
-
-			expect(activeToolNames).toContain("read");
-			expect(activeToolNames).toContain("grep");
-			expect(activeToolNames).toContain("glob");
-			expect(activeToolNames).not.toContain("search");
-			expect(activeToolNames).not.toContain("find");
 		} finally {
 			await session.dispose();
 		}
@@ -191,7 +170,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
-			toolNames: ["read", "grep", "glob", "web_search"],
+			toolNames: ["read", "search", "find", "web_search"],
 		});
 
 		try {
@@ -210,7 +189,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 		const { session } = await createAgentSession({
 			...baseOptions(tempDir),
 			settings,
-			toolNames: ["read", "grep", "glob", "web_search"],
+			toolNames: ["read", "search", "find", "web_search"],
 		});
 
 		try {

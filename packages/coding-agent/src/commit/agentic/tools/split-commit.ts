@@ -1,4 +1,4 @@
-import { type } from "arktype";
+import { z } from "zod/v4";
 import type { CommitAgentState, SplitCommitGroup, SplitCommitPlan } from "../../../commit/agentic/state";
 import { computeDependencyOrder } from "../../../commit/agentic/topo-sort";
 import {
@@ -15,28 +15,32 @@ import type { CustomTool } from "../../../extensibility/custom-tools/types";
 import * as git from "../../../utils/git";
 import { commitTypeSchema, detailSchema } from "./schemas.js";
 
-const hunkSelectorSchema = type({ type: "'all'" })
-	.or({ type: "'indices'", indices: "number[]" })
-	.or({ type: "'lines'", start: "number", end: "number" });
+const hunkSelectorSchema = z.discriminatedUnion("type", [
+	z.object({ type: z.literal("all") }),
+	z.object({ type: z.literal("indices"), indices: z.array(z.number()).min(1) }),
+	z.object({ type: z.literal("lines"), start: z.number(), end: z.number() }),
+]);
 
-const fileChangeSchema = type({
-	path: "string",
+const fileChangeSchema = z.object({
+	path: z.string(),
 	hunks: hunkSelectorSchema,
 });
 
-const commitItemSchema = type({
-	changes: fileChangeSchema.array(),
-	type: commitTypeSchema,
-	scope: type("string").or("null"),
-	summary: "string",
-	"details?": detailSchema.array(),
-	"issue_refs?": "string[]",
-	"rationale?": "string",
-	"dependencies?": "number[]",
-});
-
-const splitCommitSchema = type({
-	commits: commitItemSchema.array(),
+const splitCommitSchema = z.object({
+	commits: z
+		.array(
+			z.object({
+				changes: z.array(fileChangeSchema).min(1),
+				type: commitTypeSchema,
+				scope: z.union([z.string(), z.null()]),
+				summary: z.string(),
+				details: z.array(detailSchema).optional(),
+				issue_refs: z.array(z.string()).optional(),
+				rationale: z.string().optional(),
+				dependencies: z.array(z.number()).optional(),
+			}),
+		)
+		.min(2),
 });
 
 interface SplitCommitResponse {

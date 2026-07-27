@@ -1,30 +1,27 @@
-import { type } from "arktype";
+import { z } from "zod/v4";
 import type { CommitAgentState } from "../../../commit/agentic/state";
 import { CHANGELOG_CATEGORIES, type ChangelogCategory } from "../../../commit/types";
 import type { CustomTool } from "../../../extensibility/custom-tools/types";
 
-const changelogCategoryProperties = {
-	"Breaking Changes?": "string[]",
-	"Added?": "string[]",
-	"Changed?": "string[]",
-	"Deprecated?": "string[]",
-	"Removed?": "string[]",
-	"Fixed?": "string[]",
-	"Security?": "string[]",
-} as const;
+const changelogEntryProperties = CHANGELOG_CATEGORIES.reduce<Record<ChangelogCategory, z.ZodType>>(
+	(acc, category) => {
+		acc[category] = z.array(z.string()).optional();
+		return acc;
+	},
+	{} as Record<ChangelogCategory, z.ZodType>,
+);
 
-const changelogEntriesSchema = type({
-	...changelogCategoryProperties,
-});
+const changelogEntriesSchema = z.object(changelogEntryProperties);
+const changelogDeletionsSchema = z.object(changelogEntryProperties).describe("entries to remove");
 
-const changelogEntrySchema = type({
-	path: "string",
+const changelogEntrySchema = z.object({
+	path: z.string(),
 	entries: changelogEntriesSchema,
-	"deletions?": changelogEntriesSchema.describe("entries to remove"),
+	deletions: changelogDeletionsSchema.optional(),
 });
 
-const proposeChangelogSchema = type({
-	entries: changelogEntrySchema.array(),
+const proposeChangelogSchema = z.object({
+	entries: z.array(changelogEntrySchema),
 });
 
 interface ChangelogResponse {

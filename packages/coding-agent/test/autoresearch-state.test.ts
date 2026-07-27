@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createAutoresearchExtension } from "@oh-my-pi/pi-coding-agent/autoresearch";
 import {
 	buildExperimentState,
@@ -8,7 +11,7 @@ import {
 	findBestKeptMetric,
 	reconstructControlState,
 } from "@oh-my-pi/pi-coding-agent/autoresearch/state";
-import { AutoresearchStorage, closeAllAutoresearchStorages } from "@oh-my-pi/pi-coding-agent/autoresearch/storage";
+import { AutoresearchStorage } from "@oh-my-pi/pi-coding-agent/autoresearch/storage";
 import type { ExperimentResult } from "@oh-my-pi/pi-coding-agent/autoresearch/types";
 import type {
 	ExtensionAPI,
@@ -16,14 +19,16 @@ import type {
 	RegisteredCommand,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Snowflake } from "@oh-my-pi/pi-utils";
 
 afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-function makeTempDir(): TempDir {
-	return TempDir.createSync("@pi-autoresearch-test-");
+function makeTempDir(): string {
+	const dir = path.join(os.tmpdir(), `pi-autoresearch-test-${Snowflake.next()}`);
+	fs.mkdirSync(dir, { recursive: true });
+	return dir;
 }
 
 function makeResult(partial: Partial<ExperimentResult>): ExperimentResult {
@@ -108,19 +113,18 @@ describe("autoresearch state math", () => {
 });
 
 describe("AutoresearchStorage round-trip", () => {
-	let dbDir: TempDir;
+	let dbDir: string;
 
 	beforeEach(() => {
 		dbDir = makeTempDir();
 	});
 
-	afterEach(async () => {
-		await Bun.sleep(0);
-		await dbDir.remove().catch(() => {});
+	afterEach(() => {
+		fs.rmSync(dbDir, { recursive: true, force: true });
 	});
 
 	function openStorage(): AutoresearchStorage {
-		return new AutoresearchStorage(dbDir.join("test.db"), dbDir.path());
+		return new AutoresearchStorage(path.join(dbDir, "test.db"), dbDir);
 	}
 
 	it("persists sessions and exposes the active session", () => {
@@ -512,25 +516,25 @@ function createCommandHarness(
 }
 
 describe("autoresearch slash command", () => {
-	const cleanups: TempDir[] = [];
-	let dbOverride: TempDir | undefined;
+	const cleanups: string[] = [];
+	let dbOverride: string | undefined;
 
 	beforeEach(() => {
-		dbOverride = TempDir.createSync("@pi-autoresearch-cmd-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		dbOverride = path.join(os.tmpdir(), `pi-autoresearch-cmd-${Snowflake.next()}`);
+		fs.mkdirSync(dbOverride, { recursive: true });
+		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride;
 		cleanups.push(dbOverride);
 	});
 
 	afterEach(() => {
 		delete process.env.OMP_AUTORESEARCH_DB_DIR;
-		closeAllAutoresearchStorages();
 		for (const dir of cleanups.splice(0)) {
-			dir.removeSync();
+			fs.rmSync(dir, { recursive: true, force: true });
 		}
 	});
 
 	it("enables autoresearch with a notify when invoked bare in a clean repo", async () => {
-		const dir = makeTempDir().path();
+		const dir = makeTempDir();
 		const harness = createCommandHarness(dir, async (_command, args) => {
 			if (args[0] === "rev-parse") return { code: 0, stderr: "", stdout: `${dir}\n` };
 			if (args[0] === "branch" && args[1] === "--show-current") return { code: 0, stderr: "", stdout: "main\n" };
@@ -545,7 +549,7 @@ describe("autoresearch slash command", () => {
 	});
 
 	it("forwards a slash argument as the user message and creates a slug branch", async () => {
-		const dir = makeTempDir().path();
+		const dir = makeTempDir();
 		const harness = createCommandHarness(dir, async (_command, args) => {
 			if (args[0] === "rev-parse") return { code: 0, stderr: "", stdout: `${dir}\n` };
 			if (args[0] === "branch" && args[1] === "--show-current") return { code: 0, stderr: "", stdout: "main\n" };
@@ -561,7 +565,7 @@ describe("autoresearch slash command", () => {
 	});
 
 	it("aborts with an error when the worktree is dirty", async () => {
-		const dir = makeTempDir().path();
+		const dir = makeTempDir();
 		const harness = createCommandHarness(dir, async (_command, args) => {
 			if (args[0] === "rev-parse") return { code: 0, stderr: "", stdout: `${dir}\n` };
 			if (args[0] === "branch" && args[1] === "--show-current") return { code: 0, stderr: "", stdout: "main\n" };
@@ -579,20 +583,20 @@ describe("autoresearch slash command", () => {
 });
 
 describe("autoresearch tool-call hook", () => {
-	const cleanups: TempDir[] = [];
-	let dbOverride: TempDir;
+	const cleanups: string[] = [];
+	let dbOverride: string;
 
 	beforeEach(() => {
-		dbOverride = TempDir.createSync("@pi-autoresearch-hook-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		dbOverride = path.join(os.tmpdir(), `pi-autoresearch-hook-${Snowflake.next()}`);
+		fs.mkdirSync(dbOverride, { recursive: true });
+		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride;
 		cleanups.push(dbOverride);
 	});
 
 	afterEach(() => {
 		delete process.env.OMP_AUTORESEARCH_DB_DIR;
-		closeAllAutoresearchStorages();
 		for (const dir of cleanups.splice(0)) {
-			dir.removeSync();
+			fs.rmSync(dir, { recursive: true, force: true });
 		}
 	});
 

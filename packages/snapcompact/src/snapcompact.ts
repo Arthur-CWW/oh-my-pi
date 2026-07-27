@@ -31,11 +31,14 @@
  *   billing (32px × 1.2, 10k-patch budget at `detail: "original"`) is
  *   area-proportional, so resolution cannot improve chars/$ — 1568 stays.
  *   `detail: "high"` would downgrade (2,500-patch cap); `original` is sent.
- * - **Unknown providers** default to the Anthropic shape. `providerImageBudget`
- *   still caps per-request images per provider so inline imaging cannot flood a
- *   request with attachments, but the old OpenRouter-specific 8-image cap is
- *   gone; routers now use the same permissive budget as direct Anthropic/Claude
- *   lines unless configured otherwise upstream.
+ * - **Unknown providers** default to the Anthropic shape. Gateways can
+ *   defeat any shape silently: OpenRouter enforces a per-model image cap
+ *   (measured: 8 images for glm-4.6v — frames past the cap are dropped with
+ *   no error, billed tokens plateau exactly at 8x frame cost). The same
+ *   frames routed direct to the vendor read fine (glm f1 .20 -> .78), so
+ *   `providerImageBudget` caps per-request images per provider (OpenRouter
+ *   8, unknown 5) and `compact()` keeps any archive overflow as a text tail
+ *   on the summary instead of rendering frames that would be dropped.
  *
  * The whole pass is local and deterministic — no LLM call, no API key, no
  * latency beyond rendering. Rasterization and PNG encoding happen in native
@@ -44,10 +47,9 @@
  * re-attached to the compaction summary message on every context rebuild.
  */
 
-import type { Api, ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
-import { renderSnapcompactPng, snapcompactSupportedChars } from "@oh-my-pi/pi-natives";
+import type { Api, ImageContent, Message, Model } from "@oh-my-pi/pi-ai";
+import { renderSnapcompactPng } from "@oh-my-pi/pi-natives";
 import { formatGroupedPaths, prompt } from "@oh-my-pi/pi-utils";
-import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import fileOperationsTemplate from "./prompts/file-operations.md" with { type: "text" };
 import snapcompactSummaryPrompt from "./prompts/snapcompact-summary.md" with { type: "text" };
 
@@ -58,7 +60,7 @@ import snapcompactSummaryPrompt from "./prompts/snapcompact-summary.md" with { t
 /** One eval-validated frame shape: font, cell, ink, repetition, and size. */
 export interface Shape {
 	/** Bundled font in the native renderer. */
-	font: "5x8" | "8x8" | "6x12" | "8x13" | "silver";
+	font: "5x8" | "8x8" | "6x12" | "8x13";
 	/** Target cell advance in pixels; differing from the font's natural cell
 	 *  renders via Lanczos stretch (anti-aliased RGB frame). */
 	cellWidth: number;
@@ -97,10 +99,9 @@ export type ShapeGeometry = Omit<Shape, "frameTokenEstimate" | "imageDetail">;
  * and `8x13` the X.org misc fonts, `8on16` 8x13 glyphs on an 8x16 cell pitch
  * (no stretch, extra leading), `8on22` the same glyphs on a 22px pitch (more
  * leading), `11on16` the same glyphs on an 11px advance (more tracking),
- * `silver16` the embedded Silver TrueType font on a 16px grid for CJK and
- * other non-Latin text, and `doc-` prefixed shapes a two-column word-wrapped
- * newspaper layout. Ink: `sent` cycles six hues at sentence boundaries, `bw`
- * is plain black, `-dim` suffix prints stopwords in gray.
+ * `doc-` prefixed shapes a two-column word-wrapped newspaper layout. Ink:
+ * `sent` cycles six hues at sentence boundaries, `bw` is plain black, `-dim`
+ * suffix prints stopwords in gray.
  */
 export const SHAPE_VARIANTS = {
 	"8x8r-bw": { font: "8x8", cellWidth: 8, cellHeight: 8, variant: "bw", lineRepeat: 2, frameSize: 1568 },
@@ -144,14 +145,6 @@ export const SHAPE_VARIANTS = {
 		cellWidth: 11,
 		cellHeight: 16,
 		stretch: false,
-		variant: "bw",
-		lineRepeat: 1,
-		frameSize: 1568,
-	},
-	"silver16-bw": {
-		font: "silver",
-		cellWidth: 16,
-		cellHeight: 16,
 		variant: "bw",
 		lineRepeat: 1,
 		frameSize: 1568,
@@ -280,7 +273,7 @@ export function isShape(value: unknown): value is Shape {
 	const variant = shape.variant;
 	const detail = shape.imageDetail;
 	return (
-		(font === "5x8" || font === "8x8" || font === "6x12" || font === "8x13" || font === "silver") &&
+		(font === "5x8" || font === "8x8" || font === "6x12" || font === "8x13") &&
 		typeof shape.cellWidth === "number" &&
 		shape.cellWidth > 0 &&
 		typeof shape.cellHeight === "number" &&
@@ -305,16 +298,6 @@ const FAMILY_VARIANT: Record<BillingFamily, ShapeVariantName> = {
 	anthropic: "11on16-bw",
 	google: "8on22-bw",
 	openai: "8on22-bw",
-};
-
-/** Denser companion variant per family for the foveated archive middle: same
- *  pixels (identical per-frame bill) but a tighter 8px cell, trading some
- *  legibility for ~40% more chars per frame so the least-important middle of a
- *  long archive compresses into fewer frames. */
-const FAMILY_VARIANT_LOW: Record<BillingFamily, ShapeVariantName> = {
-	anthropic: "8on16-bw",
-	google: "8on16-bw",
-	openai: "8on16-bw",
 };
 
 const FAMILY_SHAPE: Record<BillingFamily, Shape> = {
@@ -385,41 +368,6 @@ export function resolveShape(model?: ShapeTarget, variant?: ShapeVariantName | "
 	return priceShape(ideal?.frameSize ? { ...base, frameSize: ideal.frameSize } : base, family);
 }
 
-const CJK_HEAVY_MIN_WIDE_CHARS = 8;
-const CJK_HEAVY_WIDE_RATIO = 0.25;
-
-function isCjkHeavyText(text: string): boolean {
-	const chars = normalizedInputChars(text);
-	let graphicChars = 0;
-	let wideChars = 0;
-	for (const ch of chars) {
-		if (ch === " " || ch === DIM_ON || ch === DIM_OFF || ch === NEWLINE_GLYPH) continue;
-		const cp = ch.codePointAt(0);
-		if (cp === undefined || UNRENDERABLE.test(ch)) continue;
-		graphicChars++;
-		if (isWideCodePoint(cp)) wideChars++;
-	}
-	return wideChars >= CJK_HEAVY_MIN_WIDE_CHARS && wideChars / graphicChars >= CJK_HEAVY_WIDE_RATIO;
-}
-
-/**
- * Pick the frame shape for `text`. Explicit variants remain forced. Auto first
- * resolves the model/provider default, then selects the Silver CJK grid when
- * the default font cannot safely render the text or wide CJK glyphs dominate
- * the transcript and Silver can render it safely.
- */
-export function resolveShapeForText(text: string, model?: ShapeTarget, variant?: ShapeVariantName | "auto"): Shape {
-	const shape = resolveShape(model, variant);
-	if (variant && variant !== "auto") return shape;
-	const silver = resolveShape(model, "silver16-bw");
-	if (!scanRenderability(text, { shape }).isSafe) {
-		return scanRenderability(text, { shape: silver }).isSafe ? silver : shape;
-	}
-	return shape.font !== "silver" && isCjkHeavyText(text) && scanRenderability(text, { shape: silver }).isSafe
-		? silver
-		: shape;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
@@ -428,55 +376,22 @@ export function resolveShapeForText(text: string, model?: ShapeTarget, variant?:
  *  shapes carry their own `frameSize`. */
 export const FRAME_SIZE = 2576;
 
-/** Default upper bound on archive frames carried per compaction. Sized to hold
- *  ~400k tokens of the high-res Anthropic frame Opus reads (1932px ≈ 5,000
- *  billed tokens each → 80 frames) while staying under the ~100-image
- *  per-request wire cap. Oldest frames are dropped first once the budget is
- *  exceeded (mirrors how iterative text summaries fade the oldest detail); a
- *  caller may pass a lower `maxFrames` upper limit, and per-model context
- *  fitting is handled by the caller's overflow guard. */
-export const MAX_FRAMES_DEFAULT = 80;
+/** Maximum frames carried on a compaction entry. Oldest frames are dropped
+ *  first once the budget is exceeded (mirrors how iterative text summaries
+ *  fade the oldest detail). */
+export const MAX_FRAMES = 8;
 
-/** High-quality (legible) frames rendered at each chronological edge of a
- *  foveated archive — the session head (oldest) and the slice just before the
- *  text region (newest) — with the denser low-quality tier filling the middle. */
-export const HQ_EDGE_FRAMES = 3;
-
-/** Conservative per-frame token estimate used for context budgeting — the
- *  upper bound across shapes: high-res Claude frames hit the 4,784 visual-token
- *  cap, billed at +5% margin (ceil(4784 * 1.05)). Keeps the overflow guard from
- *  undercounting a high-res archive at the raised {@link MAX_FRAMES_DEFAULT}. */
-export const FRAME_TOKEN_ESTIMATE = 5024;
-
-/** Conservative upper bound for one persisted frame's base64 payload. The
- *  measured high-res Anthropic `8x13`/`11on16` PNG frames sit around 159 KB;
- *  170 KB leaves margin for denser glyph pages without permitting multi-MB
- *  standing request bodies at large context windows. */
-export const FRAME_DATA_BYTES_ESTIMATE = 170_000;
-
-/** Maximum snapcompact image base64 carried in every rebuilt provider request.
- *  Above this, provider backends can accept the HTTP body but fail mid-stream
- *  with opaque 5xx errors. Keep this independent from visual-token budgeting:
- *  a 1M-token model can afford 70 images on paper, but not the resulting
- *  ~11 MB JSON payload on every turn. */
-export const FRAME_DATA_BYTES_BUDGET = 3_000_000;
-
-/** Frame-count cap implied by {@link FRAME_DATA_BYTES_BUDGET}. */
-export function maxFramesForDataBudget(maxFrameDataBytes: number = FRAME_DATA_BYTES_BUDGET): number {
-	return Math.max(1, Math.floor(maxFrameDataBytes / FRAME_DATA_BYTES_ESTIMATE));
-}
-
-/** Base64 byte length for persisted snapcompact frames. */
-export function frameDataBytes(frames: readonly Pick<Frame, "data">[]): number {
-	return frames.reduce((sum, frame) => sum + frame.data.length, 0);
-}
+/** Conservative per-frame token estimate used for context budgeting
+ *  (upper bound across shapes: Anthropic bills 1568*1568/750 ≈ 3,278). */
+export const FRAME_TOKEN_ESTIMATE = 3300;
 
 /**
- * Per-request image-count budgets by provider id. These cap how many images an
- * entire request may carry (archive/system-prompt/tool-result imaging combined).
- * The values are conservative policy caps under the vendor hard limits
- * (Anthropic 100, OpenAI 500, Gemini ~2500); unknown providers fall to a safe
- * floor rather than sending unbounded attachments.
+ * Per-request image-count budgets by provider id. Routers and smaller
+ * providers enforce hard caps and silently DROP images past them (measured:
+ * OpenRouter caps at 8 — images 9+ vanish with no error and billed tokens
+ * plateau at 8x frame cost). First-party APIs allow far more; their values
+ * are conservative policy caps well under the measured hard limits
+ * (Anthropic 100, OpenAI 500, Gemini ~2500).
  */
 export const PROVIDER_IMAGE_BUDGETS: Record<string, number> = {
 	anthropic: 90,
@@ -486,8 +401,7 @@ export const PROVIDER_IMAGE_BUDGETS: Record<string, number> = {
 	google: 200,
 	"google-vertex": 200,
 	"google-gemini-cli": 200,
-	openrouter: 90,
-	umans: 10,
+	openrouter: 8,
 };
 
 /** Safe floor for unknown providers (strictest mainstream measured: Groq ~5). */
@@ -496,6 +410,11 @@ export const DEFAULT_PROVIDER_IMAGE_BUDGET = 5;
 /** Per-request image budget for `provider`; unknown providers get the floor. */
 export function providerImageBudget(provider: string | undefined): number {
 	return (provider !== undefined ? PROVIDER_IMAGE_BUDGETS[provider] : undefined) ?? DEFAULT_PROVIDER_IMAGE_BUDGET;
+}
+
+/** Archive frame budget for `provider`: its image budget clamped to {@link MAX_FRAMES}. */
+export function providerFrameBudget(provider: string | undefined): number {
+	return Math.min(MAX_FRAMES, providerImageBudget(provider));
 }
 
 /** Key under `CompactionEntry.preserveData` holding the frame archive. */
@@ -530,20 +449,16 @@ export interface Frame {
 
 /** Frame archive persisted under `preserveData[PRESERVE_KEY]`. */
 export interface Archive {
-	/** Rendered frames ordered oldest to newest, re-derived from {@link text}
-	 *  each compaction with foveated quality tiers (HQ/LQ/HQ inside the imaged
-	 *  middle). May be empty when the whole archive fits in text. */
+	/** Frames ordered oldest to newest. */
 	frames: Frame[];
-	/** Characters currently readable across all frames plus the text regions. */
+	/** Characters currently readable across all frames. */
 	totalChars: number;
-	/** Characters dropped so far to respect the archive budget. */
+	/** Characters dropped so far to respect the frame budget. */
 	truncatedChars: number;
-	/** Full kept archive source (oldest to newest, normalized, bounded to the
-	 *  rendered budget) — the single source re-rendered each compaction. */
-	text?: string;
-	/** Oldest text region kept verbatim around the imaged middle. */
-	textHead?: string;
-	/** Newest text region kept verbatim around the imaged middle. */
+	/** Most recent slice of archived history that exceeded the frame budget,
+	 *  kept verbatim as normalized text (dim markers and newline glyphs
+	 *  included). Shipped as plain text in the compaction summary and folded
+	 *  back into frames by the next compaction. */
 	textTail?: string;
 }
 
@@ -559,13 +474,13 @@ export interface Geometry {
 export interface Options<TMessage = Message> extends SerializeOptions {
 	/** App-level message transformer (same contract as agent-core's `SummaryOptions.convertToLlm`). */
 	convertToLlm?: ConvertToLlm<TMessage>;
-	/** Model whose provider API and id select the frame shape. */
-	model?: ShapeTarget;
+	/** Model whose provider API selects the frame shape. */
+	model?: Pick<Model, "api">;
 	/** Explicit shape override; wins over `model`. */
 	shape?: Shape;
 	/** Frame edge in pixels. Defaults to the shape's `frameSize`. */
 	frameSize?: number;
-	/** Upper limit on archive frames; clamped to (and defaulting to) {@link MAX_FRAMES_DEFAULT}. */
+	/** Frame budget. Defaults to {@link MAX_FRAMES}. */
 	maxFrames?: number;
 }
 
@@ -636,17 +551,10 @@ export function createFileOps(): FileOperations {
 		edited: new Set(),
 	};
 }
-const URL_SCHEME_RE = /[a-z][a-z0-9+.-]*:\/\//i;
-
-const HEADING_MARKER = " ¶";
-
-export function isUrlSchemePath(path: string): boolean {
-	return URL_SCHEME_RE.test(path);
-}
 
 export function computeFileLists(fileOps: FileOperations): CompactionDetails {
-	const modified = new Set([...fileOps.edited, ...fileOps.written].filter(file => !isUrlSchemePath(file)));
-	const readFiles = [...fileOps.read].filter(file => !isUrlSchemePath(file) && !modified.has(file)).sort();
+	const modified = new Set([...fileOps.edited, ...fileOps.written]);
+	const readFiles = [...fileOps.read].filter(file => !modified.has(file)).sort();
 	const modifiedFiles = [...modified].sort();
 	return { readFiles, modifiedFiles };
 }
@@ -669,7 +577,7 @@ function stripFileOperationTags(summary: string): string {
 		.trimEnd();
 }
 
-function formatFileList(readFiles: string[], modifiedFiles: string[], readSet?: ReadonlySet<string>): string {
+function formatFileOperations(readFiles: string[], modifiedFiles: string[], readSet?: ReadonlySet<string>): string {
 	if (readFiles.length === 0 && modifiedFiles.length === 0) return "";
 	const mode = new Map<string, "Read" | "Write" | "RW">();
 	for (const file of readFiles) mode.set(file, "Read");
@@ -677,14 +585,9 @@ function formatFileList(readFiles: string[], modifiedFiles: string[], readSet?: 
 	const all = [...mode.keys()].sort();
 	let files = formatGroupedPaths(all.slice(0, FILE_OPERATION_SUMMARY_LIMIT), path => ` (${mode.get(path)})`);
 	if (all.length > FILE_OPERATION_SUMMARY_LIMIT) {
-		files += `\n[…${all.length - FILE_OPERATION_SUMMARY_LIMIT} files elided…]`;
+		files += `\n… (${all.length - FILE_OPERATION_SUMMARY_LIMIT} more files omitted)`;
 	}
-	return files;
-}
-
-function formatFileOperations(readFiles: string[], modifiedFiles: string[], readSet?: ReadonlySet<string>): string {
-	const files = formatFileList(readFiles, modifiedFiles, readSet);
-	return files.length > 0 ? prompt.render(fileOperationsTemplate, { files }) : "";
+	return prompt.render(fileOperationsTemplate, { files });
 }
 
 export function upsertFileOperations(
@@ -747,16 +650,15 @@ function truncateForSummary(text: string, maxChars: number, headRatio: number): 
 	const tailChars = maxChars - headChars;
 	const elided = text.length - maxChars;
 	const tail = tailChars > 0 ? text.slice(-tailChars) : "";
-	return `${text.slice(0, headChars)} […${elided}ch elided…] ${tail}`;
+	return `${text.slice(0, headChars)} [... ${elided} chars elided ...] ${tail}`;
 }
 
 const DIM_MARKERS = /[\u000e\u000f]/g;
 
-/** Plain-text history kept verbatim at each chronological edge, in HQ-frame-
- *  capacity units per edge. One page at the start and one at the end preserves
- *  high-fidelity context around the imaged middle while keeping the total text
- *  budget equal to the prior 2-page tail-only scheme. */
-const TEXT_EDGE_PAGES = 1;
+/** Cap on the unrendered archive text tail, in frame-capacity units: enough
+ *  to keep the newest discarded history readable without re-inflating the
+ *  context a compaction just shrank. */
+const TEXT_TAIL_MAX_PAGES = 2;
 
 /** Normalized archive text → plain text: drop zero-width dim toggles and
  *  print newline glyphs as real newlines. */
@@ -777,32 +679,14 @@ export function serializeConversation(messages: Message[], options?: SerializeOp
 	const dimToolResults = options?.dimToolResults !== false;
 	const parts: string[] = [];
 
-	// Tool results flagged contextually useless (and their paired calls) carry no
-	// information worth archiving — skip the whole pair. Surviving results are
-	// indexed by tool-call id so each merges into its originating `# Tool call`.
+	// Tool results flagged contextually useless (and their paired calls) carry
+	// no information worth archiving — skip the whole pair.
 	const uselessCallIds = new Set<string>();
-	const resultTextByCallId = new Map<string, string>();
 	for (const msg of messages) {
-		if (msg.role !== "toolResult") continue;
-		if (msg.useless === true && msg.isError !== true) {
+		if (msg.role === "toolResult" && msg.useless === true && msg.isError !== true) {
 			uselessCallIds.add(msg.toolCallId);
-			continue;
 		}
-		const text = msg.content
-			.filter((block): block is { type: "text"; text: string } => block.type === "text")
-			.map(block => block.text)
-			.join("");
-		if (text) resultTextByCallId.set(msg.toolCallId, text);
 	}
-
-	// Wrap a raw tool-result body in an `<out>` block, dimming only the body so
-	// the frame coloring keeps structure (headings, calls) loud.
-	const renderResultBlock = (rawText: string): string => {
-		const body = truncateForSummary(stripDimMarkers(rawText), toolResultMaxChars, headRatio);
-		return `<out>\n${dimToolResults ? `${DIM_ON}${body}${DIM_OFF}` : body}\n</out>`;
-	};
-
-	const mergedCallIds = new Set<string>();
 
 	for (const msg of messages) {
 		if (msg.role === "user") {
@@ -813,45 +697,22 @@ export function serializeConversation(messages: Message[], options?: SerializeOp
 							.filter((content): content is { type: "text"; text: string } => content.type === "text")
 							.map(content => content.text)
 							.join("");
-			if (content) parts.push(`# User${HEADING_MARKER}\n${stripDimMarkers(content)}`);
+			if (content) parts.push(`[User]: ${stripDimMarkers(content)}`);
 		} else if (msg.role === "assistant") {
-			// Stream blocks in content order: buffer thinking/text, then flush a
-			// `# Assistant` block (thinking as italics above the text) right before
-			// each tool call, so text or thinking after a call stays after it.
-			let pendingThinking: string[] = [];
-			let pendingText: string[] = [];
-			const flushAssistant = () => {
-				const sections: string[] = [];
-				if (pendingThinking.length > 0) sections.push(`_${pendingThinking.join("\n")}_`);
-				if (pendingText.length > 0) sections.push(pendingText.join("\n"));
-				if (sections.length > 0) parts.push(`# Assistant${HEADING_MARKER}\n${sections.join("\n\n")}`);
-				pendingThinking = [];
-				pendingText = [];
-			};
+			const textParts: string[] = [];
+			const thinkingParts: string[] = [];
+			const toolCalls: string[] = [];
 
 			for (const block of msg.content) {
 				if (block.type === "text") {
-					const text = stripDimMarkers(block.text);
-					if (text.trim()) pendingText.push(text);
+					textParts.push(stripDimMarkers(block.text));
 				} else if (block.type === "thinking") {
-					const thinking = stripDimMarkers(block.thinking);
-					if (thinking.trim()) pendingThinking.push(thinking);
+					thinkingParts.push(stripDimMarkers(block.thinking));
 				} else if (block.type === "toolCall") {
 					if (uselessCallIds.has(block.id)) continue;
-					flushAssistant();
 					const args = block.arguments as Record<string, unknown>;
-					// Prefer the harness-derived intent, else the raw intent arg; render it as
-					// a one-line `//comment` and drop it from the args below.
-					const rawIntent =
-						typeof block.intent === "string"
-							? block.intent
-							: typeof args[INTENT_FIELD] === "string"
-								? (args[INTENT_FIELD] as string)
-								: "";
-					const intent = stripDimMarkers(rawIntent).replace(/\s+/g, " ").trim();
 					const argsStr = truncateForSummary(
 						Object.entries(args)
-							.filter(([key]) => key !== INTENT_FIELD)
 							.map(
 								([key, value]) =>
 									`${key}=${truncateForSummary(JSON.stringify(value) ?? "undefined", toolArgMaxChars, headRatio)}`,
@@ -860,24 +721,30 @@ export function serializeConversation(messages: Message[], options?: SerializeOp
 						toolCallMaxChars,
 						headRatio,
 					);
-					const lines = [`# Tool call${HEADING_MARKER}`];
-					if (intent) lines.push(`//${intent}`);
-					lines.push(`${block.name}(${argsStr})`);
-					const resultText = resultTextByCallId.get(block.id);
-					if (resultText !== undefined) {
-						mergedCallIds.add(block.id);
-						lines.push(renderResultBlock(resultText));
-					}
-					parts.push(lines.join("\n"));
+					toolCalls.push(`${block.name}(${argsStr})`);
 				}
 			}
-			flushAssistant();
+
+			if (thinkingParts.length > 0) {
+				parts.push(`[Think]: ${thinkingParts.join("\n")}`);
+			}
+			if (textParts.length > 0) {
+				parts.push(`[Assistant]: ${textParts.join("\n")}`);
+			}
+			if (toolCalls.length > 0) {
+				parts.push(`[Tool Call]: ${toolCalls.join("; ")}`);
+			}
 		} else if (msg.role === "toolResult") {
-			// Paired results already merged into their `# Tool call` block above;
-			// only orphans (call archived outside this window) render standalone.
-			if (uselessCallIds.has(msg.toolCallId) || mergedCallIds.has(msg.toolCallId)) continue;
-			const resultText = resultTextByCallId.get(msg.toolCallId);
-			if (resultText !== undefined) parts.push(`# Tool call${HEADING_MARKER}\n${renderResultBlock(resultText)}`);
+			if (uselessCallIds.has(msg.toolCallId)) continue;
+			const content = msg.content
+				.filter((block): block is { type: "text"; text: string } => block.type === "text")
+				.map(block => block.text)
+				.join("");
+			if (content) {
+				// Args above are JSON-escaped, so only raw result text can carry toggles.
+				const body = truncateForSummary(stripDimMarkers(content), toolResultMaxChars, headRatio);
+				parts.push(dimToolResults ? `[Tool Result]: ${DIM_ON}${body}${DIM_OFF}` : `[Tool Result]: ${body}`);
+			}
 		}
 	}
 
@@ -904,11 +771,8 @@ function stripOpenAiRemoteCompactionPreserveData(
 // Text normalization
 // ============================================================================
 
-/** Punctuation and symbol folds applied before the NFKD fallback in
- *  {@link normalize}: quotes, dashes, bullets, arrows, and dot leaders that
- *  have no compatibility decomposition (or one that is itself non-ASCII). */
+/** Folds for common non-Latin-1 characters the bundled fonts cannot draw. */
 const CHAR_FOLD: Record<string, string> = {
-	// Quotation marks and primes.
 	"\u2018": "'",
 	"\u2019": "'",
 	"\u201a": "'",
@@ -916,44 +780,18 @@ const CHAR_FOLD: Record<string, string> = {
 	"\u201c": '"',
 	"\u201d": '"',
 	"\u201e": '"',
-	"\u2032": "'",
-	"\u2033": '"',
-	"\u2035": "'",
-	"\u2036": '"',
-	"\u2039": "<",
-	"\u203a": ">",
-	// Dashes, hyphens, and the fraction slash NFKD leaves in vulgar fractions.
-	"\u2010": "-",
-	"\u2011": "-",
-	"\u2012": "-",
 	"\u2013": "-",
 	"\u2014": "-",
 	"\u2015": "-",
 	"\u2212": "-",
-	"\u2044": "/",
-	// Dot leaders and ellipses.
-	"\u2024": ".",
-	"\u2025": "..",
 	"\u2026": "...",
-	"\u22ef": "...",
-	// Bullets.
 	"\u2022": "*",
-	"\u2023": "*",
-	"\u2043": "-",
-	"\u2219": "*",
 	"\u25cf": "*",
 	"\u25a0": "*",
 	"\u25aa": "*",
-	// Arrows.
 	"\u2190": "<-",
-	"\u2191": "^",
 	"\u2192": "->",
-	"\u2193": "v",
-	"\u2194": "<->",
-	"\u21d0": "<=",
 	"\u21d2": "=>",
-	"\u21d4": "<=>",
-	// Check marks and crosses.
 	"\u2713": "v",
 	"\u2714": "v",
 	"\u2717": "x",
@@ -981,203 +819,45 @@ const EDGE_RUNS = /^[ \u2588]+|[ \u2588]+$/g;
  *  combining marks the fonts cannot compose, and lone surrogates. */
 const UNRENDERABLE = /[\p{Cc}\p{Mn}\p{Me}\p{Cs}]/u;
 
-/** Combining marks NFKD splits off accented letters; dropped so the base
- *  letter prints without the diacritic the bundled fonts cannot compose. */
-const COMBINING_MARKS = /\p{M}+/gu;
-
-/** Status-like pictographs that carry meaning in tool output; all other emoji
- *  pictographs drop instead of burning cells as `?`. */
-const EMOJI_FOLD: Record<string, string> = {
-	"✅": "[OK]",
-	"☑": "[OK]",
-	"✔": "[OK]",
-	"❌": "[FAIL]",
-	"❎": "[FAIL]",
-	"✖": "[FAIL]",
-	"⚠": "[WARN]",
-	"🚨": "[ALERT]",
-	ℹ: "[INFO]",
-	"🐛": "[BUG]",
-	"💥": "[CRASH]",
-	"🔥": "[HOT]",
-	"🔒": "[LOCK]",
-	"🔓": "[UNLOCK]",
-	"📁": "[DIR]",
-	"📂": "[DIR]",
-	"📄": "[FILE]",
-	"📝": "[NOTE]",
-	"🧪": "[TEST]",
-	"⏳": "[WAIT]",
-	"⌛": "[WAIT]",
-	"🚀": "[RUN]",
-};
-
-const EMOJI_PICTOGRAPH = /\p{Extended_Pictographic}/u;
-
-export interface NormalizeOptions {
-	/** Shape whose font is tried before the embedded Silver fallback. */
-	shape?: Pick<Shape, "font">;
-	/** Native font name when a full shape is not available. */
-	font?: Shape["font"];
-}
-
-interface NormalizedText {
-	text: string;
-	totalGraphics: number;
-	fallbackCount: number;
-}
-
 /**
- * Aggressive single-code-point ASCII fold via Unicode NFKD: decompose the
- * compatibility form (fullwidth, super/subscripts, ligatures, circled and
- * math-styled alphanumerics, Roman numerals, vulgar fractions, …), strip the
- * combining marks, and keep the ASCII/Latin-1 skeleton — routing any residual
- * punctuation back through {@link CHAR_FOLD}. Returns `undefined` when the code
- * point has no decomposition or still leaves an undrawable glyph, so the
- * caller falls back to `?`.
+ * Prepare text for printing: strip ANSI escape sequences, collapse horizontal
+ * whitespace runs to single spaces and newline-bearing runs to one
+ * {@link NEWLINE_GLYPH} (drawn as a pitch-black cell), then fold everything
+ * outside the fonts' ASCII + Latin-1 coverage to ASCII approximations.
+ * Unrenderable control/format/combining characters are dropped without
+ * occupying a cell; `?` remains the fallback for unsupported graphic
+ * characters. The zero-width ink toggles {@link DIM_ON}/{@link DIM_OFF} pass
+ * through untouched.
  */
-function isAsciiOrLatin1(cp: number): boolean {
-	return (cp >= 0x20 && cp < 0x7f) || (cp >= 0xa0 && cp <= 0xff);
-}
-
-function foldToAscii(ch: string): string | undefined {
-	const decomposed = ch.normalize("NFKD").replace(COMBINING_MARKS, "");
-	if (decomposed === ch) return undefined;
-	let out = "";
-	for (const part of decomposed) {
-		const cp = part.codePointAt(0);
-		if (cp !== undefined && isAsciiOrLatin1(cp)) {
-			out += part;
-			continue;
-		}
-		const fold = CHAR_FOLD[part];
-		if (fold === undefined) return undefined;
-		out += fold;
-	}
-	return out;
-}
-
-function renderableUnicodeChars(chars: readonly string[], font: Shape["font"] | undefined): ReadonlySet<string> {
-	if (chars.length === 0) return new Set();
-	const text = chars.join("");
-	const primaryFont = font ?? "5x8";
-	const supported = new Set(snapcompactSupportedChars(primaryFont, text));
-	if (primaryFont !== "silver") {
-		for (const ch of snapcompactSupportedChars("silver", text)) supported.add(ch);
-	}
-	return supported;
-}
-
-function normalizedInputChars(text: string): string[] {
+export function normalize(text: string): string {
 	const stripped = text.includes("\u001b") ? Bun.stripANSI(text) : text;
 	const collapsed = stripped
 		// A run of pure format chars (BOM is both \s and Cf) vanishes; only a
 		// run containing genuine whitespace separates words.
 		.replace(COLLAPSIBLE, run => (LINE_BREAK.test(run) ? NEWLINE_GLYPH : /[^\p{Cf}]/u.test(run) ? " " : ""))
 		.replace(EDGE_RUNS, "");
-	return [...collapsed];
-}
-
-function candidateUnicodeChars(chars: readonly string[]): string[] {
-	const unique = new Set<string>();
-	for (const ch of chars) {
-		const cp = ch.codePointAt(0);
-		if (cp === undefined || isAsciiOrLatin1(cp) || ch === DIM_ON || ch === DIM_OFF || ch === NEWLINE_GLYPH) {
-			continue;
-		}
-		if (
-			CHAR_FOLD[ch] !== undefined ||
-			(cp >= 0x2500 && cp <= 0x257f) ||
-			EMOJI_FOLD[ch] !== undefined ||
-			EMOJI_PICTOGRAPH.test(ch) ||
-			foldToAscii(ch) !== undefined ||
-			UNRENDERABLE.test(ch)
-		) {
-			continue;
-		}
-		unique.add(ch);
-	}
-	return [...unique];
-}
-
-function normalizeWithStats(text: string, options?: NormalizeOptions): NormalizedText {
-	const chars = normalizedInputChars(text);
-	const font = options?.font ?? options?.shape?.font;
-	const supported = renderableUnicodeChars(candidateUnicodeChars(chars), font);
-	const out: string[] = [];
-	let totalGraphics = 0;
-	let fallbackCount = 0;
-
-	for (const ch of chars) {
-		const cp = ch.codePointAt(0);
-		if (cp === undefined) continue;
-		if (isAsciiOrLatin1(cp)) {
-			out.push(ch);
-			totalGraphics++;
+	let out = "";
+	for (const ch of collapsed) {
+		const cp = ch.codePointAt(0) as number;
+		if ((cp >= 0x20 && cp < 0x7f) || (cp >= 0xa0 && cp <= 0xff)) {
+			out += ch;
 			continue;
 		}
 		if (ch === DIM_ON || ch === DIM_OFF || ch === NEWLINE_GLYPH) {
-			out.push(ch);
-			continue;
-		}
-		const emoji = EMOJI_FOLD[ch];
-		if (emoji !== undefined) {
-			out.push(emoji);
-			totalGraphics++;
+			out += ch;
 			continue;
 		}
 		const fold = CHAR_FOLD[ch];
 		if (fold !== undefined) {
-			out.push(fold);
-			totalGraphics++;
-			continue;
-		}
-		if (cp >= 0x2500 && cp <= 0x257f) {
-			out.push(cp === 0x2502 || cp === 0x2503 ? "|" : cp === 0x2500 || cp === 0x2501 ? "-" : "+");
-			totalGraphics++;
-			continue;
-		}
-		if (!EMOJI_PICTOGRAPH.test(ch) && supported.has(ch)) {
-			out.push(ch);
-			totalGraphics++;
-			continue;
-		}
-		const folded = foldToAscii(ch);
-		if (folded !== undefined) {
-			out.push(folded);
-			totalGraphics++;
-		} else if (EMOJI_PICTOGRAPH.test(ch)) {
+			out += fold;
+		} else if (cp >= 0x2500 && cp <= 0x257f) {
+			// Box drawing: keep table skeletons legible.
+			out += cp === 0x2502 || cp === 0x2503 ? "|" : cp === 0x2500 || cp === 0x2501 ? "-" : "+";
 		} else if (!UNRENDERABLE.test(ch)) {
-			out.push("?");
-			totalGraphics++;
-			fallbackCount++;
+			out += "?";
 		}
 	}
-
-	return { text: out.join("").replace(/ +/g, " ").replace(EDGE_RUNS, ""), totalGraphics, fallbackCount };
-}
-
-/**
- * Prepare text for printing: strip ANSI escape sequences, collapse horizontal
- * whitespace runs, fold unsupported symbols (including box drawing to ASCII),
- * preserve Unicode glyphs that either the selected font or embedded Silver
- * fallback can render, and drop decorative emoji instead of printing `?`.
- */
-export function normalize(text: string, options?: NormalizeOptions): string {
-	return normalizeWithStats(text, options).text;
-}
-
-/**
- * Scan text with the same font-aware path as {@link normalize}; unsafe means
- * more than 5% of graphic characters would hit the `?` fallback.
- */
-export function scanRenderability(
-	text: string,
-	options?: NormalizeOptions,
-): { isSafe: boolean; unrenderableRatio: number } {
-	const normalized = normalizeWithStats(text, options);
-	const unrenderableRatio = normalized.totalGraphics > 0 ? normalized.fallbackCount / normalized.totalGraphics : 0;
-	return { isSafe: unrenderableRatio <= 0.05, unrenderableRatio };
+	return out;
 }
 
 // ============================================================================
@@ -1235,131 +915,34 @@ export function dimStopwords(text: string): string {
 /** Char cells between the two doc columns (research exp14 `GUTTER`). */
 const DOC_GUTTER = 3;
 
-/** East Asian Wide / Fullwidth code points that occupy two grid cells when a
- *  narrow bitmap shape draws them through the Silver fallback. Mirrors
- *  `is_wide` in `crates/pi-natives/src/snapcompact.rs`; the two MUST stay in
- *  sync or native layout and this capacity math disagree on cell counts. */
-function isWideCodePoint(cp: number): boolean {
-	return (
-		(cp >= 0x1100 && cp <= 0x115f) ||
-		(cp >= 0x2e80 && cp <= 0x2eff) ||
-		(cp >= 0x2f00 && cp <= 0x2fdf) ||
-		(cp >= 0x3000 && cp <= 0x303e) ||
-		(cp >= 0x3041 && cp <= 0x33ff) ||
-		(cp >= 0x3400 && cp <= 0x4dbf) ||
-		(cp >= 0x4e00 && cp <= 0x9fff) ||
-		(cp >= 0xa000 && cp <= 0xa4cf) ||
-		(cp >= 0xac00 && cp <= 0xd7a3) ||
-		(cp >= 0xf900 && cp <= 0xfaff) ||
-		(cp >= 0xfe30 && cp <= 0xfe4f) ||
-		(cp >= 0xff00 && cp <= 0xff60) ||
-		(cp >= 0xffe0 && cp <= 0xffe6) ||
-		(cp >= 0x20000 && cp <= 0x2fffd) ||
-		(cp >= 0x30000 && cp <= 0x3fffd)
-	);
-}
-
-/** Cells one character occupies: 0 for the zero-width dim toggles, 2 for wide
- *  code points in narrow bitmap shapes, 1 otherwise. Mirrors native
- *  `cell_units`. */
-function charCells(ch: string, wideCells: boolean): number {
-	if (ch === DIM_ON || ch === DIM_OFF) return 0;
-	const cp = ch.codePointAt(0);
-	return wideCells && cp !== undefined && isWideCodePoint(cp) ? 2 : 1;
-}
-
-/** Wide code points span two cells in every shape except the square-celled
- *  Silver shape, which sizes each cell for a full-width glyph already. */
-function usesWideCells(shape: Pick<Shape, "font">): boolean {
-	return shape.font !== "silver";
-}
-
-/** Total grid cells a string occupies (ignoring row wrapping/pads). */
-function cellLength(text: string, wideCells: boolean): number {
-	let cells = 0;
-	for (const ch of text) cells += charCells(ch, wideCells);
-	return cells;
-}
-
-/** Longest prefix of `text` that fits `width` cells (at least one char). */
-function sliceCells(text: string, width: number, wideCells: boolean): string {
-	let cells = 0;
-	let out = "";
-	let placed = false;
-	for (const ch of text) {
-		const w = charCells(ch, wideCells);
-		if (placed && cells + w > width) break;
-		out += ch;
-		cells += w;
-		if (w > 0) placed = true;
-	}
-	return out;
-}
-
-/** Split `text` into pages that each fill at most `capacity` grid cells,
- *  inserting a one-cell pad before a wide glyph that would straddle the right
- *  edge (mirrors native `place_cell`). Pages are contiguous substrings, so each
- *  renders independently starting at cell 0. A single char wider than the whole
- *  budget still rides its page; the native renderer clips it. */
-function paginateCells(text: string, capacity: number, cols: number, wideCells: boolean): string[] {
-	const chars = [...text];
-	const pages: string[] = [];
-	let start = 0;
-	let cell = 0;
-	let hasCell = false;
-	for (let i = 0; i < chars.length; i++) {
-		const w = charCells(chars[i] ?? "", wideCells);
-		if (w === 0) continue;
-		let at = cell;
-		if (w === 2 && cols >= 2 && at % cols === cols - 1) at += 1;
-		if (hasCell && at + w > capacity) {
-			pages.push(chars.slice(start, i).join(""));
-			start = i;
-			at = 0;
-		}
-		cell = at + w;
-		hasCell = true;
-	}
-	if (hasCell) pages.push(chars.slice(start).join(""));
-	return pages;
-}
-
 /**
  * Greedy word-wrap, no mid-word breaks (hard split only for width+ words) —
  * ported verbatim from `research/exp14_bestgpt.py` `wrap()`. Zero-width dim
  * markers count toward word length here; serialized history places them at
  * word boundaries, so the drift is at most one cell per affected line.
  */
-export function wrap(text: string, width: number, wideCells = false): string[] {
+export function wrap(text: string, width: number): string[] {
 	const lines: string[] = [];
 	let cur = "";
-	let curCells = 0;
 	for (const token of text.split(/\s+/)) {
 		if (token.length === 0) continue;
 		let word = token;
-		let wordCells = cellLength(word, wideCells);
-		while (wordCells > width) {
+		while (word.length > width) {
 			// Pathological; never hit on prose.
 			if (cur) {
 				lines.push(cur);
 				cur = "";
-				curCells = 0;
 			}
-			const head = sliceCells(word, width, wideCells);
-			lines.push(head);
-			word = word.slice(head.length);
-			wordCells = cellLength(word, wideCells);
+			lines.push(word.slice(0, width));
+			word = word.slice(width);
 		}
 		if (!cur) {
 			cur = word;
-			curCells = wordCells;
-		} else if (curCells + 1 + wordCells <= width) {
+		} else if (cur.length + 1 + word.length <= width) {
 			cur += ` ${word}`;
-			curCells += 1 + wordCells;
 		} else {
 			lines.push(cur);
 			cur = word;
-			curCells = wordCells;
 		}
 	}
 	if (cur) lines.push(cur);
@@ -1372,8 +955,8 @@ export function wrap(text: string, width: number, wideCells = false): string[] {
  * Every input character lands on exactly one page (whitespace becomes the
  * wrap points).
  */
-function docPages(normalized: string, geo: Geometry, wideCells: boolean): string[] {
-	const lines = wrap(normalized, geo.cols, wideCells);
+function docPages(normalized: string, geo: Geometry): string[] {
+	const lines = wrap(normalized, geo.cols);
 	const perPage = 2 * geo.rows;
 	const pages: string[] = [];
 	for (let offset = 0; offset < lines.length; offset += perPage) {
@@ -1398,8 +981,15 @@ export function geometry(shape: Shape, size: number = shape.frameSize): Geometry
 
 const NEWLINES = /\n/g;
 
-function nativeRenderOptions(shape: Shape, size: number) {
-	return {
+/** Render one snapcompact frame from already-normalized text. Doc shapes
+ *  (`columns === 2`) expect one page of `\n`-joined pre-wrapped lines. */
+export function render(text: string, shape: Shape, size: number = shape.frameSize): RenderedFrame {
+	const { cols, rows, capacity } = geometry(shape, size);
+	let visible = text.length - (text.match(DIM_MARKERS)?.length ?? 0);
+	// Doc line separators consume no cell; in the grid they print as a blank.
+	if (shape.columns === 2) visible -= text.match(NEWLINES)?.length ?? 0;
+	const chars = Math.min(visible, capacity);
+	const data = renderSnapcompactPng(text, {
 		size,
 		font: shape.font,
 		cellWidth: shape.cellWidth,
@@ -1408,39 +998,7 @@ function nativeRenderOptions(shape: Shape, size: number) {
 		variant: shape.variant,
 		lineRepeat: shape.lineRepeat,
 		columns: shape.columns,
-	};
-}
-
-function renderedChars(text: string, shape: Shape, geo: Geometry): number {
-	if (shape.columns === 2) {
-		let visible = [...text].length - (text.match(DIM_MARKERS)?.length ?? 0);
-		visible -= text.match(NEWLINES)?.length ?? 0;
-		return Math.min(visible, geo.capacity);
-	}
-	// Grid: count visible chars that fit within the frame's cell budget, with
-	// wide glyphs taking two cells (and a straddle pad) exactly as the renderer.
-	const wideCells = usesWideCells(shape);
-	let cell = 0;
-	let count = 0;
-	for (const ch of text) {
-		const w = charCells(ch, wideCells);
-		if (w === 0) continue;
-		let at = cell;
-		if (w === 2 && geo.cols >= 2 && at % geo.cols === geo.cols - 1) at += 1;
-		if (at + w > geo.capacity) break;
-		cell = at + w;
-		count++;
-	}
-	return count;
-}
-
-/** Render one snapcompact frame from already-normalized text. Doc shapes
- *  (`columns === 2`) expect one page of `\n`-joined pre-wrapped lines. */
-export async function render(text: string, shape: Shape, size: number = shape.frameSize): Promise<RenderedFrame> {
-	const geo = geometry(shape, size);
-	const { cols, rows } = geo;
-	const chars = renderedChars(text, shape, geo);
-	const data = await renderSnapcompactPng(text, nativeRenderOptions(shape, size));
+	});
 	return { data, cols, rows, chars };
 }
 
@@ -1460,8 +1018,8 @@ function pageFinisher(shape: Shape): (page: string) => string {
 export interface RenderManyOptions {
 	/** Explicit shape; wins over `model`. */
 	shape?: Shape;
-	/** Model whose provider API and id select the frame shape. */
-	model?: ShapeTarget;
+	/** Model whose `api` selects the eval-optimal shape. */
+	model?: Pick<Model, "api">;
 	/** Frame edge in px; defaults to the shape's `frameSize`. */
 	frameSize?: number;
 	/** Hard cap on frames produced; omit for unbounded (caller decides usage). */
@@ -1470,50 +1028,49 @@ export interface RenderManyOptions {
 
 /**
  * Render arbitrary text into snapcompact PNG frames as LLM image blocks
- * (first page first). Empty/whitespace-only input yields no frames.
+ * (first page first). Synchronous: safe to call from per-request transforms.
+ * Empty/whitespace-only input yields no frames.
  */
-export async function renderMany(text: string, options?: RenderManyOptions): Promise<ImageContent[]> {
-	const shape = options?.shape ?? resolveShapeForText(text, options?.model);
+export function renderMany(text: string, options?: RenderManyOptions): ImageContent[] {
+	const shape = options?.shape ?? resolveShape(options?.model);
 	const frameSize = options?.frameSize ?? shape.frameSize;
 	const geo = geometry(shape, frameSize);
-	const normalized = normalize(text, { shape });
-	const cap = options?.maxFrames;
-	// Build the per-frame texts in order first (cheap, synchronous), then fan
-	// the native PNG renders out concurrently — render() is async/off-thread,
-	// so awaiting each before starting the next leaves throughput on the table.
-	const pageTexts: string[] = [];
-	const wideCells = usesWideCells(shape);
+	const normalized = normalize(text);
+	const frames: ImageContent[] = [];
+	const push = (rendered: RenderedFrame): void => {
+		frames.push({
+			type: "image",
+			data: rendered.data,
+			mimeType: "image/png",
+			...(shape.imageDetail ? { detail: shape.imageDetail } : {}),
+		});
+	};
 	if (shape.columns === 2) {
 		const finish = pageFinisher(shape);
-		for (const page of docPages(normalized, geo, wideCells)) {
-			if (cap !== undefined && pageTexts.length >= cap) break;
-			pageTexts.push(finish(page));
+		for (const page of docPages(normalized, geo)) {
+			if (options?.maxFrames !== undefined && frames.length >= options.maxFrames) break;
+			push(render(finish(page), shape, frameSize));
 		}
-	} else {
-		for (const page of paginateCells(normalized, geo.capacity, geo.cols, wideCells)) {
-			if (cap !== undefined && pageTexts.length >= cap) break;
-			pageTexts.push(shape.stopwordDim ? dimStopwords(page) : page);
-		}
+		return frames;
 	}
-	const rendered = await Promise.all(pageTexts.map(page => render(page, shape, frameSize)));
-	return rendered.map(frame => ({
-		type: "image",
-		data: frame.data,
-		mimeType: "image/png",
-		...(shape.imageDetail ? { detail: shape.imageDetail } : {}),
-	}));
+	for (let offset = 0; offset < normalized.length; offset += geo.capacity) {
+		if (options?.maxFrames !== undefined && frames.length >= options.maxFrames) break;
+		let chunk = normalized.slice(offset, offset + geo.capacity);
+		if (shape.stopwordDim) chunk = dimStopwords(chunk);
+		push(render(chunk, shape, frameSize));
+	}
+	return frames;
 }
 
 /** Frames needed to hold `text` at the given shape/size, without rendering.
  *  For doc shapes this wraps the text once and counts pages of `2 * rows`
  *  lines; for grid shapes it divides by the frame capacity. */
 export function frames(text: string, options?: Pick<RenderManyOptions, "shape" | "model" | "frameSize">): number {
-	const shape = options?.shape ?? resolveShapeForText(text, options?.model);
+	const shape = options?.shape ?? resolveShape(options?.model);
 	const geo = geometry(shape, options?.frameSize ?? shape.frameSize);
-	const normalized = normalize(text, { shape });
-	const wideCells = usesWideCells(shape);
-	if (shape.columns === 2) return Math.ceil(wrap(normalized, geo.cols, wideCells).length / (2 * geo.rows));
-	return paginateCells(normalized, geo.capacity, geo.cols, wideCells).length;
+	const normalized = normalize(text);
+	if (shape.columns === 2) return Math.ceil(wrap(normalized, geo.cols).length / (2 * geo.rows));
+	return Math.ceil(normalized.length / geo.capacity);
 }
 
 // ============================================================================
@@ -1525,116 +1082,24 @@ export function getPreservedArchive(preserveData: Record<string, unknown> | unde
 	const candidate = preserveData?.[PRESERVE_KEY];
 	if (!candidate || typeof candidate !== "object") return undefined;
 	const archive = candidate as Archive;
-	const frames = Array.isArray(archive.frames)
-		? archive.frames.filter(
-				frame =>
-					!!frame &&
-					typeof frame.data === "string" &&
-					frame.data.length > 0 &&
-					typeof frame.mimeType === "string" &&
-					typeof frame.cols === "number" &&
-					typeof frame.rows === "number" &&
-					typeof frame.chars === "number",
-			)
-		: [];
-	const text = typeof archive.text === "string" && archive.text.length > 0 ? archive.text : undefined;
-	const textHead = typeof archive.textHead === "string" && archive.textHead.length > 0 ? archive.textHead : undefined;
-	const textTail = typeof archive.textTail === "string" && archive.textTail.length > 0 ? archive.textTail : undefined;
-	// A text-only archive (everything fit in the plain-text regions) is valid;
-	// only an archive carrying neither frames nor text is empty.
-	if (frames.length === 0 && text === undefined && textHead === undefined && textTail === undefined) return undefined;
+	if (!Array.isArray(archive.frames)) return undefined;
+	const frames = archive.frames.filter(
+		frame =>
+			!!frame &&
+			typeof frame.data === "string" &&
+			frame.data.length > 0 &&
+			typeof frame.mimeType === "string" &&
+			typeof frame.cols === "number" &&
+			typeof frame.rows === "number" &&
+			typeof frame.chars === "number",
+	);
+	if (frames.length === 0) return undefined;
 	return {
 		frames,
 		totalChars: typeof archive.totalChars === "number" ? archive.totalChars : 0,
 		truncatedChars: typeof archive.truncatedChars === "number" ? archive.truncatedChars : 0,
-		...(text !== undefined ? { text } : {}),
-		...(textHead !== undefined ? { textHead } : {}),
-		...(textTail !== undefined ? { textTail } : {}),
+		...(typeof archive.textTail === "string" && archive.textTail.length > 0 ? { textTail: archive.textTail } : {}),
 	};
-}
-
-/** Drop the persisted frame archive ({@link PRESERVE_KEY}) from `preserveData`,
- *  returning the remaining state — or `undefined` when nothing else remains, so
- *  an empty `{}` is never persisted. Callers strip the archive once its frames
- *  have been migrated into a new compaction's text, preventing the stale frames
- *  from leaking back into the rebuilt context. */
-export function stripPreservedArchive(
-	preserveData: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-	if (!preserveData || !(PRESERVE_KEY in preserveData)) return preserveData;
-	const { [PRESERVE_KEY]: _removed, ...rest } = preserveData;
-	return Object.keys(rest).length > 0 ? rest : undefined;
-}
-
-/** Extract persisted archive source text as plain text for LLM summarization. */
-export function archiveSourceText(archive: Archive): string | undefined {
-	const text =
-		archive.text ??
-		[archive.textHead, archive.textTail]
-			.filter((part): part is string => typeof part === "string" && part.length > 0)
-			.join(NEWLINE_GLYPH);
-	return text.length > 0 ? toPlainText(text) : undefined;
-}
-
-/** Build the text used to choose and preflight a font-aware snapcompact shape. */
-export function renderabilityProbeText(
-	serialized: string,
-	previousPreserveData?: Record<string, unknown>,
-	previousSummary?: string,
-): string {
-	const previousArchive = getPreservedArchive(previousPreserveData);
-	const previousText = previousArchive ? (archiveSourceText(previousArchive) ?? "") : "";
-	if (previousText.length > 0) return `${previousText}${NEWLINE_GLYPH}${serialized}`;
-	if (previousSummary) return `${previousSummary}${NEWLINE_GLYPH}${serialized}`;
-	return serialized;
-}
-
-/** Options for reconstructing a persisted snapcompact archive into prompt blocks. */
-export interface HistoryBlockOptions {
-	/** Hard cap on image base64 bytes attached to one rebuilt provider request. */
-	maxFrameDataBytes?: number;
-}
-
-function formatFrameDataBytes(bytes: number): string {
-	if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
-	if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} KB`;
-	return `${bytes} B`;
-}
-
-function imagesWithinBudget(
-	archive: Archive,
-	maxFrameDataBytes: number | undefined,
-): { images: ImageContent[]; omittedFrames: number; omittedBytes: number } {
-	if (maxFrameDataBytes === undefined) {
-		return { images: images(archive), omittedFrames: 0, omittedBytes: 0 };
-	}
-
-	let usedBytes = 0;
-	let omittedFrames = 0;
-	let omittedBytes = 0;
-	const keptNewestFirst: Frame[] = [];
-	for (let index = archive.frames.length - 1; index >= 0; index--) {
-		const frame = archive.frames[index];
-		if (!frame) continue;
-		const bytes = frame.data.length;
-		if (usedBytes + bytes > maxFrameDataBytes) {
-			omittedFrames++;
-			omittedBytes += bytes;
-			continue;
-		}
-		usedBytes += bytes;
-		keptNewestFirst.push(frame);
-	}
-	keptNewestFirst.reverse();
-	return { images: images({ ...archive, frames: keptNewestFirst }), omittedFrames, omittedBytes };
-}
-
-function omittedFrameNotice(omittedFrames: number, omittedBytes: number): string {
-	return [
-		"-------------- snapcompact image middle omitted",
-		`${omittedFrames.toLocaleString()} archived image frame${omittedFrames === 1 ? "" : "s"} (${formatFrameDataBytes(omittedBytes)} base64) exceeded the per-request snapcompact payload budget. The compacted summary and visible text edges remain available.`,
-		"--------------",
-	].join("\n");
 }
 
 /** Convert archive frames into LLM image blocks (oldest first). */
@@ -1646,191 +1111,28 @@ export function images(archive: Archive): ImageContent[] {
 		...(frame.detail ? { detail: frame.detail } : {}),
 	}));
 }
-/** Ordered archive blocks for a compaction summary message, oldest to newest:
- *  the oldest text region, the imaged middle, then the newest text region.
- *  Runtime-only; reconstructed from {@link Archive} on each context rebuild
- *  instead of persisted on the session entry. */
-export function historyBlocks(archive: Archive, options: HistoryBlockOptions = {}): (TextContent | ImageContent)[] {
-	const blocks: (TextContent | ImageContent)[] = [];
-	const budgeted = imagesWithinBudget(archive, options.maxFrameDataBytes);
-	const hasImages = budgeted.images.length > 0;
-	const hasOmittedImages = budgeted.omittedFrames > 0;
-	if (archive.textHead) {
-		const suffix = hasImages
-			? "\n-------------- imaged middle below\n"
-			: hasOmittedImages
-				? `\n${omittedFrameNotice(budgeted.omittedFrames, budgeted.omittedBytes)}\n`
-				: "";
-		blocks.push({ type: "text", text: toPlainText(archive.textHead) + suffix });
-	} else if (hasOmittedImages && !hasImages) {
-		blocks.push({ type: "text", text: omittedFrameNotice(budgeted.omittedFrames, budgeted.omittedBytes) });
-	}
-	// Omitted frames are the OLDEST archived images: the byte budget keeps the
-	// newest tail frames, so the gap notice precedes the kept images to keep the
-	// reconstructed blocks oldest-to-newest.
-	if (hasImages && hasOmittedImages) {
-		blocks.push({ type: "text", text: omittedFrameNotice(budgeted.omittedFrames, budgeted.omittedBytes) });
-	}
-	blocks.push(...budgeted.images);
-	if (archive.textTail) {
-		const prefix = hasImages
-			? "-------------- imaged middle above\n"
-			: archive.truncatedChars > 0 || hasOmittedImages
-				? "\n-------------- middle history omitted above\n"
-				: "";
-		const tail = prefix + toPlainText(archive.textTail);
-		const lastBlock = blocks[blocks.length - 1];
-		if (lastBlock?.type === "text") {
-			lastBlock.text += tail;
-		} else {
-			blocks.push({ type: "text", text: tail });
-		}
-	}
-	return blocks;
-}
 
 // ============================================================================
 // Compaction entry point
 // ============================================================================
 
-/** Denser companion of `high` for the foveated archive middle: same family and
- *  frame size (identical per-frame bill) but a tighter cell. Returns `high`
- *  unchanged for doc layouts, TrueType Unicode shapes, or when no denser
- *  variant exists (foveation off). */
-function denseCompanion(high: Shape, api: Api | undefined): Shape {
-	if (high.columns === 2 || high.font === "silver") return high;
-	const family = billingFamily(api);
-	const low = priceShape({ ...SHAPE_VARIANTS[FAMILY_VARIANT_LOW[family]], frameSize: high.frameSize }, family);
-	return geometry(low).capacity > geometry(high).capacity ? low : high;
-}
-
-/** One planned frame: the source slice and the shape (quality tier) to render. */
-interface PlanFrame {
-	text: string;
-	shape: Shape;
-}
-
-/** A foveated archive layout: frames oldest→newest for the imaged middle, the
- *  verbatim text kept at both chronological edges, the flat kept source to
- *  persist, and the chars dropped this round to fit the budget. */
-interface ArchiveLayout {
-	frames: PlanFrame[];
-	textHead: string;
-	textTail: string;
-	keptText: string;
-	truncatedChars: number;
-}
-
-/** Wrap each page string as a planned frame at one shape (tier). */
-function planFrames(pages: readonly string[], shape: Shape): PlanFrame[] {
-	return pages.map(text => ({ text, shape }));
-}
-
-/**
- * Lay out the accumulated archive `text` (oldest→newest) with text at both
- * chronological edges and images in the middle. One HQ-capacity stays verbatim
- * at the oldest edge, one at the newest edge, and the middle between them is
- * imaged. If the imaged middle itself overflows `maxFrames`, foveate it
- * internally (HQ/LQ/HQ) and drop the oldest slice of its dense center.
- */
-function planArchive(text: string, high: Shape, low: Shape, maxFrames: number): ArchiveLayout {
-	const capHi = geometry(high).capacity;
-	const edgeCap = TEXT_EDGE_PAGES * capHi;
-	if (text.length <= 2 * edgeCap) {
-		return { frames: [], textHead: text, textTail: "", keptText: text, truncatedChars: 0 };
-	}
-	if (maxFrames < 1) {
-		const textHead = text.slice(0, edgeCap);
-		const textTail = text.slice(text.length - edgeCap);
-		return {
-			frames: [],
-			textHead,
-			textTail,
-			keptText: textHead + textTail,
-			truncatedChars: text.length - textHead.length - textTail.length,
-		};
-	}
-
-	const textHead = text.slice(0, edgeCap);
-	const textTail = text.slice(text.length - edgeCap);
-	const imageText = text.slice(edgeCap, text.length - edgeCap);
-	if (imageText.length === 0) {
-		return { frames: [], textHead: text, textTail: "", keptText: text, truncatedChars: 0 };
-	}
-
-	// Doc layouts wrap (no char-slicing) and don't foveate: one tier, keep the
-	// newest pages with the session head pinned, drop the oldest middle.
-	if (high.columns === 2) {
-		const pages = docPages(imageText, geometry(high), usesWideCells(high));
-		let kept = pages;
-		let truncatedChars = 0;
-		if (pages.length > maxFrames) {
-			const dropped = pages.slice(1, pages.length - (maxFrames - 1));
-			truncatedChars = dropped.reduce((sum, page) => sum + page.length, 0);
-			kept = [...pages.slice(0, 1), ...pages.slice(pages.length - (maxFrames - 1))];
-		}
-		const flat = kept.map(page => page.replaceAll("\n", " ")).join(" ");
-		return {
-			frames: planFrames(kept, high),
-			textHead,
-			textTail,
-			keptText: textHead + flat + textTail,
-			truncatedChars,
-		};
-	}
-
-	// Grid: paginate the imaged region into HQ frames (cell-aware, so wide CJK
-	// glyphs spanning two cells never overflow a frame's capacity).
-	const hiPages = paginateCells(imageText, capHi, geometry(high).cols, usesWideCells(high));
-	if (hiPages.length <= maxFrames) {
-		return {
-			frames: planFrames(hiPages, high),
-			textHead,
-			textTail,
-			keptText: textHead + imageText + textTail,
-			truncatedChars: 0,
-		};
-	}
-
-	// Foveate the imaged middle: HQ edges, dense center, drop the oldest dense slice.
-	const capLo = geometry(low).capacity;
-	const imageEdgeFrames = Math.min(HQ_EDGE_FRAMES, Math.floor((maxFrames - 1) / 2));
-	const headPages = hiPages.slice(0, imageEdgeFrames);
-	const tailPages = imageEdgeFrames > 0 ? hiPages.slice(hiPages.length - imageEdgeFrames) : [];
-	const imageHead = headPages.join("");
-	const imageTail = tailPages.join("");
-	const middleSource = imageText.slice(imageHead.length, imageText.length - imageTail.length);
-	let middlePages = paginateCells(middleSource, capLo, geometry(low).cols, usesWideCells(low));
-	const middleBudget = maxFrames - 2 * imageEdgeFrames;
-	let truncatedChars = 0;
-	let middleText = middleSource;
-	if (middlePages.length > middleBudget) {
-		const dropped = middlePages.slice(0, middlePages.length - middleBudget).join("");
-		truncatedChars = dropped.length;
-		middleText = middleSource.slice(dropped.length);
-		middlePages = middlePages.slice(middlePages.length - middleBudget);
-	}
-	return {
-		frames: [...planFrames(headPages, high), ...planFrames(middlePages, low), ...planFrames(tailPages, high)],
-		textHead,
-		textTail,
-		keptText: textHead + imageHead + middleText + imageTail + textTail,
-		truncatedChars,
-	};
-}
-
 /**
  * Run a snapcompact compaction over prepared messages. Fully local: serializes
- * the discarded history, appends it to the accumulated archive source text, and
- * re-renders that source into an ordered history layout: plain text at the
- * oldest edge, imaged middle, then plain text at the newest edge. The imaged
- * middle itself foveates (HQ/LQ/HQ) when it grows large.
+ * the discarded history, prints it onto PNG frames in the provider-optimal
+ * shape, merges previously archived frames (oldest dropped beyond the
+ * budget), and produces a deterministic summary explaining how to read the
+ * frames. Pages past the frame budget are never rendered (providers with
+ * hard image caps silently drop excess frames on the wire) — the newest
+ * unrendered slice survives verbatim as a text tail on the summary and is
+ * folded back into frames by the next compaction.
  *
- * The full kept source persists on the archive (`text`) so each later compaction
- * unfolds and re-renders it coherently alongside the newly archived history.
+ * Frames archived under a different shape (provider switches, legacy 5x8
+ * sessions) are kept as-is — each frame carries its own geometry, and the
+ * summary describes the newest shape while noting that older frames may
+ * differ.
  *
- * If the previous compaction was text-based, its summary is printed at the head
- * of the archive as `[Summary of earlier history]` so no continuity is lost.
+ * If the previous compaction was text-based, its summary is printed at the
+ * head of the frame archive as `[Summary of earlier history]` so no continuity is lost.
  */
 export async function compact<TMessage = Message>(
 	preparation: CompactionPreparation<TMessage>,
@@ -1840,131 +1142,145 @@ export async function compact<TMessage = Message>(
 	if (!firstKeptEntryId) {
 		throw new Error("First kept entry has no ID - session may need migration");
 	}
+	const shape = options?.shape ?? resolveShape(options?.model);
+	const frameSize = options?.frameSize ?? shape.frameSize;
+	const maxFrames = Math.max(1, options?.maxFrames ?? MAX_FRAMES);
+	const geo = geometry(shape, frameSize);
+
 	const messages = preparation.messagesToSummarize.concat(preparation.turnPrefixMessages);
 	const llmMessages = (options?.convertToLlm ?? defaultConvertToLlm)(messages);
-	const serialized = serializeConversation(llmMessages, options);
+	let archiveText = normalize(serializeConversation(llmMessages, options));
+
 	const previousArchive = getPreservedArchive(previousPreserveData);
-	const previousText =
-		previousArchive?.text ??
-		[previousArchive?.textHead, previousArchive?.textTail]
-			.filter((part): part is string => typeof part === "string" && part.length > 0)
-			.join(NEWLINE_GLYPH);
-	const hasPreviousText = previousText.length > 0;
-	const includedPreviousSummary = !hasPreviousText && !!previousSummary;
-	const shapeProbeText = renderabilityProbeText(serialized, previousPreserveData, previousSummary);
-	const baseShape = options?.shape ?? resolveShapeForText(shapeProbeText, options?.model);
-	const frameSize = options?.frameSize ?? baseShape.frameSize;
-	const high = frameSize === baseShape.frameSize ? baseShape : { ...baseShape, frameSize };
-	const low = denseCompanion(high, options?.model?.api);
-	const geo = geometry(high);
-	// The engine default caps archive growth; a caller-supplied maxFrames only
-	// lowers it further (an upper limit), never raising it past the default.
-	const maxFrames = Math.max(1, Math.min(options?.maxFrames ?? MAX_FRAMES_DEFAULT, MAX_FRAMES_DEFAULT));
-
-	let archiveText = normalize(serialized, { shape: high });
-
+	const includedPreviousSummary = !previousArchive && !!previousSummary;
 	if (includedPreviousSummary && previousSummary) {
-		const head = `[Summary of earlier history] ${normalize(previousSummary, { shape: high })}`;
+		const head = `[Summary of earlier history] ${normalize(previousSummary)}`;
 		archiveText = archiveText.length > 0 ? `${head} [Recent conversation] ${archiveText}` : head;
 	}
 
 	let truncatedChars = previousArchive?.truncatedChars ?? 0;
 
-	// Re-compacting a snapcompacted history unfolds the prior archive's source
-	// text and treats it as one coherent transcript: the previous kept source
-	// ages in ahead of the new history, then the whole thing is re-rendered.
-	if (hasPreviousText) {
-		archiveText = archiveText.length > 0 ? `${previousText}${NEWLINE_GLYPH}${archiveText}` : previousText;
+	// The previous compaction's unframed text tail is the oldest part of this
+	// archive slice — prepend it so it ages into frames first.
+	if (previousArchive?.textTail) {
+		archiveText =
+			archiveText.length > 0
+				? `${previousArchive.textTail}${NEWLINE_GLYPH}${archiveText}`
+				: previousArchive.textTail;
 	}
 
-	const layout = planArchive(archiveText, high, low, maxFrames);
-	truncatedChars += layout.truncatedChars;
-
-	// Re-render the planned frames, carrying any open dim span across every
-	// boundary: textHead → frames → textTail.
-	let dimOpen = layout.textHead.lastIndexOf(DIM_ON) > layout.textHead.lastIndexOf(DIM_OFF);
-	const newFrames: Promise<Frame>[] = [];
-	for (const planned of layout.frames) {
-		let pageText: string = dimOpen ? DIM_ON + planned.text : planned.text;
-		dimOpen = pageText.lastIndexOf(DIM_ON) > pageText.lastIndexOf(DIM_OFF);
-		if (planned.shape.stopwordDim) pageText = dimStopwords(pageText);
-		newFrames.push(
-			render(pageText, planned.shape).then(rendered => ({
-				data: rendered.data,
-				mimeType: "image/png",
-				cols: rendered.cols,
-				rows: rendered.rows,
-				chars: rendered.chars,
-				font: planned.shape.font,
-				variant: planned.shape.variant,
-				lineRepeat: planned.shape.lineRepeat,
-				...(planned.shape.columns === 2 ? { columns: 2 } : {}),
-				...(planned.shape.stopwordDim ? { stopwordDim: true } : {}),
-				...(planned.shape.imageDetail ? { detail: planned.shape.imageDetail } : {}),
-			})),
-		);
+	const pages: string[] = [];
+	if (shape.columns === 2) {
+		pages.push(...docPages(archiveText, geo));
+	} else {
+		for (let offset = 0; offset < archiveText.length; offset += geo.capacity) {
+			pages.push(archiveText.slice(offset, offset + geo.capacity));
+		}
 	}
 
-	const textHead = layout.textHead;
-	const textTail = layout.textTail.length > 0 ? (dimOpen ? DIM_ON : "") + layout.textTail : "";
-	const textChars = textHead.length + textTail.length;
+	// Fit the merged archive into the frame budget BEFORE rendering: pages
+	// that cannot ship are never rasterized. Old unpinned frames evict first
+	// (the archive fades oldest-first, as before); new pages that still do
+	// not fit stay behind as a verbatim text tail instead of being dropped.
+	const prevFrames = previousArchive?.frames ?? [];
+	let keptPrev = prevFrames;
+	if (prevFrames.length + pages.length > maxFrames) {
+		// Pin the earliest frame: it anchors the session head (the original
+		// request, or the filmed summary of even older history) the way the
+		// LLM-summary strategies keep the original goal alive across rounds.
+		// With a budget of one frame the pin is moot.
+		const pinCount = maxFrames >= 2 && prevFrames.length > 0 ? 1 : 0;
+		const evictable = prevFrames.slice(pinCount);
+		const surviving = Math.min(evictable.length, Math.max(0, maxFrames - pages.length - pinCount));
+		const dropped = evictable.slice(0, evictable.length - surviving);
+		for (const frame of dropped) truncatedChars += frame.chars;
+		keptPrev = [...prevFrames.slice(0, pinCount), ...evictable.slice(evictable.length - surviving)];
+	}
+	const renderPages = pages.slice(0, maxFrames - keptPrev.length);
+	const tailPages = pages.slice(renderPages.length);
 
-	const frames = await Promise.all(newFrames);
-	const totalChars = frames.reduce((sum, frame) => sum + frame.chars, 0) + textChars;
+	const newFrames: Frame[] = [];
+	const finish = pageFinisher(shape);
+	for (const page of renderPages) {
+		const rendered = render(finish(page), shape, frameSize);
+		newFrames.push({
+			data: rendered.data,
+			mimeType: "image/png",
+			cols: rendered.cols,
+			rows: rendered.rows,
+			chars: rendered.chars,
+			font: shape.font,
+			variant: shape.variant,
+			lineRepeat: shape.lineRepeat,
+			...(shape.columns === 2 ? { columns: 2 } : {}),
+			...(shape.stopwordDim ? { stopwordDim: true } : {}),
+			...(shape.imageDetail ? { detail: shape.imageDetail } : {}),
+		});
+		// Keep the event loop responsive between native render passes.
+		await Bun.sleep(0);
+	}
+
+	// Pages past the budget survive as text, capped at two frames' capacity
+	// (middle-elided) so an oversized archive cannot blow the context back up.
+	let textTail = "";
+	if (tailPages.length > 0) {
+		const raw =
+			shape.columns === 2 ? tailPages.map(page => page.replaceAll("\n", " ")).join(" ") : tailPages.join("");
+		const tailCap = TEXT_TAIL_MAX_PAGES * geo.capacity;
+		if (raw.length > tailCap) truncatedChars += raw.length - tailCap;
+		// Re-open a dim span the render boundary cut through, so the carried
+		// tail keeps tool output dim when it lands on frames next compaction.
+		const renderedText = shape.columns === 2 ? renderPages.join("\n") : renderPages.join("");
+		const dimOpen = renderedText.lastIndexOf(DIM_ON) > renderedText.lastIndexOf(DIM_OFF);
+		textTail = (dimOpen ? DIM_ON : "") + truncateForSummary(raw, tailCap, TRUNCATE_HEAD_RATIO);
+	}
+
+	const frames = [...keptPrev, ...newFrames];
+	const totalChars = frames.reduce((sum, frame) => sum + frame.chars, 0);
 	const mixedShapes = frames.some(
 		frame =>
 			frame.cols !== geo.cols ||
 			frame.rows !== geo.rows ||
-			(frame.variant ?? "sent") !== high.variant ||
-			(frame.lineRepeat ?? 1) !== high.lineRepeat ||
-			(frame.columns ?? 1) !== (high.columns ?? 1) ||
-			(frame.stopwordDim ?? false) !== (high.stopwordDim ?? false),
+			(frame.variant ?? "sent") !== shape.variant ||
+			(frame.lineRepeat ?? 1) !== shape.lineRepeat ||
+			(frame.columns ?? 1) !== (shape.columns ?? 1) ||
+			(frame.stopwordDim ?? false) !== (shape.stopwordDim ?? false),
 	);
 
-	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
-	const files = formatFileList(readFiles, modifiedFiles, fileOps.read);
-
 	let summary: string;
-	if (frames.length === 0 && textHead.length === 0 && textTail.length === 0 && files.length === 0) {
+	if (frames.length === 0) {
 		summary = "No prior history.";
 	} else {
 		summary = prompt.render(snapcompactSummaryPrompt, {
 			frameCount: frames.length,
 			multipleFrames: frames.length > 1,
-			docColumns: high.columns === 2,
+			fontCell: `${shape.cellWidth}x${shape.cellHeight}`,
 			cols: geo.cols,
 			rows: geo.rows,
-			sentenceInk: high.variant === "sent",
-			stopwordDimmed: high.stopwordDim === true,
+			sentenceInk: shape.variant === "sent",
+			lineRepeated: shape.lineRepeat > 1,
+			docColumns: shape.columns === 2,
+			stopwordDimmed: shape.stopwordDim === true,
 			dimmedToolResults: options?.dimToolResults !== false,
-			lineRepeated: high.lineRepeat > 1,
 			mixedShapes,
+			totalChars,
 			truncatedChars,
 			includedPreviousSummary,
-			files: files.length > 0 ? files : undefined,
+			textTail: textTail.length > 0 ? toPlainText(textTail) : undefined,
 		});
 	}
+	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
+	summary = upsertFileOperations(summary, readFiles, modifiedFiles, fileOps.read);
 
 	// A snapcompact pass replaces any provider-side replacement history; strip the
 	// OpenAI remote-compaction payload like the default summarizer path does.
 	const basePreserve = stripOpenAiRemoteCompactionPreserveData(previousPreserveData) ?? {};
-	const persistedText =
-		layout.keptText.length > 0 && layout.textTail.length > 0
-			? `${layout.keptText.slice(0, layout.keptText.length - layout.textTail.length)}${textTail}`
-			: layout.keptText;
-	const archive: Archive = {
-		frames,
-		totalChars,
-		truncatedChars,
-		...(persistedText.length > 0 ? { text: persistedText } : {}),
-		...(textHead ? { textHead } : {}),
-		...(textTail ? { textTail } : {}),
-	};
+	const archive: Archive = { frames, totalChars, truncatedChars, ...(textTail ? { textTail } : {}) };
 
-	const textNote = textChars > 0 ? ` (+${textChars.toLocaleString()} chars as text)` : "";
+	const textTailNote = textTail ? ` (+${textTail.length.toLocaleString()} chars as text)` : "";
 	return {
 		summary,
-		shortSummary: `Archived ${totalChars.toLocaleString()} chars of history onto ${frames.length} snapcompact frame${frames.length === 1 ? "" : "s"}${textNote}`,
+		shortSummary: `Archived ${totalChars.toLocaleString()} chars of history onto ${frames.length} snapcompact frame${frames.length === 1 ? "" : "s"}${textTailNote}`,
 		firstKeptEntryId,
 		tokensBefore,
 		details: { readFiles, modifiedFiles },

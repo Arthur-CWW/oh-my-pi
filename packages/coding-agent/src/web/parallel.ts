@@ -3,9 +3,9 @@ import type { AgentStorage } from "../session/agent-storage";
 import { findCredential, withHardTimeout } from "./search/providers/utils";
 
 const PARALLEL_API_URL = "https://api.parallel.ai";
-export const PARALLEL_SEARCH_URL = `${PARALLEL_API_URL}/v1beta/search`;
+const PARALLEL_SEARCH_URL = `${PARALLEL_API_URL}/v1beta/search`;
 const PARALLEL_EXTRACT_URL = `${PARALLEL_API_URL}/v1beta/extract`;
-export const PARALLEL_BETA_HEADER = "search-extract-2025-10-10";
+const PARALLEL_BETA_HEADER = "search-extract-2025-10-10";
 
 export interface ParallelUsageItem {
 	name?: string;
@@ -76,6 +76,22 @@ export class ParallelApiError extends Error {
 	}
 }
 
+export function findParallelApiKey(storage: AgentStorage | null | undefined): string | null {
+	return findCredential(storage, getEnvApiKey("parallel"), "parallel");
+}
+
+export function getParallelExtractContent(document: ParallelExtractDocument): string {
+	const excerptContent = document.excerpts
+		.filter(excerpt => excerpt.trim().length > 0)
+		.join("\n\n")
+		.trim();
+	if (excerptContent.length > 0) {
+		return excerptContent;
+	}
+
+	return document.fullContent?.trim() ?? "";
+}
+
 function isObject(value: unknown): value is object {
 	return typeof value === "object" && value !== null;
 }
@@ -132,7 +148,7 @@ function createParallelApiError(statusCode: number, detail?: string): ParallelAp
 	);
 }
 
-export function parseParallelErrorResponse(statusCode: number, responseText: string): ParallelApiError {
+function parseParallelErrorResponse(statusCode: number, responseText: string): ParallelApiError {
 	const trimmedResponseText = responseText.trim();
 	if (trimmedResponseText.length === 0) {
 		return createParallelApiError(statusCode);
@@ -160,6 +176,24 @@ function getAuthHeaders(apiKey: string): {
 	};
 }
 
+function normalizeSearchMode(mode: ParallelSearchOptions["mode"]): "fast" | "one-shot" {
+	return mode === "research" ? "one-shot" : "fast";
+}
+
+function parseUsageItems(payload: unknown): ParallelUsageItem[] {
+	if (!Array.isArray(payload)) return [];
+
+	const usageItems: ParallelUsageItem[] = [];
+	for (const item of payload) {
+		if (!isObject(item)) continue;
+		usageItems.push({
+			name: getString(item, "name"),
+			count: getNumber(item, "count"),
+		});
+	}
+	return usageItems;
+}
+
 function parseWarnings(payload: unknown): string[] {
 	if (!Array.isArray(payload)) return [];
 
@@ -178,24 +212,7 @@ function parseWarnings(payload: unknown): string[] {
 	return warnings;
 }
 
-function parseUsageItems(payload: unknown): ParallelUsageItem[] {
-	if (!Array.isArray(payload)) return [];
-
-	const usageItems: ParallelUsageItem[] = [];
-	for (const item of payload) {
-		if (!isObject(item)) continue;
-		usageItems.push({
-			name: getString(item, "name"),
-			count: getNumber(item, "count"),
-		});
-	}
-	return usageItems;
-}
-
-export function parseParallelSearchPayload(
-	payload: unknown,
-	options?: { parseMetadata?: boolean },
-): ParallelSearchResult {
+function parseSearchPayload(payload: unknown): ParallelSearchResult {
 	if (!isObject(payload)) {
 		throw new ParallelApiError("Parallel search returned an invalid response payload.");
 	}
@@ -219,30 +236,12 @@ export function parseParallelSearchPayload(
 		});
 	}
 
-	const parseMetadata = options?.parseMetadata ?? true;
-
 	return {
 		requestId,
 		sources,
-		warnings: parseMetadata ? parseWarnings(getOwnValue(payload, "warnings")) : [],
-		usage: parseMetadata ? parseUsageItems(getOwnValue(payload, "usage")) : [],
+		warnings: parseWarnings(getOwnValue(payload, "warnings")),
+		usage: parseUsageItems(getOwnValue(payload, "usage")),
 	};
-}
-
-export function findParallelApiKey(storage: AgentStorage | null | undefined): string | null {
-	return findCredential(storage, getEnvApiKey("parallel"), "parallel");
-}
-
-export function getParallelExtractContent(document: ParallelExtractDocument): string {
-	const excerptContent = document.excerpts
-		.filter(excerpt => excerpt.trim().length > 0)
-		.join("\n\n")
-		.trim();
-	if (excerptContent.length > 0) {
-		return excerptContent;
-	}
-
-	return document.fullContent?.trim() ?? "";
 }
 
 function parseExtractPayload(payload: unknown): ParallelExtractResult {
@@ -305,7 +304,7 @@ export async function searchWithParallel(
 		body: JSON.stringify({
 			objective,
 			search_queries: queries,
-			mode: options.mode === "research" ? "one-shot" : "fast",
+			mode: normalizeSearchMode(options.mode),
 			excerpts: {
 				max_chars_per_result: options.maxCharsPerResult ?? 10_000,
 			},
@@ -317,7 +316,7 @@ export async function searchWithParallel(
 	}
 
 	const payload: unknown = await response.json();
-	return parseParallelSearchPayload(payload);
+	return parseSearchPayload(payload);
 }
 
 export async function extractWithParallel(

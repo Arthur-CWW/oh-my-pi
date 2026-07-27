@@ -1,14 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import { renderToolInventory } from "../src/dialect/inventory";
 import type { InbandTool } from "../src/dialect/types";
 
 const searchTool: InbandTool = {
 	name: "web_search",
 	description: "Searches the web.",
-	parameters: type({
-		query: type("string").describe("search query"),
-		"recency?": type("'day' | 'week'"),
+	parameters: z.object({
+		query: z.string().describe("search query"),
+		recency: z.enum(["day", "week"]).optional(),
 	}),
 	examples: [{ caption: "Basic", call: { query: "rust" } }],
 };
@@ -30,7 +30,7 @@ describe("renderToolInventory", () => {
 		const tool: InbandTool = {
 			name: "noop",
 			description: "No examples.",
-			parameters: type({ x: type("string") }),
+			parameters: z.object({ x: z.string() }),
 		};
 		const out = renderToolInventory([tool], "claude-3-5-sonnet-20241022");
 		expect(out).toContain("Parameters: {");
@@ -45,7 +45,7 @@ describe("renderToolInventory", () => {
 		const tool: InbandTool = {
 			name: "read",
 			description: ["Reads files.", "", "## Parameters", "", "- `path`", "", "# Files", "", "Stuff."].join("\n"),
-			parameters: type({ path: type("string") }),
+			parameters: z.object({ path: z.string() }),
 		};
 		const out = renderToolInventory([tool], "claude-3-5-sonnet-20241022");
 		// The wrapper heading stays at level 1; description headers drop one level.
@@ -60,7 +60,7 @@ describe("renderToolInventory", () => {
 		const tool: InbandTool = {
 			name: "noop",
 			description: ["Does nothing.", "", "## Parameters", "", "- `x`"].join("\n"),
-			parameters: type({ x: type("string") }),
+			parameters: z.object({ x: z.string() }),
 		};
 		const out = renderToolInventory([tool], "claude-3-5-sonnet-20241022");
 		expect(out).toContain("\n## Parameters");
@@ -71,7 +71,7 @@ describe("renderToolInventory", () => {
 		const tool: InbandTool = {
 			name: "shell",
 			description: ["Runs commands.", "", "# Usage", "", "```bash", "# not a header", "ls", "```"].join("\n"),
-			parameters: type({ cmd: type("string") }),
+			parameters: z.object({ cmd: z.string() }),
 		};
 		const out = renderToolInventory([tool], "claude-3-5-sonnet-20241022");
 		expect(out).toContain("\n## Usage");

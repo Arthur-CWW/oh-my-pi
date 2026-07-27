@@ -47,9 +47,8 @@ function createGoalHarness(opts: { goalModeEnabled: boolean; dropOnCall: boolean
 		get goalModeEnabled() {
 			return state.goalModeEnabled;
 		},
-		handleGoalModeCommand: mock(async (rest?: string) => {
+		handleGoalModeCommand: mock(async (_rest?: string) => {
 			if (state.goalModeEnabled && opts.dropOnCall) state.goalModeEnabled = false;
-			else if (!state.goalModeEnabled && rest) state.goalModeEnabled = true;
 		}),
 	} as unknown as InteractiveModeContext;
 
@@ -61,8 +60,8 @@ function createGoalHarness(opts: { goalModeEnabled: boolean; dropOnCall: boolean
 	};
 }
 
-describe("/plan handler when already active", () => {
-	it("exits plan mode when user confirms exit", async () => {
+describe("/plan history preservation when already active", () => {
+	it("preserves typed text in history when user confirms exit", async () => {
 		const h = createPlanHarness({ planModeEnabled: true, confirmExit: true });
 
 		const handled = await executeBuiltinSlashCommand("/plan hello world", h.runtime);
@@ -70,10 +69,12 @@ describe("/plan handler when already active", () => {
 		expect(handled).toBe(true);
 		// Sanity check: exit was confirmed, so plan mode is now off.
 		expect(h.state.planModeEnabled).toBe(false);
+		// The typed command must still be recoverable via Up Arrow.
+		expect(h.addToHistory).toHaveBeenCalledWith("/plan hello world");
 		expect(h.setText).toHaveBeenCalledWith("");
 	});
 
-	it("keeps plan mode active when user cancels exit", async () => {
+	it("preserves typed text in history when user cancels exit", async () => {
 		const h = createPlanHarness({ planModeEnabled: true, confirmExit: false });
 
 		const handled = await executeBuiltinSlashCommand("/plan hello world", h.runtime);
@@ -81,21 +82,23 @@ describe("/plan handler when already active", () => {
 		expect(handled).toBe(true);
 		// Cancel: plan mode stays active.
 		expect(h.state.planModeEnabled).toBe(true);
+		expect(h.addToHistory).toHaveBeenCalledWith("/plan hello world");
 		expect(h.setText).toHaveBeenCalledWith("");
 	});
 
-	it("enters plan mode when invoked for the first time", async () => {
+	it("does not add to history when entering plan mode for the first time", async () => {
+		// Plan mode was off; the typed args are consumed as the initial prompt.
 		const h = createPlanHarness({ planModeEnabled: false, confirmExit: false });
 
 		await executeBuiltinSlashCommand("/plan hello world", h.runtime);
 
 		expect(h.state.planModeEnabled).toBe(true);
-		expect(h.setText).toHaveBeenCalledWith("");
+		expect(h.addToHistory).not.toHaveBeenCalled();
 	});
 });
 
-describe("/goal handler when already active", () => {
-	it("drops goal mode when handler clears it", async () => {
+describe("/goal history preservation when already active", () => {
+	it("preserves typed text in history even if the handler clears goal mode", async () => {
 		// Simulates the user invoking a drop path that turns goal mode off
 		// inside handleGoalModeCommand. Without capturing state up-front,
 		// the post-call check would miss this case.
@@ -105,21 +108,15 @@ describe("/goal handler when already active", () => {
 
 		expect(handled).toBe(true);
 		expect(h.state.goalModeEnabled).toBe(false);
+		expect(h.addToHistory).toHaveBeenCalledWith("/goal new objective");
 	});
 
-	it("keeps goal mode active when handler does not clear it", async () => {
+	it("preserves typed text in history when goal mode stays active", async () => {
 		const h = createGoalHarness({ goalModeEnabled: true, dropOnCall: false });
 
 		await executeBuiltinSlashCommand("/goal new objective", h.runtime);
 
 		expect(h.state.goalModeEnabled).toBe(true);
-	});
-
-	it("enters goal mode when invoked for the first time", async () => {
-		const h = createGoalHarness({ goalModeEnabled: false, dropOnCall: false });
-
-		await executeBuiltinSlashCommand("/goal new objective", h.runtime);
-
-		expect(h.state.goalModeEnabled).toBe(true);
+		expect(h.addToHistory).toHaveBeenCalledWith("/goal new objective");
 	});
 });

@@ -1,11 +1,23 @@
-import { type } from "arktype";
+import { z } from "zod/v4";
 
-export const commitTypeSchema = type(
-	"'feat' | 'fix' | 'refactor' | 'perf' | 'docs' | 'test' | 'build' | 'ci' | 'chore' | 'style' | 'revert'",
-);
+export const commitTypeSchema = z.enum([
+	"feat",
+	"fix",
+	"refactor",
+	"perf",
+	"docs",
+	"test",
+	"build",
+	"ci",
+	"chore",
+	"style",
+	"revert",
+] as const);
 
-export const detailSchema = type({
-	text: "string",
-	"changelog_category?": "'Added' | 'Changed' | 'Fixed' | 'Deprecated' | 'Removed' | 'Security' | 'Breaking Changes'",
-	"user_visible?": "boolean",
+export const detailSchema = z.object({
+	text: z.string(),
+	changelog_category: z
+		.enum(["Added", "Changed", "Fixed", "Deprecated", "Removed", "Security", "Breaking Changes"])
+		.optional(),
+	user_visible: z.boolean().optional(),
 });

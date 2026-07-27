@@ -1,10 +1,21 @@
 /**
- * CLI argument parsing and help display
+ * CLI argument parsing for the launch/acp flow.
+ *
+ * The user-facing launch/acp/join/setup commands are declared as Effect CLI
+ * `Command`/`Flag`/`Argument` descriptors (see `../commands/*`). `parseArgs`
+ * below is the typed dynamic bridge those descriptors delegate to for the
+ * behaviours Effect's strict parser cannot express: optional-value flags
+ * (`--resume[=id]`), `@file` arguments, the `--` terminator, unknown-flag
+ * tracking, and the extension two-pass reparse (see `./extension-flags`). It
+ * produces the `Args` record consumed by `runRootCommand`, and together with
+ * `./flag-tables` is the single source of flag-value classification shared with
+ * the profile bootstrap and restart pre-parsers.
  */
+import { type Effort, THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { APP_NAME, CONFIG_DIR_NAME, logger } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
-import { CLI_THINKING_LEVELS, type ConfiguredThinkingLevel, parseCliThinkingLevel } from "../thinking";
-import { BUILTIN_TOOL_NAMES, normalizeToolNames } from "../tools/builtin-names";
+import { parseEffort } from "../thinking";
+import { BUILTIN_TOOL_NAMES } from "../tools/builtin-names";
 import {
 	OPTIONAL_FLAGS,
 	OPTIONAL_VALUE_FLAGS,
@@ -19,6 +30,7 @@ export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui";
 export interface Args {
 	cwd?: string;
 	profile?: string;
+	workstream?: string;
 	alias?: string;
 	allowHome?: boolean;
 	provider?: string;
@@ -27,22 +39,22 @@ export interface Args {
 	smol?: string;
 	slow?: string;
 	plan?: string;
-	maxTime?: number;
 	apiKey?: string;
 	systemPrompt?: string;
 	appendSystemPrompt?: string;
-	thinking?: ConfiguredThinkingLevel;
+	thinking?: Effort;
 	hideThinking?: boolean;
-	advisor?: boolean;
 	continue?: boolean;
 	resume?: string | true;
 	help?: boolean;
 	version?: boolean;
 	mode?: Mode;
 	noSession?: boolean;
+	tuiBundleManifest?: string;
+	collabHost?: boolean;
+	collabRelay?: string;
 	sessionDir?: string;
 	providerSessionId?: string;
-	providerPromptCacheKey?: string;
 	fork?: string;
 	/** Collab link to join at startup (set by the `join` subcommand; no CLI flag). */
 	join?: string;
@@ -56,7 +68,6 @@ export interface Args {
 	noExtensions?: boolean;
 	pluginDirs?: string[];
 	print?: boolean;
-	printThoughts?: boolean;
 	export?: string;
 	noSkills?: boolean;
 	skills?: string[];
@@ -89,40 +100,10 @@ export interface Args {
  */
 const PARSE_DEPS: ParseDeps = {
 	logger,
-	parseThinking: parseCliThinkingLevel,
+	parseEffort,
 	builtinToolNames: BUILTIN_TOOL_NAMES,
-	normalizeToolNames,
-	thinkingEfforts: CLI_THINKING_LEVELS,
+	thinkingEfforts: THINKING_EFFORTS,
 };
-
-const WINDOWS_PATH_VALUE_FLAGS: ReadonlySet<string> = new Set(["--extension", "-e", "--hook"]);
-const WINDOWS_PATH_START_RE =
-	/^(?:[A-Za-z]:[\\/]|\\\\[?]\\(?:[A-Za-z]:[\\/]|UNC[\\/])|\\\\[^\\/]+[\\/][^\\/]+[\\/]|\/\/[?]\/(?:[A-Za-z]:\/|UNC\/)|\/\/[^/]+\/[^/]+\/)/;
-const WINDOWS_MODULE_PATH_SUFFIX_RE = /\.(?:[cm]?[jt]sx?)$/i;
-
-function consumeBuiltInStringValue(flag: string, args: string[], valueIndex: number): { value: string; index: number } {
-	const value = args[valueIndex];
-	if (
-		value === undefined ||
-		!WINDOWS_PATH_VALUE_FLAGS.has(flag) ||
-		!WINDOWS_PATH_START_RE.test(value) ||
-		WINDOWS_MODULE_PATH_SUFFIX_RE.test(value)
-	) {
-		return { value: value ?? "", index: valueIndex };
-	}
-
-	let candidate = value;
-	for (let index = valueIndex + 1; index < args.length; index++) {
-		const next = args[index];
-		if (next === PROFILE_BOOTSTRAP_BOUNDARY_ARG || next.startsWith("-")) break;
-		candidate += ` ${next}`;
-		if (WINDOWS_MODULE_PATH_SUFFIX_RE.test(candidate)) {
-			return { value: candidate, index };
-		}
-	}
-
-	return { value, index: valueIndex };
-}
 
 export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { type: "boolean" | "string" }>): Args {
 	// Work on a copy: the `--option=value` handling below splices the value
@@ -191,9 +172,7 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			// here only when its boolean extension is NOT loaded) would otherwise swallow
 			// the marker as its value and drop the user's trailing message.
 			if (i + 1 < args.length && args[i + 1] !== PROFILE_BOOTSTRAP_BOUNDARY_ARG) {
-				const consumed = consumeBuiltInStringValue(arg, args, i + 1);
-				i = consumed.index;
-				STRING_SETTERS[arg](result, consumed.value, PARSE_DEPS);
+				STRING_SETTERS[arg](result, args[++i], PARSE_DEPS);
 			}
 		} else if (OPTIONAL_VALUE_FLAGS.has(arg)) {
 			const config = OPTIONAL_FLAGS[arg];
@@ -219,6 +198,12 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.alias = arg.slice("--alias=".length);
 		} else if (arg === "--continue" || arg === "-c") {
 			result.continue = true;
+		} else if (arg === "--collab-host") {
+			result.collabHost = true;
+		} else if (arg === "--collab-relay" && i + 1 < args.length) {
+			result.collabRelay = args[++i];
+		} else if (arg.startsWith("--collab-relay=")) {
+			result.collabRelay = arg.slice("--collab-relay=".length);
 		} else if (arg === "--no-session") {
 			result.noSession = true;
 		} else if (arg === "--no-tools") {
@@ -229,12 +214,8 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.noPty = true;
 		} else if (arg === "--hide-thinking") {
 			result.hideThinking = true;
-		} else if (arg === "--advisor") {
-			result.advisor = true;
 		} else if (arg === "--print" || arg === "-p") {
 			result.print = true;
-		} else if (arg === "--print-thoughts") {
-			result.printThoughts = true;
 		} else if (arg === "--no-extensions") {
 			result.noExtensions = true;
 		} else if (arg === "--no-skills") {
@@ -246,13 +227,7 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 		} else if (arg === "--auto-approve" || arg === "--yolo") {
 			result.autoApprove = true;
 		} else if (arg.startsWith("@")) {
-			let filePath = arg.slice(1);
-			if (filePath.startsWith('"') && filePath.endsWith('"') && filePath.length > 1) {
-				filePath = filePath.slice(1, -1);
-			} else if (filePath.startsWith("'") && filePath.endsWith("'") && filePath.length > 1) {
-				filePath = filePath.slice(1, -1);
-			}
-			result.fileArgs.push(filePath);
+			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
 		} else if (!arg.startsWith("-") || arg === "-") {
 			// Plain positional or lone `-` (stdin marker) — pass through as a
 			// message rather than flagging it.
@@ -325,11 +300,11 @@ export function getExtraHelpText(): string {
   MISTRAL_API_KEY            - Mistral models
   ZAI_API_KEY                - z.ai models (ZhipuAI/GLM)
   UMANS_AI_CODING_PLAN_API_KEY - Umans AI Coding Plan models
-  UMANS_WEBSEARCH_PROVIDER    - Umans gateway web search backend (native or exa)
   MINIMAX_API_KEY            - MiniMax models
   OPENCODE_API_KEY           - OpenCode Zen/OpenCode Go models
   CURSOR_ACCESS_TOKEN        - Cursor AI models
   AI_GATEWAY_API_KEY         - Vercel AI Gateway
+  WAFER_PASS_API_KEY         - Wafer Pass (flat-rate subscription; GLM-5.1, Qwen3.5)
   WAFER_SERVERLESS_API_KEY   - Wafer Serverless (pay-as-you-go)
 
   ${chalk.dim("# Cloud Providers")}
@@ -343,13 +318,12 @@ export function getExtraHelpText(): string {
   PERPLEXITY_API_KEY         - Perplexity web search API key (optional; anonymous fallback)
   PERPLEXITY_COOKIES         - Perplexity web search (session cookie)
   TAVILY_API_KEY             - Tavily web search
-  TINYFISH_API_KEY           - TinyFish web search
-  FIRECRAWL_API_KEY          - Firecrawl web search
   ANTHROPIC_SEARCH_API_KEY   - Anthropic web search (override; isolates search from main ANTHROPIC_API_KEY)
   ANTHROPIC_SEARCH_BASE_URL  - Anthropic web search base URL (override; pairs with ANTHROPIC_SEARCH_API_KEY)
 
   ${chalk.dim("# Configuration")}
   OMP_PROFILE                 - Named profile for isolated agent state (same as --profile)
+  OMP_WORKSTREAM              - Classify new sessions (slug or "adhoc"; overridden by --workstream)
   Use \`omp --profile <name> --alias <command>\` to create a shell shortcut for a profile
   PI_CODING_AGENT_DIR        - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
   PI_PACKAGE_DIR             - Override package directory (for Nix/Guix store paths)
@@ -365,7 +339,7 @@ ${chalk.bold("Available Tools (default-enabled unless noted):")}
   edit          - Edit files with find/replace
   write         - Write files (creates/overwrites)
   grep          - Search file contents
-  glob          - Find files by glob pattern
+  find          - Find files by glob pattern
   lsp           - Language server protocol (code intelligence)
   python        - Execute Python code (requires: ${APP_NAME} setup python)
   notebook      - Edit Jupyter notebooks
@@ -382,13 +356,4 @@ ${chalk.bold("Plugin Options:")}
 ${chalk.bold("Useful Commands:")}
   omp agents unpack           - Export bundled subagents to ~/.omp/agent/agents (default)
   omp agents unpack --project - Export bundled subagents to ./.omp/agents`;
-}
-
-export function printHelp(): void {
-	process.stdout.write(
-		`${chalk.bold(APP_NAME)} - AI coding assistant\n\n` +
-			`Run ${APP_NAME} --help for full command and option details.\n` +
-			`Run ${APP_NAME} <command> --help for command-specific help.\n\n` +
-			`${getExtraHelpText()}\n`,
-	);
 }

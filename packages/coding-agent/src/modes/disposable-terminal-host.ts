@@ -1,0 +1,313 @@
+import { pathToFileURL } from "node:url";
+import { Effect, Exit, Scope } from "effect";
+import type { PrepareHostTransitionReceipt } from "../runner/protocol";
+import type { SessionRunner } from "../runner/session-runner";
+import type { InteractiveHostIntent } from "./interactive-host-intent";
+import { createTerminalSessionController, type TerminalSessionController } from "./terminal-session-controller";
+
+export type { InteractiveHostIntent };
+
+export interface DisposableTerminalHostCallbacks {
+	readonly epoch: number;
+	readonly isCurrentEpoch: () => boolean;
+	readonly assertCurrentEpoch: () => void;
+	readonly requestReload: () => Promise<void>;
+	readonly requestStop: () => Promise<void>;
+	readonly requestTransition: (intent: InteractiveHostIntent) => Promise<void>;
+}
+
+export interface DisposableTerminalView {
+	/** Initialize the disposable view and perform its first render. */
+	readonly run: () => Promise<void>;
+	/** Stop and join input/render work. */
+	readonly quiesce: () => Promise<void>;
+	/** Release resources owned only by this view. */
+	readonly dispose: () => Promise<void>;
+}
+
+export type DisposableTerminalViewFactory = (
+	controller: TerminalSessionController,
+	callbacks: DisposableTerminalHostCallbacks,
+) => DisposableTerminalView | Promise<DisposableTerminalView>;
+
+export interface DisposableTerminalRevision {
+	/** Runtime-selected module path or URL. */
+	readonly specifier: string;
+	/** Content hash or other immutable revision identity. */
+	readonly cacheKey: string;
+}
+
+export interface DisposableTerminalRevisionModule {
+	readonly createDisposableTerminalView: DisposableTerminalViewFactory;
+}
+
+export interface DisposableTerminalRevisionLoader {
+	readonly load: (revision: DisposableTerminalRevision) => Promise<DisposableTerminalViewFactory>;
+}
+
+/** Dev loader whose query-addressed URL prevents the ESM module cache from hiding a new revision. */
+export function createUniqueRevisionLoader(): DisposableTerminalRevisionLoader {
+	return {
+		load: async revision => {
+			const base = revision.specifier.startsWith("file:")
+				? new URL(revision.specifier)
+				: pathToFileURL(revision.specifier);
+			base.searchParams.set("omp-revision", revision.cacheKey);
+			// This import is intentionally dynamic: the revision specifier is selected at runtime.
+			const loaded: unknown = await import(base.href);
+			if (
+				typeof loaded !== "object" ||
+				loaded === null ||
+				!("createDisposableTerminalView" in loaded) ||
+				typeof loaded.createDisposableTerminalView !== "function"
+			) {
+				throw new TypeError(`Disposable terminal revision ${revision.cacheKey} has no view factory`);
+			}
+			return loaded.createDisposableTerminalView as DisposableTerminalViewFactory;
+		},
+	};
+}
+
+export interface DisposableTerminalHostOptions {
+	readonly runner: SessionRunner;
+	readonly loader: DisposableTerminalRevisionLoader;
+	readonly resolveRevision?: () => Promise<DisposableTerminalRevision>;
+	readonly createController?: (runner: SessionRunner) => Promise<TerminalSessionController>;
+}
+
+interface ActiveRevision {
+	readonly revision: DisposableTerminalRevision;
+	readonly factory: DisposableTerminalViewFactory;
+	readonly controller: TerminalSessionController;
+	readonly view: DisposableTerminalView;
+	readonly epoch: number;
+}
+
+export class DisposableTerminalHost {
+	readonly #runner: SessionRunner;
+	readonly #loader: DisposableTerminalRevisionLoader;
+	readonly #createController: (runner: SessionRunner) => Promise<TerminalSessionController>;
+	readonly #resolveRevision: (() => Promise<DisposableTerminalRevision>) | undefined;
+	readonly #runnerScope = Scope.makeUnsafe("sequential");
+	#active: ActiveRevision | undefined;
+	#serial: Promise<void> = Promise.resolve();
+	#epoch = 0;
+	#stopped = false;
+	#stopPromise: Promise<void> | undefined;
+	readonly #completion: Promise<InteractiveHostIntent | undefined>;
+	#resolveCompletion!: (intent: InteractiveHostIntent | undefined) => void;
+	#exitIntent: InteractiveHostIntent | undefined;
+	#preparedTransition: PrepareHostTransitionReceipt | undefined;
+
+	constructor(options: DisposableTerminalHostOptions) {
+		this.#runner = options.runner;
+		this.#loader = options.loader;
+		this.#resolveRevision = options.resolveRevision;
+		this.#createController = options.createController ?? createTerminalSessionController;
+		this.#completion = new Promise(resolve => {
+			this.#resolveCompletion = resolve;
+		});
+	}
+
+	get revision(): DisposableTerminalRevision | undefined {
+		return this.#active?.revision;
+	}
+
+	get completion(): Promise<InteractiveHostIntent | undefined> {
+		return this.#completion;
+	}
+
+	get preparedTransition(): PrepareHostTransitionReceipt | undefined {
+		return this.#preparedTransition;
+	}
+
+	reload(revision: DisposableTerminalRevision): Promise<void> {
+		return this.#serialize(async () => {
+			if (this.#stopped) throw new Error("Disposable terminal host is stopped");
+			const previous = this.#active;
+			this.#active = undefined;
+			if (previous) await this.#retire(previous);
+
+			try {
+				const factory = await this.#loader.load(revision);
+				this.#active = await this.#activate(revision, factory);
+			} catch (error) {
+				if (previous) {
+					try {
+						this.#active = await this.#activate(previous.revision, previous.factory);
+					} catch (fallbackError) {
+						throw new AggregateError(
+							[error, fallbackError],
+							"Revision load failed and fallback could not reattach",
+						);
+					}
+				}
+				throw error;
+			}
+		});
+	}
+
+	transition(intent: InteractiveHostIntent): Promise<PrepareHostTransitionReceipt> {
+		const active = this.#active;
+		if (!active || this.#stopped) return Promise.reject(new Error("Disposable terminal host is stopped"));
+		return this.#prepareTransition(active.epoch, intent);
+	}
+
+	stop(): Promise<void> {
+		if (this.#stopPromise) return this.#stopPromise;
+		this.#stopped = true;
+		this.#stopPromise = this.#serialize(async () => {
+			const errors: unknown[] = [];
+			const active = this.#active;
+			this.#active = undefined;
+			if (active) {
+				try {
+					await this.#retire(active);
+				} catch (error) {
+					errors.push(error);
+				}
+			}
+			try {
+				await Effect.runPromise(Scope.provide(this.#runnerScope)(this.#runner.stop()));
+			} catch (error) {
+				errors.push(error);
+			}
+			try {
+				await Effect.runPromise(Scope.close(this.#runnerScope, Exit.void));
+			} catch (error) {
+				errors.push(error);
+			}
+			if (errors.length === 1) throw errors[0];
+			if (errors.length > 1) throw new AggregateError(errors, "Disposable terminal host stop failed");
+		}).finally(() => {
+			this.#resolveCompletion(this.#exitIntent);
+		});
+		return this.#stopPromise;
+	}
+
+	#serialize(operation: () => Promise<void>): Promise<void> {
+		const result = this.#serial.then(operation, operation);
+		this.#serial = result.catch(() => undefined);
+		return result;
+	}
+
+	async #activate(
+		revision: DisposableTerminalRevision,
+		factory: DisposableTerminalViewFactory,
+	): Promise<ActiveRevision> {
+		const controller = await this.#createController(this.#runner);
+		const epoch = ++this.#epoch;
+		const callbacks: DisposableTerminalHostCallbacks = {
+			epoch,
+			isCurrentEpoch: () => this.#active?.epoch === epoch && !this.#stopped,
+			assertCurrentEpoch: () => {
+				if (this.#active?.epoch !== epoch || this.#stopped) {
+					throw new Error(`Stale disposable terminal view epoch ${epoch}`);
+				}
+			},
+			requestReload: () => this.#requestReload(epoch),
+			requestStop: () => this.#requestStop(epoch),
+			requestTransition: intent => this.#requestTransition(epoch, intent),
+		};
+		let view: DisposableTerminalView | undefined;
+		try {
+			view = await factory(controller, callbacks);
+			const active = { revision, factory, controller, view, epoch };
+			this.#active = active;
+			await view.run();
+			return active;
+		} catch (error) {
+			this.#active = undefined;
+			const errors: unknown[] = [error];
+			if (view) {
+				try {
+					await view.quiesce();
+				} catch (cleanupError) {
+					errors.push(cleanupError);
+				}
+				try {
+					await view.dispose();
+				} catch (cleanupError) {
+					errors.push(cleanupError);
+				}
+			}
+			try {
+				await controller.close();
+			} catch (cleanupError) {
+				errors.push(cleanupError);
+			}
+			if (errors.length === 1) throw error;
+			throw new AggregateError(errors, "Disposable terminal view activation failed");
+		}
+	}
+
+	#requestReload(epoch: number): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			queueMicrotask(() => {
+				if (this.#active?.epoch !== epoch || this.#stopped) {
+					reject(new Error(`Stale disposable terminal view epoch ${epoch}`));
+					return;
+				}
+				if (!this.#resolveRevision) {
+					reject(new Error("Disposable terminal reload is not configured"));
+					return;
+				}
+				void this.#resolveRevision()
+					.then(revision => this.reload(revision))
+					.then(resolve, reject);
+			});
+		});
+	}
+
+	#requestStop(epoch: number): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			queueMicrotask(() => {
+				if (this.#active?.epoch !== epoch || this.#stopped) {
+					reject(new Error(`Stale disposable terminal view epoch ${epoch}`));
+					return;
+				}
+				void this.stop().then(resolve, reject);
+			});
+		});
+	}
+
+	#requestTransition(epoch: number, intent: InteractiveHostIntent): Promise<void> {
+		return this.#prepareTransition(epoch, intent).then(() => undefined);
+	}
+
+	#prepareTransition(epoch: number, intent: InteractiveHostIntent): Promise<PrepareHostTransitionReceipt> {
+		const { promise, resolve, reject } = Promise.withResolvers<PrepareHostTransitionReceipt>();
+		queueMicrotask(() => {
+			const active = this.#active;
+			if (active?.epoch !== epoch || this.#stopped) {
+				reject(new Error(`Stale disposable terminal view epoch ${epoch}`));
+				return;
+			}
+			void active.controller
+				.prepareHostTransition(intent)
+				.then(receipt => {
+					if (receipt.cancelled) {
+						resolve(receipt);
+						return;
+					}
+					this.#preparedTransition = receipt;
+					this.#exitIntent = receipt.intent;
+					return this.stop().then(() => resolve(receipt));
+				})
+				.catch(reject);
+		});
+		return promise;
+	}
+
+	async #retire(active: ActiveRevision): Promise<void> {
+		try {
+			await active.view.quiesce();
+		} finally {
+			try {
+				await active.view.dispose();
+			} finally {
+				await active.controller.close();
+			}
+		}
+	}
+}

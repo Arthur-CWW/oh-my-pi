@@ -6,12 +6,11 @@ import {
 	getEnvApiKey,
 	getProviderDetails,
 	type ProviderDetails,
-	resolveUsedFraction,
 	type UsageLimit,
 	type UsageReport,
 } from "@oh-my-pi/pi-ai";
-import { Loader, Markdown, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
-import { formatDuration, Snowflake, sanitizeText } from "@oh-my-pi/pi-utils";
+import { Loader, Markdown, type OverlayHandle, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
+import { formatDuration, Snowflake } from "@oh-my-pi/pi-utils";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type LoadedCustomShare, loadCustomShare } from "../../export/custom-share";
 import { shareSession } from "../../export/share";
@@ -30,23 +29,27 @@ import { resolveMemoryBackend } from "../../memory-backend";
 import { BashExecutionComponent } from "../../modes/components/bash-execution";
 import { BorderedLoader } from "../../modes/components/bordered-loader";
 import { DynamicBorder } from "../../modes/components/dynamic-border";
+import { keyHint } from "../../modes/components/keybinding-hints";
+import { CommandOutputOverlayComponent } from "../../modes/components/command-line";
+import { ToolsView } from "../../modes/components/tools-view";
+import { UsageHudComponent } from "../../modes/components/usage-hud";
 import { EvalExecutionComponent } from "../../modes/components/eval-execution";
-import { MoveOverlay, type MoveOverlayResult } from "../../modes/components/move-overlay";
 import { TranscriptBlock } from "../../modes/components/transcript-container";
 import { getMarkdownTheme, getSymbolTheme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext } from "../../modes/types";
 import { computeContextBreakdown, renderContextUsage } from "../../modes/utils/context-usage";
 import { buildHotkeysMarkdown } from "../../modes/utils/hotkeys-markdown";
+import type { DisplayTool } from "../../modes/utils/tools-markdown";
 import { buildToolsMarkdown } from "../../modes/utils/tools-markdown";
 import type { AsyncJobSnapshotItem } from "../../session/agent-session";
 import type { AuthStorage, OAuthAccountIdentity } from "../../session/auth-storage";
-import type { CompactMode } from "../../session/compact-modes";
+import { formatCompactionReceipt, getLatestCompactionReceipt } from "../../session/compaction-receipt";
 import type { NewSessionOptions } from "../../session/session-entries";
 import { formatShakeSummary, type ShakeMode, type ShakeResult } from "../../session/shake-types";
 import { limitMatchesActiveAccount } from "../../slash-commands/helpers/active-oauth-account";
 import { outputMeta } from "../../tools/output-meta";
 import { resolveToCwd, stripOuterDoubleQuotes } from "../../tools/path-utils";
-import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
+import { replaceTabs } from "../../tools/render-utils";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog";
 import { copyToClipboard } from "../../utils/clipboard";
 import { openPath } from "../../utils/open";
@@ -63,7 +66,77 @@ function showMarkdownPanel(ctx: InteractiveModeContext, title: string, markdown:
 }
 
 export class CommandController {
+	#commandOutputOverlay: OverlayHandle | undefined;
+	#toolsOverlay: OverlayHandle | undefined;
+	#usageHud: UsageHudComponent | undefined;
+	#toolsView: ToolsView | undefined;
+
 	constructor(private readonly ctx: InteractiveModeContext) {}
+
+	#showCommandOutput(message: string): void {
+		this.#commandOutputOverlay?.hide();
+		let component: CommandOutputOverlayComponent;
+		const dismiss = (): void => {
+			this.#commandOutputOverlay?.hide();
+			this.#commandOutputOverlay = undefined;
+			this.ctx.ui.requestRender();
+		};
+		component = new CommandOutputOverlayComponent(message, dismiss);
+		this.#commandOutputOverlay = this.ctx.ui.showOverlay(component, {
+			anchor: "bottom-center",
+			width: "100%",
+			maxHeight: 14,
+			margin: { bottom: 1 },
+		});
+		this.ctx.ui.setFocus(component);
+		this.ctx.ui.requestRender();
+	}
+	#showUsageHud(message: string): void {
+		const container = this.ctx.usageContainer ?? this.ctx.statusContainer;
+		container.clear();
+		let component: UsageHudComponent;
+		const dismiss = (): void => {
+			if (this.#usageHud !== component) return;
+			this.#usageHud = undefined;
+			container.clear();
+			this.ctx.ui.setFocus(this.ctx.editor);
+			this.ctx.ui.requestRender();
+		};
+		component = new UsageHudComponent(message, dismiss, () => this.ctx.ui.terminal.rows ?? 24);
+		this.#usageHud = component;
+		container.addChild(component);
+		this.ctx.ui.setFocus(component);
+		this.ctx.ui.requestRender();
+	}
+
+	#showToolsView(tools: ReadonlyArray<DisplayTool>): void {
+		this.#toolsOverlay?.hide();
+		if (this.#toolsView) void this.#toolsView.dispose();
+		let view: ToolsView;
+		const dismiss = (): void => {
+			this.#toolsOverlay?.hide();
+			this.#toolsOverlay = undefined;
+			if (this.#toolsView === view) this.#toolsView = undefined;
+			void view.dispose();
+			this.ctx.ui.setFocus(this.ctx.editor);
+			this.ctx.ui.requestRender();
+		};
+		view = new ToolsView(tools, {
+			height: () => this.ctx.ui.terminal.rows ?? 24,
+			requestRender: () => this.ctx.ui.requestRender(),
+			onClose: dismiss,
+		});
+		this.#toolsView = view;
+		this.#toolsOverlay = this.ctx.ui.showOverlay(view, {
+			anchor: "top-left",
+			width: "100%",
+			maxHeight: "100%",
+			margin: 0,
+			fullscreen: true,
+		});
+		this.ctx.ui.setFocus(view);
+		this.ctx.ui.requestRender();
+	}
 
 	openInBrowser(urlOrPath: string): void {
 		openPath(urlOrPath);
@@ -87,30 +160,15 @@ export class CommandController {
 		}
 	}
 
-	async handleDumpCommand(): Promise<void> {
+	handleDumpCommand(isRaw = false) {
 		try {
-			const formatted = this.ctx.session.formatSessionAsText();
+			const formatted = this.ctx.session.formatSessionAsText({ compact: !isRaw });
 			if (!formatted) {
 				this.ctx.showError("No messages to dump yet.");
 				return;
 			}
-			// Build the LLM request JSON sidecar first so its path (and a
-			// raw-context warning) can be appended to the copied transcript.
-			let sidecarPath: string | undefined;
-			let sidecarError: string | undefined;
-			try {
-				sidecarPath = await this.ctx.session.dumpLlmRequestToTmpDir();
-			} catch (error: unknown) {
-				sidecarError = error instanceof Error ? error.message : "Unknown error";
-			}
-			const doc = sidecarPath
-				? `${formatted}\n\n---\nLLM request JSON: ${sidecarPath}\nThis file persists on disk and may contain raw context/secrets — treat accordingly.`
-				: formatted;
-			await copyToClipboard(doc);
-			const statusParts = ["Session copied to clipboard"];
-			if (sidecarPath) statusParts.push(`LLM request JSON: ${sidecarPath}`);
-			if (sidecarError) statusParts.push(`LLM request JSON unavailable: ${sidecarError}`);
-			this.ctx.showStatus(statusParts.join("\n"));
+			copyToClipboard(formatted);
+			this.ctx.showStatus("Session copied to clipboard");
 		} catch (error: unknown) {
 			this.ctx.showError(`Failed to copy session: ${error instanceof Error ? error.message : "Unknown error"}`);
 		}
@@ -219,7 +277,6 @@ export class CommandController {
 		try {
 			const result = await shareSession(this.ctx.session.sessionManager, {
 				serverUrl: this.ctx.settings.get("share.serverUrl"),
-				store: this.ctx.settings.get("share.store"),
 				state: this.ctx.session.state,
 				obfuscator: this.ctx.settings.get("share.redactSecrets") ? this.ctx.session.obfuscator : undefined,
 			});
@@ -239,7 +296,7 @@ export class CommandController {
 		}
 	}
 
-	async handleSessionCommand(): Promise<void> {
+	async handleSessionCommand(showOutput: (message: string) => void = message => this.#showCommandOutput(message)): Promise<void> {
 		const stats = this.ctx.session.getSessionStats();
 		const premiumRequests =
 			"premiumRequests" in stats && typeof stats.premiumRequests === "number"
@@ -341,43 +398,19 @@ export class CommandController {
 			}
 		}
 
-		this.ctx.present([new Spacer(1), new Text(info, 1, 0)]);
+		showOutput(info);
 	}
 
-	async handleAdvisorStatusCommand(): Promise<void> {
+	async handleAdvisorStatusCommand(
+		showOutput: (message: string) => void = message => this.#showCommandOutput(message),
+	): Promise<void> {
 		const stats = this.ctx.session.getAdvisorStats();
 		if (!stats.active) {
-			this.ctx.present([
-				new Spacer(1),
-				new Text(
-					stats.configured
-						? "Advisor setting is enabled, but no model is assigned to the 'advisor' role."
-						: "Advisor is disabled.",
-					1,
-					0,
-				),
-			]);
-			return;
-		}
-		if (stats.advisors.length > 1) {
-			let info = `${theme.bold("Advisor Status")} (${stats.advisors.length} advisors)\n`;
-			for (const a of stats.advisors) {
-				const ctx =
-					a.contextWindow > 0
-						? `${a.contextTokens.toLocaleString()} / ${a.contextWindow.toLocaleString()} (${Math.round((a.contextTokens / a.contextWindow) * 100)}%)`
-						: `${a.contextTokens.toLocaleString()}`;
-				info += `\n${theme.bold(a.name)}\n`;
-				info += `${theme.fg("dim", "Model:")} ${a.model.provider}/${a.model.id}\n`;
-				info += `${theme.fg("dim", "Context:")} ${ctx}\n`;
-				info += `${theme.fg("dim", "Messages:")} ${a.messages.total.toLocaleString()}\n`;
-				info += `${theme.fg("dim", "Spend:")} ${a.tokens.input.toLocaleString()} in / ${a.tokens.output.toLocaleString()} out`;
-				if (a.cost > 0) info += `, $${a.cost.toFixed(4)}`;
-				info += "\n";
-			}
-			info += `\n${theme.bold("Totals")}\n`;
-			info += `${theme.fg("dim", "Tokens:")} ${stats.tokens.total.toLocaleString()}\n`;
-			if (stats.cost > 0) info += `${theme.fg("dim", "Cost:")} $${stats.cost.toFixed(4)}\n`;
-			this.ctx.present([new Spacer(1), new Text(info, 1, 0)]);
+			showOutput(
+				stats.configured
+					? "Advisor setting is enabled, but no model is assigned to the 'advisor' role."
+					: "Advisor is disabled.",
+			);
 			return;
 		}
 		const model = stats.model!;
@@ -409,10 +442,10 @@ export class CommandController {
 			info += `\n${theme.bold("Cost")}\n`;
 			info += `${theme.fg("dim", "Total:")} $${stats.cost.toFixed(4)}\n`;
 		}
-		this.ctx.present([new Spacer(1), new Text(info, 1, 0)]);
+		showOutput(info);
 	}
 
-	async handleJobsCommand(): Promise<void> {
+	async handleJobsCommand(showOutput: (message: string) => void = message => this.#showCommandOutput(message)): Promise<void> {
 		const snapshot = this.ctx.session.getAsyncJobSnapshot({ recentLimit: 5 });
 		if (!snapshot) {
 			this.ctx.showWarning("Async background jobs are unavailable in this session.");
@@ -426,7 +459,7 @@ export class CommandController {
 
 		if (snapshot.running.length === 0 && snapshot.recent.length === 0) {
 			info += `\n${theme.fg("dim", "No async jobs yet.")}\n`;
-			this.ctx.present([new Spacer(1), new Text(info, 1, 0)]);
+			showOutput(info);
 			return;
 		}
 
@@ -446,7 +479,7 @@ export class CommandController {
 			}
 		}
 
-		this.ctx.present([new Spacer(1), new Text(info.trimEnd(), 1, 0)]);
+		showOutput(info.trimEnd());
 	}
 
 	async handleUsageCommand(reports?: UsageReport[] | null): Promise<void> {
@@ -481,7 +514,7 @@ export class CommandController {
 		const output = renderUsageReports(usageReports, theme, Date.now(), availableWidth, provider =>
 			provider === currentProvider ? activeAccount : undefined,
 		);
-		this.ctx.present([new Spacer(1), new Text(output, 1, 0)]);
+		this.#showUsageHud(output);
 	}
 
 	async handleChangelogCommand(showFull = false): Promise<void> {
@@ -516,9 +549,16 @@ export class CommandController {
 		showMarkdownPanel(this.ctx, "Keyboard Shortcuts", hotkeys);
 	}
 
-	handleToolsCommand(): void {
-		const tools = buildToolsMarkdown({ tools: this.ctx.session.agent.state.tools });
-		showMarkdownPanel(this.ctx, "Available Tools", tools);
+	handleToolsCommand(showOutput?: (message: string) => void): void {
+		const registeredTools = this.ctx.session
+			.getAllToolNames()
+			.map(name => this.ctx.session.getToolByName(name))
+			.filter(tool => tool !== undefined);
+		if (showOutput) {
+			showOutput(buildToolsMarkdown({ tools: registeredTools }));
+			return;
+		}
+		this.#showToolsView(registeredTools);
 	}
 
 	handleContextCommand(): void {
@@ -849,7 +889,11 @@ export class CommandController {
 	}
 
 	async #runNewSessionFlow(options?: NewSessionOptions, label: string = "New session started"): Promise<void> {
-		this.ctx.clearTransientSessionUi();
+		if (this.ctx.loadingAnimation) {
+			this.ctx.loadingAnimation.stop();
+			this.ctx.loadingAnimation = undefined;
+		}
+		this.ctx.statusContainer.clear();
 
 		if (this.ctx.session.isCompacting) {
 			this.ctx.session.abortCompaction();
@@ -862,12 +906,16 @@ export class CommandController {
 		setSessionTerminalTitle(this.ctx.sessionManager.getSessionName(), this.ctx.sessionManager.getCwd());
 
 		this.ctx.statusLine.invalidate();
-		this.ctx.statusLine.resetActiveTime();
+		this.ctx.statusLine.setSessionStartTime(Date.now());
+		this.ctx.updateEditorTopBorder();
 		this.ctx.updateEditorBorderColor();
-		this.ctx.clearTransientSessionUi();
-		this.ctx.resetTranscript();
+		this.ctx.chatContainer.clear();
+		this.ctx.pendingMessagesContainer.clear();
+		this.ctx.streamingComponent = undefined;
+		this.ctx.streamingMessage = undefined;
+		this.ctx.pendingTools.clear();
 
-		this.ctx.present([new Spacer(1), new Text(`${theme.fg("accent", `${theme.status.success} ${label}`)}`, 1, 1)]);
+		this.#showCommandOutput(`${theme.status.success} ${label}`);
 		await this.ctx.reloadTodos();
 		this.ctx.ui.requestRender(true, { clearScrollback: true });
 	}
@@ -884,8 +932,10 @@ export class CommandController {
 		}
 		const stateLabel = result.closedProviderSessions === 1 ? "provider state" : "provider states";
 		this.ctx.statusLine.invalidate();
-		this.ctx.ui.requestRender();
-		this.ctx.showStatus(`Fresh provider session started (${result.closedProviderSessions} ${stateLabel} pruned).`);
+		this.ctx.updateEditorTopBorder();
+		this.#showCommandOutput(
+			`Fresh provider session started (${result.closedProviderSessions} ${stateLabel} pruned).`,
+		);
 	}
 
 	async handleDropCommand(): Promise<void> {
@@ -905,7 +955,7 @@ export class CommandController {
 			this.ctx.loadingAnimation.stop();
 			this.ctx.loadingAnimation = undefined;
 		}
-		this.ctx.statusContainer.disposeChildren();
+		this.ctx.statusContainer.clear();
 
 		const success = await this.ctx.session.fork();
 		if (!success) {
@@ -914,44 +964,20 @@ export class CommandController {
 		}
 
 		this.ctx.statusLine.invalidate();
-		this.ctx.ui.requestRender();
+		this.ctx.updateEditorTopBorder();
 
 		const sessionFile = this.ctx.session.sessionFile;
 		const shortPath = sessionFile ? sessionFile.split("/").pop() : "new session";
-		this.ctx.present([
-			new Spacer(1),
-			new Text(`${theme.fg("accent", `${theme.status.success} Session forked to ${shortPath}`)}`, 1, 1),
-		]);
+		this.#showCommandOutput(`${theme.status.success} Session forked to ${shortPath}`);
 	}
 
-	/**
-	 * `/move` — relocate the current session to a different directory.
-	 *
-	 * With no `targetPath` (TUI only), opens an autocomplete overlay so the user
-	 * can pick or type a directory. With a `targetPath`, resolves it directly.
-	 * If the target directory does not exist, the user is asked whether to create
-	 * it. The active session file and artifacts are moved into the target
-	 * directory's session bucket so `/resume` from that directory can find it.
-	 */
-	async handleMoveCommand(targetPath?: string): Promise<void> {
+	async handleMoveCommand(targetPath: string): Promise<void> {
 		if (this.ctx.session.isStreaming) {
 			this.ctx.showWarning("Wait for the current response to finish or abort it before moving.");
 			return;
 		}
 
-		let input: string | undefined = targetPath?.trim() || undefined;
-
-		// No argument in TUI mode: open the path autocomplete overlay.
-		if (!input) {
-			const result = await this.ctx.showHookCustom<MoveOverlayResult | undefined>(
-				(_tui, _theme, _keybindings, done) => new MoveOverlay(this.ctx.sessionManager.getCwd(), done),
-				{ overlay: true },
-			);
-			if (!result) return; // cancelled
-			input = result.directory;
-		}
-
-		const unquoted = stripOuterDoubleQuotes(input);
+		const unquoted = stripOuterDoubleQuotes(targetPath);
 		if (!unquoted) {
 			this.ctx.showError("Usage: /move <path>");
 			return;
@@ -960,56 +986,26 @@ export class CommandController {
 		const cwd = this.ctx.sessionManager.getCwd();
 		const resolvedPath = resolveToCwd(unquoted, cwd);
 
-		// If the directory doesn't exist, offer to create it.
-		let isDirectory: boolean;
 		try {
-			isDirectory = (await fs.stat(resolvedPath)).isDirectory();
+			const stat = await fs.stat(resolvedPath);
+			if (!stat.isDirectory()) {
+				this.ctx.showError(`Not a directory: ${resolvedPath}`);
+				return;
+			}
 		} catch {
-			isDirectory = false;
-		}
-
-		if (!isDirectory) {
-			const parentDir = path.dirname(resolvedPath);
-			let parentExists = false;
-			try {
-				parentExists = (await fs.stat(parentDir)).isDirectory();
-			} catch {
-				parentExists = false;
-			}
-			if (!parentExists) {
-				this.ctx.showError(`Cannot create "${path.basename(resolvedPath)}": parent directory does not exist`);
-				return;
-			}
-			const confirmed = await this.ctx.showHookConfirm(
-				"Create directory?",
-				`"${path.basename(resolvedPath)}" does not exist. Create it?`,
-			);
-			if (!confirmed) return;
-			try {
-				await fs.mkdir(resolvedPath, { recursive: true });
-			} catch (err) {
-				this.ctx.showError(`Failed to create directory: ${err instanceof Error ? err.message : String(err)}`);
-				return;
-			}
-		}
-
-		try {
-			await this.ctx.sessionManager.moveTo(resolvedPath);
-		} catch (err) {
-			this.ctx.showError(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.ctx.showError(`Directory does not exist: ${resolvedPath}`);
 			return;
 		}
 
-		await this.ctx.applyCwdChange(resolvedPath);
+		try {
+			await this.ctx.sessionManager.flush();
+			await this.ctx.sessionManager.moveTo(resolvedPath);
+			await this.ctx.applyCwdChange(resolvedPath);
 
-		this.ctx.updateEditorBorderColor();
-		await this.ctx.reloadTodos();
-		this.ctx.ui.requestRender();
-
-		this.ctx.present([
-			new Spacer(1),
-			new Text(`${theme.fg("accent", `${theme.status.success} Moved to ${resolvedPath}`)}`, 1, 1),
-		]);
+			this.#showCommandOutput(`${theme.status.success} Session moved to ${resolvedPath}`);
+		} catch (err) {
+			this.ctx.showError(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 
 	async handleRenameCommand(title: string): Promise<void> {
@@ -1020,7 +1016,10 @@ export class CommandController {
 				return;
 			}
 			const name = this.ctx.sessionManager.getSessionName()!;
-			this.ctx.showStatus(`Session renamed to "${name}".`);
+			setSessionTerminalTitle(name, this.ctx.sessionManager.getCwd());
+			this.ctx.statusLine.invalidate();
+			this.ctx.updateEditorBorderColor();
+			this.#showCommandOutput(`Session renamed to "${name}".`);
 		} catch (err) {
 			this.ctx.showError(`Rename failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
@@ -1110,9 +1109,7 @@ export class CommandController {
 
 	async handleCompactCommand(
 		customInstructions?: string,
-		mode?: CompactMode,
-		beforeFlush?: (outcome: CompactionOutcome) => void | Promise<void>,
-		internalGuidance?: string,
+		afterCompaction?: (outcome: CompactionOutcome) => void | Promise<void>,
 	): Promise<CompactionOutcome> {
 		const entries = this.ctx.sessionManager.getEntries();
 		const messageCount = entries.filter(e => e.type === "message").length;
@@ -1122,21 +1119,12 @@ export class CommandController {
 			return "ok";
 		}
 
-		// `internalGuidance` is a private summarizer directive (plan-mode
-		// "Approve and compact context") that MUST stay off the public
-		// `customInstructions` channel of the `session_before_compact` extension
-		// hook — extensions treat that field as user focus and would otherwise
-		// bias the summary toward the plan boilerplate (issue #4359). Ride it
-		// through as a CompactOptions field instead.
-		if (internalGuidance) {
-			return this.executeCompaction({ internalGuidance, ...(mode ? { mode } : {}) }, false, beforeFlush, mode);
-		}
-		return this.executeCompaction(customInstructions, false, beforeFlush, mode);
+		return this.executeCompaction(customInstructions, false, afterCompaction);
 	}
 
 	/**
 	 * TUI handler for `/shake`. `elide` drops heavy structural content and
-	 * `images` strips image blocks. Rebuilds the chat and reports counts.
+	 * `media` strips image and video blocks. Rebuilds the chat and reports counts.
 	 */
 	async handleShakeCommand(mode: ShakeMode): Promise<void> {
 		let result: ShakeResult;
@@ -1147,30 +1135,44 @@ export class CommandController {
 			return;
 		}
 
-		const dropped = result.toolResultsDropped + result.blocksDropped + (result.imagesDropped ?? 0);
+		const dropped = result.toolResultsDropped + result.blocksDropped + (result.mediaDropped ?? 0);
 		if (dropped === 0) {
 			this.ctx.showStatus("Nothing to shake.");
 			return;
 		}
 		this.ctx.rebuildChatFromMessages();
 		this.ctx.statusLine.invalidate();
-		this.ctx.ui.requestRender();
+		this.ctx.updateEditorTopBorder();
 		this.ctx.showStatus(formatShakeSummary(result));
+	}
+
+	async handleSkillCommand(skillPath: string, args: string): Promise<void> {
+		try {
+			const content = await Bun.file(skillPath).text();
+			const body = content.replace(/^---\n[\s\S]*?\n---\n/, "").trim();
+			const metaLines = [`Skill: ${skillPath}`];
+			if (args) {
+				metaLines.push(`User: ${args}`);
+			}
+			const message = `${body}\n\n---\n\n${metaLines.join("\n")}`;
+			await this.ctx.session.prompt(message);
+		} catch (err) {
+			this.ctx.showError(`Failed to load skill: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 
 	async executeCompaction(
 		customInstructionsOrOptions?: string | CompactOptions,
 		isAuto = false,
-		beforeFlush?: (outcome: CompactionOutcome) => void | Promise<void>,
-		mode?: CompactMode,
+		afterCompaction?: (outcome: CompactionOutcome) => void | Promise<void>,
 	): Promise<CompactionOutcome> {
 		if (this.ctx.loadingAnimation) {
 			this.ctx.loadingAnimation.stop();
 			this.ctx.loadingAnimation = undefined;
 		}
-		this.ctx.statusContainer.disposeChildren();
+		this.ctx.statusContainer.clear();
 
-		const label = isAuto ? "Auto-compacting context... (esc to cancel)" : "Compacting context... (esc to cancel)";
+		const label = `${isAuto ? "Auto-compacting context..." : "Compacting context..."} (${keyHint("app.interrupt", "to cancel")})`;
 		const compactingLoader = new Loader(
 			this.ctx.ui,
 			spinner => theme.fg("accent", spinner),
@@ -1184,25 +1186,32 @@ export class CommandController {
 		let outcome: CompactionOutcome = "ok";
 		try {
 			const instructions = typeof customInstructionsOrOptions === "string" ? customInstructionsOrOptions : undefined;
-			const baseOptions =
+			const providedOptions =
 				customInstructionsOrOptions && typeof customInstructionsOrOptions === "object"
 					? customInstructionsOrOptions
 					: undefined;
-			// The slash path passes `mode` positionally; the extension path carries
-			// it inside the options object. Either source wins over no mode.
-			const effectiveMode = mode ?? baseOptions?.mode;
-			const options =
-				baseOptions || effectiveMode
-					? { ...baseOptions, ...(effectiveMode ? { mode: effectiveMode } : {}) }
-					: undefined;
+			const options: CompactOptions | undefined = afterCompaction
+				? {
+						...providedOptions,
+						beforeAdmission: async result => {
+							await providedOptions?.beforeAdmission?.(result);
+							await afterCompaction(result.outcome);
+						},
+					}
+				: providedOptions;
 			await this.ctx.session.compact(instructions, options);
 
 			compactingLoader.stop();
-			this.ctx.statusContainer.disposeChildren();
+			this.ctx.statusContainer.clear();
 			this.ctx.rebuildChatFromMessages();
 
 			this.ctx.statusLine.invalidate();
-			this.ctx.ui.requestRender();
+			this.ctx.updateEditorTopBorder();
+			const receipt =
+				typeof this.ctx.sessionManager?.getEntries === "function"
+					? getLatestCompactionReceipt(this.ctx.sessionManager.getEntries())
+					: undefined;
+			if (receipt) this.ctx.showStatus(formatCompactionReceipt(receipt));
 		} catch (error) {
 			if (error instanceof CompactionCancelledError) {
 				outcome = "cancelled";
@@ -1214,23 +1223,12 @@ export class CommandController {
 			}
 		} finally {
 			compactingLoader.stop();
-			this.ctx.statusContainer.disposeChildren();
+			this.ctx.statusContainer.clear();
 		}
-		// Run the caller's pre-flush hook (e.g. the plan-approval model transition)
-		// before queued user input is dispatched, so any turn queued during
-		// compaction executes on the post-compaction model rather than the model
-		// compaction itself ran on.
-		if (beforeFlush) await beforeFlush(outcome);
-		await this.ctx.flushCompactionQueue({ willRetry: false });
 		return outcome;
 	}
 
 	async handleHandoffCommand(customInstructions?: string): Promise<void> {
-		if (this.ctx.session.isStreaming) {
-			this.ctx.showWarning("Wait for the current response to finish or abort it before handing off.");
-			return;
-		}
-
 		const entries = this.ctx.sessionManager.getEntries();
 		const messageCount = entries.filter(e => e.type === "message").length;
 
@@ -1243,13 +1241,13 @@ export class CommandController {
 			this.ctx.loadingAnimation.stop();
 			this.ctx.loadingAnimation = undefined;
 		}
-		this.ctx.statusContainer.disposeChildren();
+		this.ctx.statusContainer.clear();
 
 		const handoffLoader = new Loader(
 			this.ctx.ui,
 			spinner => theme.fg("accent", spinner),
 			text => theme.fg("muted", text),
-			"Generating handoff… (esc to cancel)",
+			`Generating handoff… (${keyHint("app.interrupt", "to cancel")})`,
 			getSymbolTheme().spinnerFrames,
 		);
 		this.ctx.statusContainer.addChild(handoffLoader);
@@ -1264,20 +1262,17 @@ export class CommandController {
 				return;
 			}
 
-			// Rebuild chat from the new session (which now contains the handoff document).
-			this.ctx.clearTransientSessionUi();
-			this.ctx.renderInitialMessages();
+			// Rebuild chat from the new session (which now contains the handoff document)
+			this.ctx.rebuildChatFromMessages();
+
 			this.ctx.statusLine.invalidate();
+			this.ctx.updateEditorTopBorder();
 			this.ctx.updateEditorBorderColor();
 			await this.ctx.reloadTodos();
 
-			this.ctx.present([
-				new Spacer(1),
-				new Text(`${theme.fg("accent", `${theme.status.success} New session started with handoff context`)}`, 1, 1),
-			]);
-			if (result.savedPath) {
-				this.ctx.showStatus(`Handoff document saved to: ${result.savedPath}`);
-			}
+			let acknowledgement = `${theme.status.success} New session started with handoff context`;
+			if (result.savedPath) acknowledgement += `\nHandoff document saved to: ${result.savedPath}`;
+			this.#showCommandOutput(acknowledgement);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			if (message === "Handoff cancelled" || (error instanceof Error && error.name === "AbortError")) {
@@ -1287,9 +1282,132 @@ export class CommandController {
 			}
 		} finally {
 			handoffLoader.stop();
-			this.ctx.statusContainer.disposeChildren();
+			this.ctx.statusContainer.clear();
 		}
-		this.ctx.ui.requestRender(true, { clearScrollback: true });
+		this.ctx.ui.requestRender();
+	}
+
+	async handleSuccessorCommand(options?: { keepSource?: boolean; sourceNote?: string }): Promise<void> {
+		const entries = this.ctx.sessionManager.getEntries();
+		const messageCount = entries.filter(e => e.type === "message").length;
+
+		if (messageCount < 2) {
+			this.ctx.showWarning("Nothing to hand off (no messages yet)");
+			return;
+		}
+
+		if (this.ctx.loadingAnimation) {
+			this.ctx.loadingAnimation.stop();
+			this.ctx.loadingAnimation = undefined;
+		}
+		this.ctx.statusContainer.clear();
+
+		const successorLoader = new Loader(
+			this.ctx.ui,
+			spinner => theme.fg("accent", spinner),
+			text => theme.fg("muted", text),
+			`Generating successor handoff… (${keyHint("app.interrupt", "to cancel")})`,
+			getSymbolTheme().spinnerFrames,
+		);
+		this.ctx.statusContainer.addChild(successorLoader);
+		this.ctx.ui.requestRender();
+
+		try {
+			const result = await this.ctx.session.generateHandoffDocument(options?.sourceNote);
+
+			if (!result) {
+				this.ctx.showError("Successor handoff cancelled");
+				return;
+			}
+
+			// Save the handoff document to disk
+			const artifactsDir = this.ctx.sessionManager.getArtifactsDir();
+			if (!artifactsDir) {
+				this.ctx.showError("Cannot save handoff: session is not persisted");
+				return;
+			}
+			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+			const handoffPath = path.join(artifactsDir, `handoff-successor-${timestamp}.md`);
+			await fs.mkdir(artifactsDir, { recursive: true });
+			await Bun.write(handoffPath, `${result.document}\n`);
+
+			// Resolve workstream slug
+			const workstream = this.ctx.sessionManager.getWorkstream();
+			const streamSlug = workstream?.kind === "workstream" ? workstream.id : "adhoc";
+
+			// Resolve model selector
+			const model = this.ctx.session.model;
+			const modelSelector = model ? `${model.provider}/${model.id}` : "anthropic/claude-sonnet-4-20250514";
+
+			// Resolve predecessor handle
+			const sessionId = this.ctx.sessionManager.getSessionId();
+			const predecessorHandle = `${sessionId}/Main`;
+
+			// Build spawn args
+			const args = [
+				"scripts/successor.ts",
+				"--handoff", handoffPath,
+				"--stream", streamSlug,
+				"--model", modelSelector,
+				"--predecessor", predecessorHandle,
+				"--title", streamSlug,
+			];
+			if (options?.keepSource) {
+				args.push("--keep-source");
+			}
+
+			const cwd = this.ctx.sessionManager.getCwd();
+			const proc = Bun.spawn(["bun", ...args], {
+				cwd,
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+
+			const [stdout, stderr] = await Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+			]);
+			const exitCode = await proc.exited;
+
+			if (exitCode !== 0) {
+				this.ctx.showError(`Successor script failed (exit ${exitCode}): ${stderr.trim() || stdout.trim()}`);
+				return;
+			}
+
+			let receipt: { ok: boolean };
+			try {
+				receipt = JSON.parse(stdout.trim());
+			} catch {
+				this.ctx.showError(`Successor script returned invalid JSON: ${stdout.trim()}`);
+				return;
+			}
+
+			if (!receipt.ok) {
+				this.ctx.showError("Successor script reported failure");
+				return;
+			}
+
+			if (!options?.keepSource) {
+				this.#showCommandOutput(`${theme.status.success} Successor launched — parking predecessor`);
+				this.ctx.ui.requestRender();
+				// Allow the render to flush before exit
+				await Bun.sleep(100);
+				process.exit(0);
+			} else {
+				this.#showCommandOutput(`${theme.status.success} Successor launched, source kept alive`);
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (message === "Handoff cancelled" || (error instanceof Error && error.name === "AbortError")) {
+				this.ctx.showError("Successor handoff cancelled");
+			} else {
+				this.ctx.showError(`Successor failed: ${message}`);
+			}
+		} finally {
+			successorLoader.stop();
+			this.ctx.statusContainer.clear();
+		}
+		this.ctx.ui.requestRender();
 	}
 }
 
@@ -1359,10 +1477,22 @@ export function renderProviderSection(details: ProviderDetails, uiTheme: Pick<ty
 	return `${lines.join("\n")}\n`;
 }
 
+function resolveFraction(limit: UsageLimit): number | undefined {
+	const amount = limit.amount;
+	if (amount.usedFraction !== undefined) return amount.usedFraction;
+	if (amount.used !== undefined && amount.limit !== undefined && amount.limit > 0) {
+		return amount.used / amount.limit;
+	}
+	if (amount.unit === "percent" && amount.used !== undefined) {
+		return amount.used / 100;
+	}
+	return undefined;
+}
+
 function resolveProviderUsageTotal(reports: UsageReport[]): number {
 	return reports
 		.flatMap(report => report.limits)
-		.map(limit => resolveUsedFraction(limit) ?? 0)
+		.map(limit => resolveFraction(limit) ?? 0)
 		.reduce((sum, value) => sum + value, 0);
 }
 
@@ -1383,28 +1513,22 @@ function formatWindowSuffix(label: string, windowLabel: string, uiTheme: typeof 
 }
 
 function formatAccountLabel(limit: UsageLimit, report: UsageReport, index: number): string {
-	const email = report.metadata?.email;
-	if (typeof email === "string" && email) return email;
-	const accountId =
-		typeof report.metadata?.accountId === "string" && report.metadata.accountId
-			? report.metadata.accountId
-			: limit.scope.accountId || undefined;
+	const email = (report.metadata?.email as string | undefined) ?? limit.scope.accountId;
+	if (email) return email;
+	const accountId = (report.metadata?.accountId as string | undefined) ?? limit.scope.accountId;
 	if (accountId) return accountId;
-	const projectId =
-		typeof report.metadata?.projectId === "string" && report.metadata.projectId
-			? report.metadata.projectId
-			: limit.scope.projectId || undefined;
+	const projectId = (report.metadata?.projectId as string | undefined) ?? limit.scope.projectId;
 	if (projectId) return projectId;
 	return `account ${index + 1}`;
 }
 
 function formatUnlimitedReportLabel(report: UsageReport, index: number): string {
-	const email = report.metadata?.email;
-	if (typeof email === "string" && email) return email;
-	const accountId = report.metadata?.accountId;
-	if (typeof accountId === "string" && accountId) return accountId;
-	const projectId = report.metadata?.projectId;
-	if (typeof projectId === "string" && projectId) return projectId;
+	const email = report.metadata?.email as string | undefined;
+	if (email) return email;
+	const accountId = report.metadata?.accountId as string | undefined;
+	if (accountId) return accountId;
+	const projectId = report.metadata?.projectId as string | undefined;
+	if (projectId) return projectId;
 	return `account ${index + 1}`;
 }
 
@@ -1479,7 +1603,7 @@ function resolveAggregateStatus(limits: UsageLimit[]): UsageLimit["status"] {
 
 function formatAggregateAmount(limits: UsageLimit[]): string {
 	const fractions = limits
-		.map(limit => resolveUsedFraction(limit))
+		.map(limit => resolveFraction(limit))
 		.filter((value): value is number => value !== undefined);
 	if (fractions.length === limits.length && fractions.length > 0) {
 		const sum = fractions.reduce((total, value) => total + value, 0);
@@ -1536,7 +1660,7 @@ function resolveStatusColor(status: UsageLimit["status"]): "success" | "warning"
 }
 
 function renderUsageBar(limit: UsageLimit, uiTheme: typeof theme, barWidth: number): string {
-	const fraction = resolveUsedFraction(limit);
+	const fraction = resolveFraction(limit);
 	if (fraction === undefined) {
 		return uiTheme.fg("dim", "·".repeat(barWidth));
 	}
@@ -1570,7 +1694,7 @@ function resolveColumnWidth(count: number, available: number, trailing: number):
 	return ideal;
 }
 
-export function renderUsageReports(
+function renderUsageReports(
 	reports: UsageReport[],
 	uiTheme: typeof theme,
 	nowMs: number,
@@ -1630,25 +1754,14 @@ export function renderUsageReports(
 			lines.push(`  ${uiTheme.fg("accent", "in use by this session:")} ${activeAccountLabel}`);
 		}
 
-		// Provider-wide disclaimers (e.g. "OMP-observed spend only") render once
-		// above the per-account sections instead of duplicating onto every limit.
-		const providerNotes = [...new Set(providerReports.flatMap(report => report.notes ?? []))];
-		if (providerNotes.length > 0) {
-			lines.push(
-				`  ${uiTheme.fg("dim", replaceTabs(truncateToWidth(sanitizeText(providerNotes.map(n => n.replace(/[\r\n]+/g, " ")).join(" • ")), 110)))}`.trimEnd(),
-			);
-		}
-
 		const resetAccountLines: string[] = [];
 		for (const report of providerReports) {
 			const count = report.resetCredits?.availableCount ?? 0;
 			if (count <= 0) continue;
 			const label =
-				typeof report.metadata?.email === "string" && report.metadata.email
-					? report.metadata.email
-					: typeof report.metadata?.accountId === "string" && report.metadata.accountId
-						? report.metadata.accountId
-						: "account";
+				(report.metadata?.email as string | undefined) ??
+				(report.metadata?.accountId as string | undefined) ??
+				"account";
 			const isActive =
 				!!activeAccount &&
 				((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
@@ -1656,23 +1769,6 @@ export function renderUsageReports(
 			resetAccountLines.push(
 				`    • ${label}: ${count} saved reset${count === 1 ? "" : "s"}${isActive ? " (active)" : ""}`,
 			);
-			const credits = report.resetCredits?.credits;
-			if (credits) {
-				for (const credit of credits) {
-					if (credit.expiresAt) {
-						const expiryMs = Date.parse(credit.expiresAt);
-						if (!Number.isNaN(expiryMs)) {
-							const remaining = expiryMs - nowMs;
-							const expiryDate = credit.expiresAt.slice(0, 10);
-							if (remaining > 0) {
-								resetAccountLines.push(`        expires in ${formatDuration(remaining)} (${expiryDate})`);
-							} else {
-								resetAccountLines.push(`        expired (${expiryDate})`);
-							}
-						}
-					}
-				}
-			}
 		}
 		if (resetAccountLines.length > 0) {
 			lines.push(
@@ -1685,7 +1781,7 @@ export function renderUsageReports(
 			const entries = group.limits.map((limit, index) => ({
 				limit,
 				report: group.reports[index],
-				fraction: resolveUsedFraction(limit),
+				fraction: resolveFraction(limit),
 				index,
 			}));
 			entries.sort((a, b) => {
@@ -1726,11 +1822,9 @@ export function renderUsageReports(
 			if (resetText) {
 				lines.push(`  ${uiTheme.fg("dim", resetText)}`.trimEnd());
 			}
-			const notes = [...new Set(sortedLimits.flatMap(limit => limit.notes ?? []))];
+			const notes = sortedLimits.flatMap(limit => limit.notes ?? []);
 			if (notes.length > 0) {
-				lines.push(
-					`  ${uiTheme.fg("dim", replaceTabs(truncateToWidth(sanitizeText(notes.map(n => n.replace(/[\r\n]+/g, " ")).join(" • ")), 110)))}`.trimEnd(),
-				);
+				lines.push(`  ${uiTheme.fg("dim", notes.join(" • "))}`.trimEnd());
 			}
 		}
 
@@ -1738,8 +1832,8 @@ export function renderUsageReports(
 		const unlimitedReports = providerReports.filter(report => report.limits.length === 0);
 		for (const report of unlimitedReports) {
 			const label = formatUnlimitedReportLabel(report, 0);
-			const tier = report.metadata?.planType;
-			const tierSuffix = typeof tier === "string" && tier ? ` ${uiTheme.fg("dim", `(${tier})`)}` : "";
+			const tier = report.metadata?.planType as string | undefined;
+			const tierSuffix = tier ? ` ${uiTheme.fg("dim", `(${tier})`)}` : "";
 			lines.push(
 				`${uiTheme.fg("success", uiTheme.status.success)} ${label}${tierSuffix} ${uiTheme.fg("dim", "-- no limits")}`,
 			);

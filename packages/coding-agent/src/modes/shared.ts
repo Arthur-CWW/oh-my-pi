@@ -1,5 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
-import type { TabBarTheme } from "@oh-my-pi/pi-tui";
+import { getKeybindings, type TabBarTheme } from "@oh-my-pi/pi-tui";
+import { formatKeyHints } from "../config/keybindings";
 import { theme } from "./theme/theme";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -35,15 +36,12 @@ export function getTabBarTheme(): TabBarTheme {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Suffix appended to the loader's working message to remind users they can
- * abort with Esc. Rendered with the active theme's bracket glyphs so it stays
- * visually consistent with badges and other bracketed UI affordances.
- *
- * The leading space separates the hint from the message body and is consumed
- * by `endsWith`/`slice` matching in the loader renderer.
+ * Suffix appended to the loader's working message with the effective interrupt
+ * shortcut. The leading space is consumed by the loader renderer's matching.
  */
 export function interruptHint(): string {
-	return ` ${theme.format.bracketLeft}esc${theme.format.bracketRight}`;
+	const keyHint = formatKeyHints(getKeybindings().getKeys("app.interrupt"));
+	return ` ${theme.format.bracketLeft}${keyHint}${theme.format.bracketRight}`;
 }
 
 export { parseCommandArgs } from "../utils/command-args";

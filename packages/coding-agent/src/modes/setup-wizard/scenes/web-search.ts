@@ -1,14 +1,9 @@
-import {
-	routeSelectListMouse,
-	type SelectItem,
-	SelectList,
-	type SgrMouseEvent,
-	truncateToWidth,
-} from "@oh-my-pi/pi-tui";
+import { type SelectItem, SelectList, type SgrMouseEvent, truncateToWidth } from "@oh-my-pi/pi-tui";
 import { SETTINGS_SCHEMA } from "../../../config/settings-schema";
 import { getSearchProvider, setPreferredSearchProvider } from "../../../web/search/provider";
 import { isSearchProviderPreference, type SearchProviderId } from "../../../web/search/types";
 import { getSelectListTheme, theme } from "../../theme/theme";
+import { matchesUiDismiss } from "../../utils/keybinding-matchers";
 import type { SetupSceneHost, SetupTab } from "./types";
 
 const MAX_VISIBLE = 8;
@@ -47,7 +42,6 @@ export class WebSearchTab implements SetupTab {
 		if (index >= 0) this.#list.setSelectedIndex(index);
 		this.#list.onSelectionChange = item => this.#onHighlight(item.value);
 		this.#list.onSelect = item => this.#apply(item.value);
-		this.#list.onCancel = () => host.finish("skipped");
 	}
 
 	onActivate(): void {
@@ -60,12 +54,28 @@ export class WebSearchTab implements SetupTab {
 	}
 
 	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.host.finish("skipped");
+			return;
+		}
+
 		this.#list.handleInput(data);
 	}
 
 	/** Wheel moves the highlight; hover lights the row under the pointer; click confirms it. */
 	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
-		routeSelectListMouse(this.#list, event, line - this.#listRowStart);
+		if (event.wheel !== null) {
+			this.#list.handleWheel(event.wheel);
+			return;
+		}
+		const index = this.#list.hitTest(line - this.#listRowStart);
+		if (event.motion) {
+			this.#list.setHoverIndex(index ?? null);
+			return;
+		}
+		if (event.leftClick && index !== undefined) {
+			this.#list.clickItem(index);
+		}
 	}
 
 	invalidate(): void {

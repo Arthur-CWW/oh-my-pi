@@ -1,12 +1,14 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storage";
-import { TempDir } from "@oh-my-pi/pi-utils";
 import { readTableSql } from "./helpers/sqlite-inspect";
 
 const LEGACY_TIMESTAMP = 1_700_000_000;
 
-let tempDir: TempDir | null = null;
+let tempDir = "";
 
 beforeEach(() => {
 	HistoryStorage.resetInstance();
@@ -15,15 +17,14 @@ beforeEach(() => {
 afterEach(async () => {
 	HistoryStorage.resetInstance();
 	if (tempDir) {
-		await Bun.sleep(0);
-		await tempDir.remove().catch(() => {});
-		tempDir = null;
+		await fs.rm(tempDir, { recursive: true, force: true });
+		tempDir = "";
 	}
 });
 
 it("migrates legacy history schema away from unixepoch defaults", async () => {
-	tempDir = TempDir.createSync("@omp-history-storage-legacy-");
-	const dbPath = tempDir.join("history.db");
+	tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-history-storage-legacy-"));
+	const dbPath = path.join(tempDir, "history.db");
 	const legacyDb = new Database(dbPath);
 	legacyDb.exec(`
 		CREATE TABLE history (

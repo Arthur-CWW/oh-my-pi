@@ -5,10 +5,9 @@
  * fallback strategies for finding text in files.
  */
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { type } from "arktype";
-import type { FileDiagnosticsResult, WritethroughCallback, WritethroughDeferredHandle } from "../../lsp";
+import { z } from "zod/v4";
+import type { WritethroughCallback, WritethroughDeferredHandle } from "../../lsp";
 import type { ToolSession } from "../../tools";
-import { routeWriteThroughBridge } from "../../tools/acp-bridge";
 import { invalidateFsScanAfterWrite } from "../../tools/fs-cache-invalidation";
 import { outputMeta } from "../../tools/output-meta";
 import { enforcePlanModeWrite, resolvePlanPath } from "../../tools/plan-mode-guard";
@@ -24,7 +23,6 @@ import {
 } from "../normalize";
 import { readEditFileText, serializeEditFileText } from "../read-file";
 import type { EditToolDetails, LspBatchRequest } from "../renderer";
-import { pruneOversizedEditSnapshots } from "../snapshot-details";
 
 export interface FuzzyMatch {
 	actualText: string;
@@ -1012,19 +1010,23 @@ export function findContextLine(
 	return { index: undefined, confidence: bestScore };
 }
 
-export const replaceEditEntrySchema = type({
-	old_text: "string",
-	new_text: "string",
-	"all?": "boolean",
-});
+export const replaceEditEntrySchema = z
+	.object({
+		old_text: z.string().describe("text to find"),
+		new_text: z.string().describe("replacement text"),
+		all: z.boolean().describe("replace all occurrences").optional(),
+	})
+	.strict();
 
-export const replaceEditSchema = type({
-	path: "string",
-	edits: replaceEditEntrySchema.array(),
-});
+export const replaceEditSchema = z
+	.object({
+		path: z.string().describe("file path"),
+		edits: z.array(replaceEditEntrySchema).min(1).describe("replacements"),
+	})
+	.strict();
 
-export type ReplaceEditEntry = typeof replaceEditEntrySchema.infer;
-export type ReplaceParams = typeof replaceEditSchema.infer;
+export type ReplaceEditEntry = z.infer<typeof replaceEditEntrySchema>;
+export type ReplaceParams = z.infer<typeof replaceEditSchema>;
 
 export interface ExecuteReplaceSingleOptions {
 	session: ToolSession;
@@ -1040,7 +1042,7 @@ export interface ExecuteReplaceSingleOptions {
 
 export async function executeReplaceSingle(
 	options: ExecuteReplaceSingleOptions,
-): Promise<AgentToolResult<EditToolDetails, ReplaceEditEntry>> {
+): Promise<AgentToolResult<EditToolDetails, typeof replaceEditEntrySchema>> {
 	const {
 		session,
 		path,
@@ -1100,17 +1102,15 @@ export async function executeReplaceSingle(
 		path,
 		bom + restoreLineEndings(result.content, originalEnding),
 	);
-
-	// Route through ACP bridge when available; skips internal artifacts.
-	let diagnostics: FileDiagnosticsResult | undefined;
-	if (await routeWriteThroughBridge(session, path, absolutePath, finalContent, signal)) {
-		// bridge handled the write; diagnostics not available via writethrough
-	} else {
-		diagnostics = await writethrough(absolutePath, finalContent, signal, Bun.file(absolutePath), batchRequest, dst =>
-			dst === absolutePath ? beginDeferredDiagnosticsForPath(absolutePath) : undefined,
-		);
-		invalidateFsScanAfterWrite(absolutePath);
-	}
+	const diagnostics = await writethrough(
+		absolutePath,
+		finalContent,
+		signal,
+		Bun.file(absolutePath),
+		batchRequest,
+		dst => (dst === absolutePath ? beginDeferredDiagnosticsForPath(absolutePath) : undefined),
+	);
+	invalidateFsScanAfterWrite(absolutePath);
 
 	const diffResult = generateDiffString(normalizedContent, result.content, undefined, { path });
 	const resultText =
@@ -1124,7 +1124,7 @@ export async function executeReplaceSingle(
 
 	return {
 		content: [{ type: "text", text: resultText }],
-		details: pruneOversizedEditSnapshots({
+		details: {
 			diff: diffResult.diff,
 			path: absolutePath,
 			firstChangedLine: diffResult.firstChangedLine,
@@ -1132,6 +1132,6 @@ export async function executeReplaceSingle(
 			meta,
 			oldText: rawContent,
 			newText: finalContent,
-		}),
+		},
 	};
 }

@@ -1,52 +1,42 @@
-import { type } from "arktype";
+import { z } from "zod/v4";
 import { getBundledModels } from "../models";
 import { toModelSpec } from "../provider-models/bundled-references";
 import type { FetchImpl, Model, ModelSpec } from "../types";
-import { discoveryFetch } from "../utils";
 
 const GOOGLE_GENERATIVE_AI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_PAGES = 25;
 
-const resilientString = type("unknown").pipe(val => {
-	if (val === undefined) return undefined;
-	const out = type("string")(val);
-	return out instanceof type.errors ? undefined : out;
+const geminiModelListItemSchema = z.object({
+	name: z.string().optional().catch(undefined),
+	displayName: z.string().optional().catch(undefined),
+	supportedGenerationMethods: z.array(z.string()).optional(),
+	inputTokenLimit: z.number().finite().optional().catch(undefined),
+	outputTokenLimit: z.number().finite().optional().catch(undefined),
 });
 
-const resilientNumber = type("unknown").pipe(val => {
-	if (val === undefined) return undefined;
-	const out = type("number")(val);
-	return out instanceof type.errors ? undefined : out;
-});
-
-const geminiModelListItemSchema = type({
-	"name?": resilientString,
-	"displayName?": resilientString,
-	"supportedGenerationMethods?": "string[]",
-	"inputTokenLimit?": resilientNumber,
-	"outputTokenLimit?": resilientNumber,
-});
-
-type GeminiModelListItem = typeof geminiModelListItemSchema.infer;
-
-const modelsSchema = type("unknown[]")
-	.pipe(items => {
-		const parsedItems: GeminiModelListItem[] = [];
-		for (const item of items) {
-			const parsed = geminiModelListItemSchema(item);
-			if (!(parsed instanceof type.errors)) {
-				parsedItems.push(parsed);
+const geminiModelListResponseSchema = z.object({
+	models: z
+		.array(z.unknown())
+		.optional()
+		.transform(items => {
+			if (!items) {
+				return [];
 			}
-		}
-		return parsedItems;
-	})
-	.default(() => []);
-
-const geminiModelListResponseSchema = type({
-	models: modelsSchema,
-	"nextPageToken?": resilientString,
+			const parsedItems: GeminiModelListItem[] = [];
+			for (const item of items) {
+				const parsed = geminiModelListItemSchema.safeParse(item);
+				if (parsed.success) {
+					parsedItems.push(parsed.data);
+				}
+			}
+			return parsedItems;
+		}),
+	nextPageToken: z.string().optional().catch(undefined),
 });
+
+type GeminiModelListItem = z.infer<typeof geminiModelListItemSchema>;
+
 /**
  * Configuration for Google Generative AI model discovery.
  */
@@ -78,7 +68,7 @@ export async function fetchGeminiModels(
 		return null;
 	}
 
-	const fetchImpl = discoveryFetch(options.fetch);
+	const fetchImpl = options.fetch ?? fetch;
 	const baseUrl = normalizeBaseUrl(options.baseUrl);
 	const pageSize = normalizePositiveInt(options.pageSize, DEFAULT_PAGE_SIZE);
 	const maxPages = normalizePositiveInt(options.maxPages, DEFAULT_MAX_PAGES);
@@ -113,19 +103,19 @@ export async function fetchGeminiModels(
 			return null;
 		}
 
-		const parsed = geminiModelListResponseSchema(payload);
-		if (parsed instanceof type.errors) {
+		const parsed = geminiModelListResponseSchema.safeParse(payload);
+		if (!parsed.success) {
 			return null;
 		}
 
-		for (const item of parsed.models) {
+		for (const item of parsed.data.models) {
 			const model = normalizeModel(item, baseUrl, bundledById);
 			if (model) {
 				modelsById.set(model.id, model);
 			}
 		}
 
-		const token = normalizePageToken(parsed.nextPageToken);
+		const token = normalizePageToken(parsed.data.nextPageToken);
 		if (!token) {
 			break;
 		}

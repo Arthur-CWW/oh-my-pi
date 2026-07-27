@@ -41,7 +41,6 @@ describe("per-profile MCP OAuth binding", () => {
 	});
 
 	afterEach(() => {
-		authStorage.close();
 		setProfile(originalProfile);
 		vi.restoreAllMocks();
 	});
@@ -202,20 +201,17 @@ describe("per-profile MCP OAuth binding", () => {
 			"embedded-client",
 			"embedded-secret",
 			SERVER_URL,
-			{ authorizationUrl: undefined, stripSameOriginResource: true, signal: expect.any(AbortSignal) },
 		);
 		expect(authorizationHeader(prepared)).toBe("Bearer fresh-token");
 		// Embedded refresh material must survive rotation, or the *next* refresh
-		// of this definition-only binding would be impossible. The fallback
-		// resource (synthesized from config.url) is intentionally not persisted —
-		// it is re-derived from the definition on the next refresh.
+		// of this definition-only binding would be impossible.
 		expect(authStorage.get(URL_KEY_ID)).toMatchObject({
 			type: "oauth",
 			access: "fresh-token",
 			refresh: "fresh-refresh",
 			tokenUrl: "https://mcp.example.com/token",
 			clientId: "embedded-client",
-			resource: undefined,
+			resource: SERVER_URL,
 		});
 	});
 
@@ -315,7 +311,6 @@ describe("per-profile MCP OAuth binding", () => {
 			"my-dcr-client",
 			undefined,
 			SERVER_URL,
-			{ authorizationUrl: undefined, stripSameOriginResource: true, signal: expect.any(AbortSignal) },
 		);
 		expect(authorizationHeader(prepared)).toBe("Bearer fresh-token");
 	});

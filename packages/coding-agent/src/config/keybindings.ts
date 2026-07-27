@@ -9,8 +9,8 @@ import {
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
 } from "@oh-my-pi/pi-tui";
-import { getActiveProfile, getAgentDir, getProfileRootDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { JSONC, YAML } from "bun";
+import { getAgentDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { YAML } from "bun";
 
 /**
  * Application-level keybindings (coding agent specific).
@@ -18,10 +18,18 @@ import { JSONC, YAML } from "bun";
  */
 interface AppKeybindings {
 	"app.interrupt": true;
+	"ui.dismiss": true;
 	"app.clear": true;
 	"app.exit": true;
 	"app.suspend": true;
 	"app.display.reset": true;
+	"app.transcript.rawToggle": true;
+	"app.navigation.down": true;
+	"app.navigation.up": true;
+	"app.navigation.pageDown": true;
+	"app.navigation.pageUp": true;
+	"app.navigation.top": true;
+	"app.navigation.bottom": true;
 	"app.thinking.cycle": true;
 	"app.thinking.toggle": true;
 	"app.model.cycleForward": true;
@@ -31,13 +39,14 @@ interface AppKeybindings {
 	"app.tools.expand": true;
 	"app.editor.external": true;
 	"app.message.followUp": true;
-	"app.retry": true;
 	"app.message.dequeue": true;
 	"app.clipboard.pasteImage": true;
 	"app.clipboard.pasteTextRaw": true;
 	"app.clipboard.copyLine": true;
 	"app.clipboard.copyPrompt": true;
 	"app.agents.hub": true;
+	"app.primitives.inspect": true;
+	"app.agents.returnToParent": true;
 	"app.session.new": true;
 	"app.session.tree": true;
 	"app.session.fork": true;
@@ -65,9 +74,7 @@ declare module "@oh-my-pi/pi-tui" {
  * Resolve default image-paste shortcuts for the current terminal platform.
  */
 export function getDefaultPasteImageKeys(platform: NodeJS.Platform = process.platform): KeyId[] {
-	if (platform === "win32") return ["ctrl+v", "alt+v"];
-	if (platform === "darwin") return ["ctrl+v", "super+v"];
-	return ["ctrl+v"];
+	return platform === "win32" ? ["ctrl+v", "alt+v"] : ["ctrl+v"];
 }
 
 /**
@@ -76,8 +83,12 @@ export function getDefaultPasteImageKeys(platform: NodeJS.Platform = process.pla
 export const KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
 	"app.interrupt": {
-		defaultKeys: "escape",
+		defaultKeys: "ctrl+q",
 		description: "Interrupt current operation",
+	},
+	"ui.dismiss": {
+		defaultKeys: "escape",
+		description: "Dismiss active UI",
 	},
 	"app.clear": {
 		defaultKeys: "ctrl+c",
@@ -94,6 +105,34 @@ export const KEYBINDINGS = {
 	"app.display.reset": {
 		defaultKeys: "ctrl+l",
 		description: "Reset terminal display",
+	},
+	"app.transcript.rawToggle": {
+		defaultKeys: "alt+v",
+		description: "Toggle raw semantic transcript",
+	},
+	"app.navigation.down": {
+		defaultKeys: "j",
+		description: "Move or scroll down outside text entry",
+	},
+	"app.navigation.up": {
+		defaultKeys: "k",
+		description: "Move or scroll up outside text entry",
+	},
+	"app.navigation.pageDown": {
+		defaultKeys: "ctrl+d",
+		description: "Move or scroll down half a page outside text entry",
+	},
+	"app.navigation.pageUp": {
+		defaultKeys: "ctrl+u",
+		description: "Move or scroll up half a page outside text entry",
+	},
+	"app.navigation.top": {
+		defaultKeys: "g",
+		description: "Start a jump-to-top sequence outside text entry",
+	},
+	"app.navigation.bottom": {
+		defaultKeys: "shift+g",
+		description: "Jump to bottom outside text entry",
 	},
 	"app.thinking.cycle": {
 		defaultKeys: "shift+tab",
@@ -128,15 +167,8 @@ export const KEYBINDINGS = {
 		description: "Open external editor",
 	},
 	"app.message.followUp": {
-		// Ctrl+Enter is preserved for terminals that deliver it (Kitty/iTerm2/WezTerm/Ghostty),
-		// but Windows Terminal does not emit a distinct event for Ctrl+Enter — Ctrl+Q is listed
-		// first so the default binding works there without remapping (#1903).
-		defaultKeys: ["ctrl+q", "ctrl+enter"],
+		defaultKeys: "ctrl+enter",
 		description: "Send follow-up message",
-	},
-	"app.retry": {
-		defaultKeys: "alt+r",
-		description: "Retry last failed assistant turn",
 	},
 	"app.message.dequeue": {
 		defaultKeys: "alt+up",
@@ -178,6 +210,14 @@ export const KEYBINDINGS = {
 		defaultKeys: "alt+a",
 		description: "Open the agent hub",
 	},
+	"app.primitives.inspect": {
+		defaultKeys: "alt+i",
+		description: "Open the primitives inspector",
+	},
+	"app.agents.returnToParent": {
+		defaultKeys: "alt+shift+left",
+		description: "Return to the parent agent",
+	},
 	"app.session.observe": {
 		defaultKeys: "ctrl+s",
 		description: "Open the agent hub",
@@ -187,7 +227,7 @@ export const KEYBINDINGS = {
 		description: "Toggle session path display",
 	},
 	"app.session.toggleSort": {
-		defaultKeys: "ctrl+s",
+		defaultKeys: "ctrl+shift+s",
 		description: "Toggle session sort order",
 	},
 	"app.session.rename": {
@@ -203,11 +243,11 @@ export const KEYBINDINGS = {
 		description: "Delete session (non-invasive)",
 	},
 	"app.tree.foldOrUp": {
-		defaultKeys: ["ctrl+left", "alt+left"],
+		defaultKeys: "ctrl+shift+left",
 		description: "Fold or move up",
 	},
 	"app.tree.unfoldOrDown": {
-		defaultKeys: ["ctrl+right", "alt+right"],
+		defaultKeys: "ctrl+shift+right",
 		description: "Unfold or move down",
 	},
 	"app.plan.toggle": {
@@ -245,7 +285,6 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	toggleThinking: "app.thinking.toggle",
 	externalEditor: "app.editor.external",
 	followUp: "app.message.followUp",
-	retry: "app.retry",
 	dequeue: "app.message.dequeue",
 	pasteImage: "app.clipboard.pasteImage",
 	pasteTextRaw: "app.clipboard.pasteTextRaw",
@@ -375,12 +414,6 @@ interface KeybindingsConfigPaths {
 	writeBackPath: string;
 }
 
-/** Controls inherited keybinding lookup when creating a manager for a named profile. */
-export interface KeybindingsCreateOptions {
-	/** Default-profile agent directory whose keybindings are merged before profile-specific bindings. */
-	inheritedAgentDir?: string;
-}
-
 /**
  * Load raw config from a file synchronously.
  * Returns parsed JSON/YAML or null if file doesn't exist or is invalid.
@@ -389,7 +422,7 @@ function loadRawConfig(filePath: string): unknown {
 	try {
 		const content = fs.readFileSync(filePath, "utf-8");
 		if (filePath.endsWith(".json")) {
-			return JSONC.parse(content);
+			return JSON.parse(content);
 		}
 		if (filePath.endsWith(".yml") || filePath.endsWith(".yaml")) {
 			return YAML.parse(content);
@@ -434,48 +467,6 @@ function resolveKeybindingsConfigPaths(agentDir: string): KeybindingsConfigPaths
 	return { readPath: ymlPath, writeBackPath: ymlPath };
 }
 
-function mergeKeybindingsConfig(
-	inheritedConfig: KeybindingsConfig,
-	profileConfig: KeybindingsConfig,
-): KeybindingsConfig {
-	return { ...inheritedConfig, ...profileConfig };
-}
-
-function resolveInheritedAgentDir(agentDir: string, options: KeybindingsCreateOptions): string | undefined {
-	const inheritedAgentDir =
-		options.inheritedAgentDir ?? (getActiveProfile() ? path.join(getProfileRootDir(undefined), "agent") : undefined);
-	if (!inheritedAgentDir) return undefined;
-	if (path.resolve(inheritedAgentDir) === path.resolve(agentDir)) return undefined;
-	return inheritedAgentDir;
-}
-
-function loadMergedKeybindingsConfig(
-	agentDir: string,
-	options: KeybindingsCreateOptions,
-): {
-	config: KeybindingsConfig;
-	profilePath: string;
-	inheritedPath: string | undefined;
-} {
-	const profilePaths = resolveKeybindingsConfigPaths(agentDir);
-	const profile = loadKeybindingsConfig(profilePaths.readPath, profilePaths.writeBackPath);
-	const inheritedAgentDir = resolveInheritedAgentDir(agentDir, options);
-	if (!inheritedAgentDir) {
-		return { config: profile.config, profilePath: profile.persistedPath, inheritedPath: undefined };
-	}
-
-	const inheritedPaths = resolveKeybindingsConfigPaths(inheritedAgentDir);
-	// Read-only: a named-profile process must never write migration output into
-	// the default profile's agent dir. Name migration still applies in-memory;
-	// the on-disk migration happens when the default profile itself launches.
-	const inherited = loadKeybindingsConfig(inheritedPaths.readPath, undefined);
-	return {
-		config: mergeKeybindingsConfig(inherited.config, profile.config),
-		profilePath: profile.persistedPath,
-		inheritedPath: inherited.persistedPath,
-	};
-}
-
 /**
  * Load and migrate keybindings config.
  * Legacy JSON is read for compatibility, but successful write-back goes to YAML.
@@ -509,37 +500,7 @@ function migrateKeybindingsConfigFile(agentDir: string): void {
 	loadKeybindingsConfig(readPath, writeBackPath);
 }
 
-const FOLLOW_UP_KEYBINDING: AppKeybinding = "app.message.followUp";
-const WINDOWS_FOLLOW_UP_FALLBACK_KEY: KeyId = "ctrl+q";
-function keyListIncludes(keys: KeyId | KeyId[] | undefined, target: KeyId): boolean {
-	if (keys === undefined) return false;
-	const keyList = Array.isArray(keys) ? keys : [keys];
-	for (const key of keyList) {
-		if (key.toLowerCase() === target) return true;
-	}
-	return false;
-}
-
-function userBindingClaimsKey(config: KeybindingsConfig, target: KeyId, except: Keybinding): boolean {
-	for (const [keybinding, keys] of Object.entries(config)) {
-		if (!(keybinding in KEYBINDINGS)) continue;
-		if (keybinding === except) continue;
-		if (keyListIncludes(keys, target)) return true;
-	}
-	return false;
-}
-
-function removeKey(keys: KeyId[], target: KeyId): KeyId[] {
-	return keys.filter(key => key !== target);
-}
-
-function keyConfigValue(keys: KeyId[]): KeyId | KeyId[] {
-	if (keys.length === 1) {
-		const key = keys[0];
-		if (key !== undefined) return key;
-	}
-	return [...keys];
-}
+const DIRECT_INTERRUPT_KEY: KeyId = "ctrl+q";
 
 /**
  * Manages all keybindings (app + TUI).
@@ -547,23 +508,20 @@ function keyConfigValue(keys: KeyId[]): KeyId | KeyId[] {
  */
 export class KeybindingsManager extends TuiKeybindingsManager {
 	#configPath: string | undefined;
-	#inheritedConfigPath: string | undefined;
-	#userBindings: KeybindingsConfig;
 
-	constructor(userBindings: KeybindingsConfig = {}, configPath?: string, inheritedConfigPath?: string) {
+	constructor(userBindings: KeybindingsConfig = {}, configPath?: string) {
 		super(KEYBINDINGS, userBindings);
 		this.#configPath = configPath;
-		this.#inheritedConfigPath = inheritedConfigPath;
-		this.#userBindings = userBindings;
 	}
 
 	/**
-	 * Create from config files at agentDir/keybindings.yml and the default profile.
+	 * Create from config file at agentDir/keybindings.yml.
 	 * Legacy keybindings.json is migrated to keybindings.yml on load.
 	 */
-	static create(agentDir: string = getAgentDir(), options: KeybindingsCreateOptions = {}): KeybindingsManager {
-		const { config: userBindings, profilePath, inheritedPath } = loadMergedKeybindingsConfig(agentDir, options);
-		const manager = new KeybindingsManager(userBindings, profilePath, inheritedPath);
+	static create(agentDir: string = getAgentDir()): KeybindingsManager {
+		const { readPath, writeBackPath } = resolveKeybindingsConfigPaths(agentDir);
+		const { config: userBindings, persistedPath } = KeybindingsManager.#loadFromFile(readPath, writeBackPath);
+		const manager = new KeybindingsManager(userBindings, persistedPath);
 		// Set globally so getKeybindings() returns this manager
 		setKeybindings(manager);
 		return manager;
@@ -577,37 +535,29 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	}
 
 	/**
-	 * Reload keybindings from the config files.
+	 * Reload keybindings from the config file.
 	 */
 	reload(): void {
 		if (!this.#configPath) return;
-		const { config: inheritedConfig } = this.#inheritedConfigPath
-			? KeybindingsManager.#loadFromFile(this.#inheritedConfigPath)
-			: { config: {} };
-		const { config: profileConfig } = KeybindingsManager.#loadFromFile(this.#configPath);
-		this.setUserBindings(mergeKeybindingsConfig(inheritedConfig, profileConfig));
-	}
-
-	setUserBindings(userBindings: KeybindingsConfig): void {
-		this.#userBindings = userBindings;
-		super.setUserBindings(userBindings);
+		const { config } = KeybindingsManager.#loadFromFile(this.#configPath);
+		this.setUserBindings(config);
 	}
 
 	getKeys(keybinding: Keybinding): KeyId[] {
 		const keys = super.getKeys(keybinding);
-		if (keybinding === FOLLOW_UP_KEYBINDING) {
-			if (this.#userBindings[FOLLOW_UP_KEYBINDING] !== undefined) return keys;
-			if (!userBindingClaimsKey(this.#userBindings, WINDOWS_FOLLOW_UP_FALLBACK_KEY, FOLLOW_UP_KEYBINDING)) {
-				return keys;
-			}
-			return removeKey(keys, WINDOWS_FOLLOW_UP_FALLBACK_KEY);
+		if (keybinding === "app.message.followUp") {
+			return keys.filter(key => key.toLowerCase() !== DIRECT_INTERRUPT_KEY);
 		}
-		return keys;
+		if (keybinding !== "app.interrupt" || keys.some(key => key.toLowerCase() === DIRECT_INTERRUPT_KEY)) {
+			return keys;
+		}
+		return [...keys, DIRECT_INTERRUPT_KEY];
 	}
 
 	getResolvedBindings(): KeybindingsConfig {
 		const resolved = super.getResolvedBindings();
-		resolved[FOLLOW_UP_KEYBINDING] = keyConfigValue(this.getKeys(FOLLOW_UP_KEYBINDING));
+		resolved["app.interrupt"] = this.getKeys("app.interrupt");
+		resolved["app.message.followUp"] = this.getKeys("app.message.followUp");
 		return resolved;
 	}
 

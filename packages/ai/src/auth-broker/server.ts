@@ -10,14 +10,10 @@
  * the server only checks a bearer token against an allow-list per request.
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import { type Type, type } from "arktype";
-import type { AuthStorage, StoredCredentialBlock } from "../auth-storage";
+import type { AuthStorage } from "../auth-storage";
 import { parseBind } from "../utils/parse-bind";
 import { AuthBrokerRefresher, type AuthBrokerRefresherSchedule } from "./refresher";
 import type {
-	CredentialBlockResponse,
-	CredentialBlockSnapshot,
-	CredentialBlocksDeleteResponse,
 	CredentialDisableResponse,
 	CredentialRefreshResponse,
 	CredentialUploadResponse,
@@ -36,11 +32,7 @@ import {
 	DEFAULT_SERVER_IDLE_TIMEOUT_S,
 	DEFAULT_STREAM_KEEPALIVE_MS,
 } from "./types";
-import {
-	credentialBlockRequestSchema,
-	credentialDisableRequestSchema,
-	credentialUploadRequestSchema,
-} from "./wire-schemas";
+import { credentialDisableRequestSchema, credentialUploadRequestSchema } from "./wire-schemas";
 
 export interface AuthBrokerServerOptions {
 	/** Underlying credential storage (wraps the local SQLite store on the broker). */
@@ -94,15 +86,15 @@ function isAuthorized(req: Request, tokens: ReadonlySet<string>): boolean {
 }
 
 /**
- * Parse + validate a JSON request body against an ArkType schema. Returns a
+ * Parse + validate a JSON request body against a Zod schema. Returns a
  * `Response` (400) on parse/validation failure so handlers can early-return.
  * When `allowEmpty` is set, an empty request body is validated against `{}`.
  */
-async function parseBody<t>(
+async function parseBody<T>(
 	req: Request,
-	schema: Type<t>,
+	schema: { safeParse(input: unknown): { success: true; data: T } | { success: false; error: { message: string } } },
 	options: { allowEmpty?: boolean } = {},
-): Promise<{ ok: true; data: typeof schema.infer } | { ok: false; response: Response }> {
+): Promise<{ ok: true; data: T } | { ok: false; response: Response }> {
 	let raw: string;
 	try {
 		raw = await req.text();
@@ -118,17 +110,15 @@ async function parseBody<t>(
 	} catch (error) {
 		return { ok: false, response: json(400, { error: `Invalid JSON body: ${String(error)}` }) };
 	}
-	const result = schema(parsed);
-	if (result instanceof type.errors) {
-		return { ok: false, response: json(400, { error: result.summary }) };
+	const result = schema.safeParse(parsed);
+	if (!result.success) {
+		return { ok: false, response: json(400, { error: result.error.message }) };
 	}
-	return { ok: true, data: result };
+	return { ok: true, data: result.data };
 }
 
 const REFRESH_ROUTE = /^\/v1\/credential\/(\d+)\/refresh$/;
 const DISABLE_ROUTE = /^\/v1\/credential\/(\d+)\/disable$/;
-const BLOCK_ROUTE = /^\/v1\/credential\/(\d+)\/block$/;
-const BLOCKS_ROUTE = /^\/v1\/credential\/(\d+)\/blocks$/;
 
 const MAX_SNAPSHOT_WAIT_MS = 30_000;
 const DISABLED_NEXT_SWEEP_IN_MS = Number.MAX_SAFE_INTEGER;
@@ -271,49 +261,14 @@ function computeRotatesInMs(
 	return Math.max(0, rotatesAt - serverNowMs);
 }
 
-function compareCredentialBlockSnapshots(a: CredentialBlockSnapshot, b: CredentialBlockSnapshot): number {
-	const provider = a.providerKey.localeCompare(b.providerKey);
-	if (provider !== 0) return provider;
-	const scope = a.blockScope.localeCompare(b.blockScope);
-	if (scope !== 0) return scope;
-	return a.blockedUntilMs - b.blockedUntilMs;
-}
-
-function buildCredentialBlockGroups(
-	blocks: readonly StoredCredentialBlock[],
-	serverNowMs: number,
-): Map<number, CredentialBlockSnapshot[]> {
-	const byCredentialId = new Map<number, CredentialBlockSnapshot[]>();
-	for (const block of blocks) {
-		if (block.blockedUntilMs <= serverNowMs) continue;
-		const snapshotBlock: CredentialBlockSnapshot = {
-			providerKey: block.providerKey,
-			blockScope: block.blockScope,
-			blockedUntilMs: block.blockedUntilMs,
-			updatedAtMs: block.updatedAtMs,
-		};
-		const existing = byCredentialId.get(block.credentialId);
-		if (existing) {
-			existing.push(snapshotBlock);
-		} else {
-			byCredentialId.set(block.credentialId, [snapshotBlock]);
-		}
-	}
-	for (const credentialBlocks of byCredentialId.values()) credentialBlocks.sort(compareCredentialBlockSnapshots);
-	return byCredentialId;
-}
-
 function buildSnapshot(storage: AuthStorage, refresher: AuthBrokerRefresher | undefined): SnapshotResponse {
 	const serverNowMs = Date.now();
 	const base = storage.exportSnapshot();
 	const { wire, nextSweepAt } = resolveRefresherSchedule(refresher, serverNowMs);
-	const credentialIds = base.credentials.map(entry => entry.id);
-	const blocksByCredentialId = buildCredentialBlockGroups(storage.listCredentialBlocks(credentialIds), serverNowMs);
-	const credentials: SnapshotEntry[] = base.credentials.map(entry => {
-		const blocks = blocksByCredentialId.get(entry.id);
-		const rotatesInMs = computeRotatesInMs(entry, wire, nextSweepAt, serverNowMs);
-		return blocks && blocks.length > 0 ? { ...entry, rotatesInMs, blocks } : { ...entry, rotatesInMs };
-	});
+	const credentials: SnapshotEntry[] = base.credentials.map(entry => ({
+		...entry,
+		rotatesInMs: computeRotatesInMs(entry, wire, nextSweepAt, serverNowMs),
+	}));
 	return {
 		generation: base.generation,
 		generatedAt: base.generatedAt,
@@ -380,14 +335,7 @@ async function serveSnapshot(
  * keep the stale projection.
  */
 function fingerprintEntry(entry: SnapshotEntry): string {
-	return JSON.stringify([
-		entry.id,
-		entry.provider,
-		entry.identityKey,
-		entry.rotatesInMs,
-		entry.credential,
-		entry.blocks ?? [],
-	]);
+	return JSON.stringify([entry.id, entry.provider, entry.identityKey, entry.rotatesInMs, entry.credential]);
 }
 
 function sseEvent(event: string, body: unknown): string {
@@ -635,66 +583,25 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 					if (!parsed.ok) return parsed.response;
 					const cause =
 						parsed.data.cause && parsed.data.cause.length > 0 ? parsed.data.cause : "disabled via auth-broker";
-					const ok = opts.storage.disableCredentialById(id, cause);
-					if (!ok) {
-						logger.info("auth-broker disable miss", { id, peer, cause });
-						return json(404, { error: `No credential with id=${id}` });
+					const expectedData = parsed.data.expectedData;
+					if (expectedData !== undefined) {
+						await opts.storage.reload();
+						const ok = await opts.storage.disableCredentialByIdIfSnapshotMatches(id, expectedData, cause);
+						if (!ok) {
+							logger.info("auth-broker conditional disable lost CAS", { id, peer, cause });
+							const response: CredentialDisableResponse = { ok: false };
+							return json(200, response);
+						}
+					} else {
+						const ok = opts.storage.disableCredentialById(id, cause);
+						if (!ok) {
+							logger.info("auth-broker disable miss", { id, peer, cause });
+							return json(404, { error: `No credential with id=${id}` });
+						}
 					}
 					logger.info("auth-broker credential disabled", { id, peer, cause });
 					const response: CredentialDisableResponse = { ok: true };
 					return json(200, response);
-				}
-				const blockMatch = req.method === "POST" ? pathname.match(BLOCK_ROUTE) : null;
-				if (blockMatch) {
-					const id = Number.parseInt(blockMatch[1], 10);
-					const parsed = await parseBody(req, credentialBlockRequestSchema);
-					if (!parsed.ok) return parsed.response;
-					const block: StoredCredentialBlock = {
-						credentialId: id,
-						providerKey: parsed.data.providerKey,
-						blockScope: parsed.data.blockScope,
-						blockedUntilMs: parsed.data.blockedUntilMs,
-					};
-					if (!opts.storage.exportSnapshot().credentials.some(entry => entry.id === id)) {
-						logger.info("auth-broker credential block miss", { id, peer });
-						return json(404, { error: `No credential with id=${id}` });
-					}
-					try {
-						opts.storage.upsertCredentialBlock(block);
-						const response: CredentialBlockResponse = { ok: true };
-						logger.info("auth-broker credential block upserted", {
-							id,
-							peer,
-							providerKey: block.providerKey,
-							blockScope: block.blockScope,
-							blockedUntilMs: block.blockedUntilMs,
-						});
-						return json(200, response);
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						logger.warn("auth-broker credential block upsert failed", { id, peer, error: message });
-						const status = message.includes("No credential with id") ? 404 : 500;
-						return json(status, { error: message });
-					}
-				}
-				const blocksDeleteMatch = req.method === "DELETE" ? pathname.match(BLOCKS_ROUTE) : null;
-				if (blocksDeleteMatch) {
-					const id = Number.parseInt(blocksDeleteMatch[1], 10);
-					if (!opts.storage.exportSnapshot().credentials.some(entry => entry.id === id)) {
-						logger.info("auth-broker credential blocks delete miss", { id, peer });
-						return json(404, { error: `No credential with id=${id}` });
-					}
-					try {
-						opts.storage.deleteCredentialBlocks(id);
-						const response: CredentialBlocksDeleteResponse = { ok: true };
-						logger.info("auth-broker credential blocks deleted", { id, peer });
-						return json(200, response);
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						logger.warn("auth-broker credential blocks delete failed", { id, peer, error: message });
-						const status = message.includes("No credential with id") ? 404 : 500;
-						return json(status, { error: message });
-					}
 				}
 				if (req.method === "POST" && pathname === "/v1/credential") {
 					const parsed = await parseBody(req, credentialUploadRequestSchema);

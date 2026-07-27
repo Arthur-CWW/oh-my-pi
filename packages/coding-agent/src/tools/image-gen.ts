@@ -1,7 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { type ApiKey, type FetchImpl, getEnvApiKey, type Model, withAuth } from "@oh-my-pi/pi-ai";
-import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
+import { type ApiKey, type FetchImpl, getEnvApiKey, type Model, ProviderHttpError, withAuth } from "@oh-my-pi/pi-ai";
 import {
 	CODEX_BASE_URL,
 	getCodexAccountId,
@@ -20,10 +19,10 @@ import {
 	Snowflake,
 	untilAborted,
 } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import packageJson from "../../package.json" with { type: "json" };
+
 import { isAuthenticated, type ModelRegistry } from "../config/model-registry";
-import { settings } from "../config/settings";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import { ohMyPiXAIUserAgent, resolveXAIHttpCredentials } from "../lib/xai-http";
 import imageGenDescription from "../prompts/tools/image-gen.md" with { type: "text" };
@@ -39,8 +38,7 @@ const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const OPENAI_IMAGE_OUTPUT_FORMAT = "webp";
 const OPENAI_IMAGE_MIME_TYPE = "image/webp";
 
-const DEFAULT_ANTIGRAVITY_ENDPOINT_PROD = "https://daily-cloudcode-pa.googleapis.com";
-const DEFAULT_ANTIGRAVITY_ENDPOINT_SANDBOX = "https://daily-cloudcode-pa.sandbox.googleapis.com";
+const ANTIGRAVITY_ENDPOINT = "https://daily-cloudcode-pa.sandbox.googleapis.com";
 const IMAGE_SYSTEM_INSTRUCTION =
 	"You are an AI image generator. Generate images based on user descriptions. Focus on creating high-quality, visually appealing images that match the user's request.";
 
@@ -59,32 +57,37 @@ const XAI_IMAGE_ASPECT_RATIOS = [...COMMON_IMAGE_ASPECT_RATIOS, "3:2", "2:3"] as
 const COMMON_IMAGE_ASPECT_RATIO_SET = new Set<string>(COMMON_IMAGE_ASPECT_RATIOS);
 const IMAGE_PROVIDER_PREFERENCES = new Set<string>(["auto", "antigravity", "gemini", "openai", "openrouter", "xai"]);
 
-const responseModalitySchema = type('"IMAGE" | "TEXT"');
+const responseModalitySchema = z.enum(["IMAGE", "TEXT"] as const);
+const aspectRatioSchema = z.enum(XAI_IMAGE_ASPECT_RATIOS).describe("aspect ratio");
+const imageSizeSchema = z.enum(["1024x1024", "1536x1024", "1024x1536"] as const).describe("image size");
 
-const aspectRatioSchema = type.enumerated(...XAI_IMAGE_ASPECT_RATIOS).describe("aspect ratio");
-const imageSizeSchema = type('"1024x1024" | "1536x1024" | "1024x1536"').describe("image size");
+const inputImageSchema = z
+	.object({
+		path: z.string().describe("input image path").optional(),
+		data: z.string().describe("base64 image data").optional(),
+		mime_type: z.string().describe("mime type").optional(),
+	})
+	.strict();
 
-const inputImageSchema = type({
-	"path?": type("string").describe("input image path"),
-	"data?": type("string").describe("base64 image data"),
-	"mime_type?": type("string").describe("mime type"),
-});
+const baseImageSchema = z
+	.object({
+		subject: z.string().describe("main subject"),
+		action: z.string().describe("what subject is doing").optional(),
+		scene: z.string().describe("location or environment").optional(),
+		composition: z.string().describe("camera angle and framing").optional(),
+		lighting: z.string().describe("lighting setup").optional(),
+		style: z.string().describe("artistic style").optional(),
+		text: z.string().describe("text to render").optional(),
+		changes: z.array(z.string()).describe("edits to make").optional(),
+		aspect_ratio: aspectRatioSchema.optional(),
+		image_size: imageSizeSchema.optional(),
+		input: z.array(inputImageSchema).describe("input images").optional(),
+	})
+	.strict();
 
-export const imageGenSchema = type({
-	subject: type("string").describe("main subject"),
-	"action?": type("string").describe("what subject is doing"),
-	"scene?": type("string").describe("location or environment"),
-	"composition?": type("string").describe("camera angle and framing"),
-	"lighting?": type("string").describe("lighting setup"),
-	"style?": type("string").describe("artistic style"),
-	"text?": type("string").describe("text to render"),
-	"changes?": type("string[]").describe("edits to make"),
-	"aspect_ratio?": aspectRatioSchema,
-	"image_size?": imageSizeSchema,
-	"input?": inputImageSchema.array().describe("input images"),
-});
-export type ImageGenParams = typeof imageGenSchema.infer;
-export type GeminiResponseModality = typeof responseModalitySchema.infer;
+export const imageGenSchema = baseImageSchema;
+export type ImageGenParams = z.infer<typeof imageGenSchema>;
+export type GeminiResponseModality = z.infer<typeof responseModalitySchema>;
 
 /**
  * Assembles a structured prompt from the provided parameters.
@@ -1161,74 +1164,33 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 							resolvedImages,
 						);
 
-						let endpoints = [DEFAULT_ANTIGRAVITY_ENDPOINT_PROD, DEFAULT_ANTIGRAVITY_ENDPOINT_SANDBOX];
-						try {
-							const mode = settings.get("providers.antigravityEndpoint");
-							if (mode === "production") {
-								endpoints = [DEFAULT_ANTIGRAVITY_ENDPOINT_PROD];
-							} else if (mode === "sandbox") {
-								endpoints = [DEFAULT_ANTIGRAVITY_ENDPOINT_SANDBOX];
-							}
-						} catch {
-							// Ignored
-						}
+						const resp = await fetchImpl(`${ANTIGRAVITY_ENDPOINT}/v1internal:streamGenerateContent?alt=sse`, {
+							method: "POST",
+							headers: {
+								Authorization: `Bearer ${bearer}`,
+								"Content-Type": "application/json",
+								Accept: "text/event-stream",
+								"User-Agent": getAntigravityUserAgent(),
+							},
+							body: JSON.stringify(requestBody),
+							signal: requestSignal,
+						});
 
-						let resp: Response | undefined;
-						let lastError: Error | undefined;
-
-						for (let i = 0; i < endpoints.length; i++) {
-							const endpoint = endpoints[i];
-							const isLastEndpoint = i === endpoints.length - 1;
+						if (!resp.ok) {
+							const errorText = await resp.text();
+							let message = errorText;
 							try {
-								resp = await fetchImpl(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {
-									method: "POST",
-									headers: {
-										Authorization: `Bearer ${bearer}`,
-										"Content-Type": "application/json",
-										Accept: "text/event-stream",
-										"User-Agent": getAntigravityUserAgent(),
-									},
-									body: JSON.stringify(requestBody),
-									signal: requestSignal,
-								});
-
-								if (resp.ok) {
-									break;
-								}
-
-								const errorText = await resp.text();
-								let message = errorText;
-								try {
-									const parsedErr = JSON.parse(errorText) as { error?: { message?: string } };
-									message = parsedErr.error?.message ?? message;
-								} catch {
-									// Keep raw text.
-								}
-
-								lastError = new ProviderHttpError(
-									`Antigravity image request failed (${resp.status}): ${message}`,
-									resp.status,
-									{ headers: resp.headers },
-								);
-
-								if (resp.status === 429 || (resp.status >= 500 && resp.status < 600)) {
-									if (!isLastEndpoint) {
-										continue;
-									}
-								}
-								break;
-							} catch (error) {
-								lastError = error as Error;
-								if (isLastEndpoint) {
-									break;
-								}
+								const parsedErr = JSON.parse(errorText) as { error?: { message?: string } };
+								message = parsedErr.error?.message ?? message;
+							} catch {
+								// Keep raw text.
 							}
+							throw new ProviderHttpError(
+								`Antigravity image request failed (${resp.status}): ${message}`,
+								resp.status,
+								{ headers: resp.headers },
+							);
 						}
-
-						if (!resp?.ok) {
-							throw lastError ?? new Error("Antigravity image generation failed");
-						}
-
 						return resp;
 					},
 					{ signal: requestSignal },
@@ -1276,7 +1238,7 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 				const xaiCreds = await resolveXAIHttpCredentials(ctx.modelRegistry, resolvedModel);
 				if (!xaiCreds) {
 					throw new Error(
-						"No xAI credentials. Run /login → xAI Grok OAuth (SuperGrok or X Premium+) or set XAI_API_KEY.",
+						"No xAI credentials. Run /login → xAI Grok OAuth (SuperGrok Subscription) or set XAI_API_KEY.",
 					);
 				}
 
@@ -1573,15 +1535,19 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 };
 
 export async function getImageGenTools(
-	_modelRegistry?: ModelRegistry,
-	_activeModel?: Model,
+	modelRegistry?: ModelRegistry,
+	activeModel?: Model,
 ): Promise<Array<CustomTool<typeof imageGenSchema, ImageGenToolDetails>>> {
+	const apiKey = await findImageApiKey(modelRegistry, activeModel);
+	if (!apiKey) return [];
 	return [imageGenTool];
 }
 
 export async function getImageGenToolsWithRegistry(
-	_modelRegistry: ModelRegistry,
-	_activeModel?: Model,
+	modelRegistry: ModelRegistry,
+	activeModel?: Model,
 ): Promise<Array<CustomTool<typeof imageGenSchema, ImageGenToolDetails>>> {
+	const apiKey = await findImageApiKey(modelRegistry, activeModel);
+	if (!apiKey) return [];
 	return [imageGenTool];
 }

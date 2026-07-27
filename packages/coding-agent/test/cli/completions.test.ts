@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as path from "node:path";
-import { buildSpec, type CompletionSpec, generateCompletion } from "@oh-my-pi/pi-coding-agent/cli/completion-gen";
-import type { CliConfig, CommandCtor } from "@oh-my-pi/pi-utils/cli";
+import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
+import { buildSpec, type CommandMeta, type CompletionSpec, generateCompletion } from "@oh-my-pi/pi-coding-agent/cli/completion-gen";
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..", "..", "..");
 const cliEntry = path.join(repoRoot, "packages", "coding-agent", "src", "cli.ts");
@@ -137,21 +137,13 @@ describe("generateCompletion — fish", () => {
 });
 
 describe("buildSpec", () => {
-	function fakeCmd(props: Partial<CommandCtor>): CommandCtor {
-		return props as unknown as CommandCtor;
-	}
-
 	it("lifts the root command's flags and excludes root + hidden from subcommands", () => {
-		const config: CliConfig = {
-			bin: "omp",
-			version: "0",
-			commands: new Map<string, CommandCtor>([
-				["launch", fakeCmd({ hidden: true, flags: { model: { kind: "string" } }, args: {} })],
-				["__complete", fakeCmd({ hidden: true, flags: {}, args: {} })],
-				["config", fakeCmd({ description: "Cfg", flags: { json: { kind: "boolean" } }, args: {} })],
-			]),
-		};
-		const result = buildSpec(config, "launch", new Map([["config", ["c"]]]));
+		const meta: CommandMeta[] = [
+			{ name: "launch", hidden: true, flags: [{ name: "model" }] },
+			{ name: "__complete", hidden: true },
+			{ name: "config", aliases: ["c"], description: "Cfg", flags: [{ name: "json", boolean: true }] },
+		];
+		const result = buildSpec("omp", meta, "launch");
 
 		expect(result.root.flags.map(f => f.name)).toContain("model");
 		// hidden (__complete) and the root entry (launch) are both dropped
@@ -159,27 +151,20 @@ describe("buildSpec", () => {
 		expect(result.commands[0]?.aliases).toEqual(["c"]);
 	});
 
-	it("classifies flag value sources from descriptor metadata", () => {
-		const config: CliConfig = {
-			bin: "omp",
-			version: "0",
-			commands: new Map<string, CommandCtor>([
-				[
-					"launch",
-					fakeCmd({
-						hidden: true,
-						flags: {
-							model: { kind: "string" },
-							thinking: { kind: "string", options: ["low", "high"] },
-							"no-tools": { kind: "boolean" },
-							"session-dir": { kind: "string" },
-						},
-						args: {},
-					}),
+	it("classifies flag value sources from owned metadata", () => {
+		const meta: CommandMeta[] = [
+			{
+				name: "launch",
+				hidden: true,
+				flags: [
+					{ name: "model" },
+					{ name: "thinking", options: ["low", "high"] },
+					{ name: "no-tools", boolean: true },
+					{ name: "session-dir" },
 				],
-			]),
-		};
-		const root = buildSpec(config, "launch", new Map()).root;
+			},
+		];
+		const root = buildSpec("omp", meta, "launch").root;
 		const byName = new Map(root.flags.map(f => [f.name, f.value.kind]));
 		expect(byName.get("model")).toBe("models");
 		expect(byName.get("thinking")).toBe("enum");
@@ -203,15 +188,15 @@ describe("omp completions (integration / drift)", () => {
 		]);
 		expect(exitCode).toBe(0);
 
-		// Real top-level flags from launch's static `flags` table. Flags with a
+		// Real top-level flags from the owned launch completion table. Flags with a
 		// short char render as `{-r,--resume}`, so only assert the bracket form for
 		// the long-only ones and check the char-paired form separately.
 		for (const flag of ["--model", "--thinking", "--mode", "--approval-mode", "--tools", "--no-tools"]) {
 			expect(stdout).toContain(`${flag}[`);
 		}
 		expect(stdout).toContain("{-r,--resume}");
-		// Real enum option sets flow through unchanged.
-		expect(stdout).toContain(":value:(off minimal low medium high xhigh max auto)");
+		// Real enum option sets flow through unchanged (sourced from the live catalog).
+		expect(stdout).toContain(`:value:(${THINKING_EFFORTS.join(" ")})`);
 		expect(stdout).toContain(":value:(always-ask write yolo)");
 		// Real subcommands present; dynamic callbacks wired.
 		expect(stdout).toContain("_omp_cmd_commit");

@@ -10,6 +10,7 @@ describe("prompt action autocomplete", () => {
 				"tui.editor.cursorLineStart": { defaultKeys: ["home", "f6"], description: "Move cursor to line start" },
 				"tui.editor.cursorLineEnd": { defaultKeys: "f7", description: "Move cursor to line end" },
 				"tui.editor.undo": { defaultKeys: "f8", description: "Undo" },
+				"tui.editor.expandPaste": { defaultKeys: "enter", description: "Expand paste marker for editing" },
 			}),
 		);
 	});
@@ -29,6 +30,7 @@ describe("prompt action autocomplete", () => {
 			copyCurrentLine: () => {},
 			copyPrompt: () => {},
 			undo: () => {},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},
@@ -42,6 +44,7 @@ describe("prompt action autocomplete", () => {
 			"Copy current line",
 			"Copy whole prompt",
 			"Undo",
+			"Expand paste for editing",
 			"Move cursor to end of message",
 			"Move cursor to beginning of message",
 			"Move cursor to beginning of line",
@@ -56,6 +59,7 @@ describe("prompt action autocomplete", () => {
 		);
 		expect(suggestions?.items.find(item => item.label === "Move cursor to end of line")?.description).toBe("F7");
 		expect(suggestions?.items.find(item => item.label === "Undo")?.description).toBe("F8");
+		expect(suggestions?.items.find(item => item.label === "Expand paste for editing")?.description).toBe("Enter");
 	});
 
 	it("passes the typed trigger to undo and leaves text removal to the editor", async () => {
@@ -71,6 +75,7 @@ describe("prompt action autocomplete", () => {
 				undoCalls += 1;
 				undoPrefix = prefix;
 			},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},
@@ -101,6 +106,7 @@ describe("prompt action autocomplete", () => {
 			copyCurrentLine: () => {},
 			copyPrompt: () => {},
 			undo: () => {},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},
@@ -111,80 +117,6 @@ describe("prompt action autocomplete", () => {
 		expect(suggestions).toBeNull();
 	});
 
-	it("treats # prompt-action tokens as literal text inside slash command arguments without completions", async () => {
-		const provider = createPromptActionAutocompleteProvider({
-			commands: [{ name: "rename", description: "Rename current session", allowArgs: true }],
-			basePath: "/tmp",
-			keybindings: AppKeybindingsManager.inMemory(),
-			copyCurrentLine: () => {},
-			copyPrompt: () => {},
-			undo: () => {},
-			moveCursorToMessageEnd: () => {},
-			moveCursorToMessageStart: () => {},
-			moveCursorToLineStart: () => {},
-			moveCursorToLineEnd: () => {},
-		});
-
-		const line = "/rename repro #copy";
-		const suggestions = await provider.getSuggestions([line], 0, line.length);
-
-		expect(suggestions).toBeNull();
-	});
-
-	it("returns # prompt-action completions for matched slash commands that reject arguments", async () => {
-		const provider = createPromptActionAutocompleteProvider({
-			commands: [{ name: "settings", description: "Open settings", allowArgs: false }],
-			basePath: "/tmp",
-			keybindings: AppKeybindingsManager.inMemory(),
-			copyCurrentLine: () => {},
-			copyPrompt: () => {},
-			undo: () => {},
-			moveCursorToMessageEnd: () => {},
-			moveCursorToMessageStart: () => {},
-			moveCursorToLineStart: () => {},
-			moveCursorToLineEnd: () => {},
-		});
-
-		const line = "/settings #copy";
-		const suggestions = await provider.getSuggestions([line], 0, line.length);
-
-		expect(suggestions?.prefix).toBe("#copy");
-		expect(suggestions?.items.map(item => item.label)).toEqual(["Copy current line", "Copy whole prompt"]);
-	});
-
-	it("returns slash command argument completions instead of # prompt actions when the command defines them", async () => {
-		const provider = createPromptActionAutocompleteProvider({
-			commands: [
-				{
-					name: "rename",
-					description: "Rename current session",
-					allowArgs: true,
-					getArgumentCompletions: argumentPrefix =>
-						argumentPrefix === "repro #copy"
-							? [{ value: "repro #copy-title", label: "Keep #copy in the title" }]
-							: null,
-				},
-			],
-			basePath: "/tmp",
-			keybindings: AppKeybindingsManager.inMemory(),
-			copyCurrentLine: () => {},
-			copyPrompt: () => {},
-			undo: () => {},
-			moveCursorToMessageEnd: () => {},
-			moveCursorToMessageStart: () => {},
-			moveCursorToLineStart: () => {},
-			moveCursorToLineEnd: () => {},
-		});
-
-		const line = "/rename repro #copy";
-		const suggestions = await provider.getSuggestions([line], 0, line.length);
-
-		expect(suggestions).toEqual({
-			prefix: "repro #copy",
-			items: [{ value: "repro #copy-title", label: "Keep #copy in the title" }],
-		});
-	});
-
 	it("delegates trySyncSlashCompletion to CombinedAutocompleteProvider", () => {
 		const provider = createPromptActionAutocompleteProvider({
 			commands: [{ name: "model", description: "Switch AI model" }],
@@ -193,6 +125,7 @@ describe("prompt action autocomplete", () => {
 			copyCurrentLine: () => {},
 			copyPrompt: () => {},
 			undo: () => {},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},
@@ -212,6 +145,7 @@ describe("prompt action autocomplete", () => {
 			copyCurrentLine: () => {},
 			copyPrompt: () => {},
 			undo: () => {},
+			expandPaste: () => {},
 			moveCursorToMessageEnd: () => {},
 			moveCursorToMessageStart: () => {},
 			moveCursorToLineStart: () => {},

@@ -18,7 +18,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 import type { MCPStdioServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
-import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
 const FIXTURE_PATH = path.join(import.meta.dir, "fixtures", "crash-after-init-mcp.ts");
 const BUN_EXEC = process.execPath;
@@ -34,7 +33,7 @@ describe("MCP reconnect storm (issue #1592)", () => {
 	});
 
 	afterEach(() => {
-		removeSyncWithRetries(workDir);
+		fs.rmSync(workDir, { recursive: true, force: true });
 	});
 
 	function countSpawns(): number {

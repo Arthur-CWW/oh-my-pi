@@ -294,7 +294,7 @@ async function renderSearch(
 	}
 
 	if (results.length > maxResults) {
-		md += `[…${results.length - maxResults} results elided…]\n`;
+		md += `... and ${results.length - maxResults} more results\n`;
 	}
 
 	return { content: md, ok: true };

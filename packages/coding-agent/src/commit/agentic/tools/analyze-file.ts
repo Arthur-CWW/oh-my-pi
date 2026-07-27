@@ -1,5 +1,5 @@
 import { prompt } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import analyzeFilePrompt from "../../../commit/agentic/prompts/analyze-file.md" with { type: "text" };
 import type { CommitAgentState } from "../../../commit/agentic/state";
 import type { NumstatEntry } from "../../../commit/types";
@@ -12,9 +12,9 @@ import type { TaskParams } from "../../../task/types";
 import type { ToolSession } from "../../../tools";
 import { getFilePriority } from "./git-file-diff";
 
-const analyzeFileSchema = type({
-	files: type("string").describe("file path").array().atLeastLength(1),
-	"goal?": type("string").describe("analysis focus"),
+const analyzeFileSchema = z.object({
+	files: z.array(z.string().describe("file path")).min(1),
+	goal: z.string().describe("analysis focus").optional(),
 });
 
 const analyzeFileOutputSchema = {
@@ -63,7 +63,7 @@ export function createAnalyzeFileTool(options: {
 	return {
 		name: "analyze_files",
 		label: "Analyze Files",
-		description: "Spawn sonic agents to analyze files.",
+		description: "Spawn quick_task agents to analyze files.",
 		parameters: analyzeFileSchema,
 		async execute(toolCallId, params, _onUpdate, ctx, signal) {
 			const toolSession = buildToolSession(ctx, options);
@@ -83,7 +83,7 @@ export function createAnalyzeFileTool(options: {
 						related_files: relatedFiles,
 					});
 					const taskParams: TaskParams = {
-						agent: "sonic",
+						agent: "quick_task",
 						id: `AnalyzeFile${index + 1}`,
 						description: `Analyze ${file}`,
 						assignment,

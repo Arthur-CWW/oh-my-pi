@@ -1,16 +1,16 @@
 import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { logger, untilAborted } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import { ensureBankExists } from "../hindsight/bank";
 import reflectDescription from "../prompts/tools/reflect.md" with { type: "text" };
 import type { ToolSession } from ".";
 
-const memoryReflectSchema = type({
-	query: type("string").describe("question to answer"),
-	"context?": type("string").describe("optional context"),
+const memoryReflectSchema = z.object({
+	query: z.string().describe("question to answer"),
+	context: z.string().describe("optional context").optional(),
 });
 
-export type MemoryReflectParams = typeof memoryReflectSchema.infer;
+export type MemoryReflectParams = z.infer<typeof memoryReflectSchema>;
 
 export class MemoryReflectTool implements AgentTool<typeof memoryReflectSchema> {
 	readonly name = "reflect";

@@ -59,23 +59,31 @@ export const shellFixtures: Record<string, GalleryFixture> = {
 	eval: {
 		label: "Eval",
 		streamingArgs: {
-			language: "py",
-			code: 'import json\nfrom pathlib import Path\n\ndata = json.loads(Path("package.js',
-			title: "load config",
+			cells: [
+				{
+					language: "py",
+					code: 'import json\nfrom pathlib import Path\n\ndata = json.loads(Path("package.js',
+					title: "load config",
+				},
+			],
 		},
 		args: {
-			language: "py",
-			title: "load config",
-			code: [
-				"import json",
-				"from pathlib import Path",
-				"",
-				'data = json.loads(Path("package.json").read_text())',
-				'deps = data.get("dependencies", {})',
-				'print(f"{data[\\"name\\"]} v{data[\\"version\\"]}")',
-				'print(f"{len(deps)} dependencies")',
-				"display(sorted(deps)[:3])",
-			].join("\n"),
+			cells: [
+				{
+					language: "py",
+					title: "load config",
+					code: [
+						"import json",
+						"from pathlib import Path",
+						"",
+						'data = json.loads(Path("package.json").read_text())',
+						'deps = data.get("dependencies", {})',
+						'print(f"{data[\\"name\\"]} v{data[\\"version\\"]}")',
+						'print(f"{len(deps)} dependencies")',
+						"display(sorted(deps)[:3])",
+					].join("\n"),
+				},
+			],
 		},
 		result: {
 			content: [

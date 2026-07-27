@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { type AuthBrokerServerHandle, startAuthBroker } from "@oh-my-pi/pi-ai/auth-broker";
+import { type AuthBrokerServerHandle, AuthStorage, SqliteAuthCredentialStore, startAuthBroker } from "@oh-my-pi/pi-ai";
 import { runAuthBrokerCommand } from "@oh-my-pi/pi-coding-agent/cli/auth-broker-cli";
-import { getAgentDbPath, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+import { getAgentDbPath, setAgentDir } from "@oh-my-pi/pi-utils";
 
 const ORIGINAL_STDOUT_WRITE = process.stdout.write.bind(process.stdout);
 
@@ -34,8 +33,8 @@ describe("auth-broker import (CLIProxyAPI)", () => {
 		process.stdout.write = ORIGINAL_STDOUT_WRITE;
 		if (originalAgentDir === undefined) delete process.env.OMP_AGENT_DIR;
 		else process.env.OMP_AGENT_DIR = originalAgentDir;
-		await removeWithRetries(agentDir);
-		await removeWithRetries(cliproxyDir);
+		await fs.rm(agentDir, { recursive: true, force: true });
+		await fs.rm(cliproxyDir, { recursive: true, force: true });
 	});
 
 	async function writeCliProxyJson(name: string, body: Record<string, unknown>): Promise<string> {
@@ -222,9 +221,9 @@ describe("auth-broker import (broker-routed)", () => {
 		await handle?.close();
 		brokerStorage?.close();
 		brokerStore?.close();
-		await removeWithRetries(agentDir);
-		await removeWithRetries(brokerAgentDir);
-		await removeWithRetries(cliproxyDir);
+		await fs.rm(agentDir, { recursive: true, force: true });
+		await fs.rm(brokerAgentDir, { recursive: true, force: true });
+		await fs.rm(cliproxyDir, { recursive: true, force: true });
 		for (const key of ["OMP_AUTH_BROKER_URL", "OMP_AUTH_BROKER_TOKEN"] as const) {
 			if (savedEnv[key] === undefined) delete process.env[key];
 			else process.env[key] = savedEnv[key];

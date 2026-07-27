@@ -16,7 +16,7 @@
  * itself stays credential-free.
  */
 import { readSseJson } from "@oh-my-pi/pi-utils";
-import * as AIError from "../error";
+import { ProviderHttpError } from "../errors";
 import type {
 	Api,
 	AssistantMessage,
@@ -26,9 +26,7 @@ import type {
 	Model,
 	SimpleStreamOptions,
 } from "../types";
-import { createAbortSourceTracker } from "../utils/abort";
 import { AssistantMessageEventStream } from "../utils/event-stream";
-import { getStreamFirstEventTimeoutMs, getStreamIdleTimeoutMs, iterateWithIdleTimeout } from "../utils/idle-iterator";
 
 /**
  * Fields that must not cross the wire — either non-serializable (functions,
@@ -49,13 +47,6 @@ const NON_WIRE_KEYS = new Set<keyof SimpleStreamOptions>([
 	"cursorOnToolResult",
 	"providerSessionState",
 ]);
-const PI_NATIVE_STREAM_IDLE_TIMEOUT_ERROR = "pi-native stream stalled while waiting for the next event";
-const PI_NATIVE_STREAM_FIRST_EVENT_TIMEOUT_ERROR = "pi-native stream timed out while waiting for the first event";
-
-function isPiNativeProgressEvent(event: unknown): boolean {
-	if (typeof event !== "object" || event === null || !("type" in event)) return true;
-	return event.type !== "start";
-}
 
 function buildWireOptions(options: SimpleStreamOptions | undefined): Record<string, unknown> {
 	if (!options) return {};
@@ -68,7 +59,19 @@ function buildWireOptions(options: SimpleStreamOptions | undefined): Record<stri
 	return wire;
 }
 
-async function decodeGatewayError(response: Response): Promise<AIError.AuthGatewayError> {
+/**
+ * Non-2xx response from the auth-gateway `/v1/pi/stream` endpoint. `code`
+ * carries the gateway's error-type token (`authentication_error`,
+ * `rate_limit_error`, `upstream_error`, ...).
+ */
+export class AuthGatewayError extends ProviderHttpError {
+	constructor(message: string, status: number, headers?: Headers, code?: string) {
+		super(message, status, { headers, code });
+		this.name = "AuthGatewayError";
+	}
+}
+
+async function decodeGatewayError(response: Response): Promise<AuthGatewayError> {
 	const status = response.status;
 	let body: unknown;
 	try {
@@ -81,7 +84,7 @@ async function decodeGatewayError(response: Response): Promise<AIError.AuthGatew
 		if (typeof err === "object" && err !== null) {
 			const message = (err as { message?: unknown }).message;
 			const type = (err as { type?: unknown }).type;
-			return new AIError.AuthGatewayError(
+			return new AuthGatewayError(
 				typeof message === "string" ? message : `auth-gateway ${status}`,
 				status,
 				response.headers,
@@ -90,11 +93,7 @@ async function decodeGatewayError(response: Response): Promise<AIError.AuthGatew
 		}
 	}
 	const text = typeof body === "string" ? body : JSON.stringify(body);
-	return new AIError.AuthGatewayError(
-		`auth-gateway ${status}: ${text || response.statusText}`,
-		status,
-		response.headers,
-	);
+	return new AuthGatewayError(`auth-gateway ${status}: ${text || response.statusText}`, status, response.headers);
 }
 
 /**
@@ -105,7 +104,7 @@ async function decodeGatewayError(response: Response): Promise<AIError.AuthGatew
  */
 function resolveStreamUrl(model: Model<Api>): string {
 	if (!model.baseUrl) {
-		throw new AIError.ConfigurationError(
+		throw new Error(
 			`pi-native transport requires \`baseUrl\` on model ${model.id} (set it on the provider config in models.yml)`,
 		);
 	}
@@ -143,8 +142,7 @@ export function streamPiNative<TApi extends Api>(
 	const stream = new AssistantMessageEventStream();
 
 	void (async () => {
-		const callerSignal = options?.signal;
-		const abortTracker = createAbortSourceTracker(callerSignal);
+		const signal = options?.signal;
 		// Abort propagation: cancel the response body when the caller's signal
 		// fires. Mirror `streamProxy`'s shape — explicit listener + finally
 		// cleanup — so we don't leak listeners on the long-running case.
@@ -153,16 +151,12 @@ export function streamPiNative<TApi extends Api>(
 			const body = response?.body;
 			if (body) body.cancel("Request aborted by caller").catch(() => {});
 		};
-		if (callerSignal) {
-			if (callerSignal.aborted) {
-				stream.fail(
-					callerSignal.reason instanceof Error
-						? callerSignal.reason
-						: new Error(String(callerSignal.reason ?? "aborted")),
-				);
+		if (signal) {
+			if (signal.aborted) {
+				stream.fail(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason ?? "aborted")));
 				return;
 			}
-			callerSignal.addEventListener("abort", onAbort, { once: true });
+			signal.addEventListener("abort", onAbort, { once: true });
 		}
 
 		try {
@@ -179,37 +173,21 @@ export function streamPiNative<TApi extends Api>(
 				stream: true,
 			});
 
-			response = await fetchImpl(url, { method: "POST", headers, body, signal: abortTracker.requestSignal });
+			response = await fetchImpl(url, { method: "POST", headers, body, signal });
 			if (!response.ok) {
 				stream.fail(await decodeGatewayError(response));
 				return;
 			}
 			if (!response.body) {
-				stream.fail(
-					new AIError.AuthGatewayError("auth-gateway returned empty body", response.status, response.headers),
-				);
+				stream.fail(new Error("auth-gateway returned empty body"));
 				return;
 			}
 
-			const idleTimeoutMs = options?.streamIdleTimeoutMs ?? getStreamIdleTimeoutMs();
-			const firstEventTimeoutMs = options?.streamFirstEventTimeoutMs ?? getStreamFirstEventTimeoutMs(idleTimeoutMs);
-			const source = readSseJson<AssistantMessageEvent>(
-				response.body as ReadableStream<Uint8Array>,
-				abortTracker.requestSignal,
-			);
-			const watchedSource = iterateWithIdleTimeout(source, {
-				idleTimeoutMs,
-				firstItemTimeoutMs: firstEventTimeoutMs,
-				errorMessage: PI_NATIVE_STREAM_IDLE_TIMEOUT_ERROR,
-				firstItemErrorMessage: PI_NATIVE_STREAM_FIRST_EVENT_TIMEOUT_ERROR,
-				onIdle: () =>
-					abortTracker.abortLocally(new AIError.StreamTimeoutError(PI_NATIVE_STREAM_IDLE_TIMEOUT_ERROR)),
-				onFirstItemTimeout: () =>
-					abortTracker.abortLocally(new AIError.StreamTimeoutError(PI_NATIVE_STREAM_FIRST_EVENT_TIMEOUT_ERROR)),
-				isProgressItem: isPiNativeProgressEvent,
-			});
 			let sawTerminal = false;
-			for await (const event of watchedSource) {
+			for await (const event of readSseJson<AssistantMessageEvent>(
+				response.body as ReadableStream<Uint8Array>,
+				signal,
+			)) {
 				if (event.type === "done" || event.type === "error") sawTerminal = true;
 				stream.push(event);
 				// `stream.push` resolves `.result()` on `done`/`error`; subsequent
@@ -223,7 +201,7 @@ export function streamPiNative<TApi extends Api>(
 				// so awaiters of `.result()` resolve instead of hanging forever.
 				// Matches the gateway's own defensive fallback in
 				// `pi-native-server.encodeStream`.
-				const aborted = abortTracker.wasCallerAbort();
+				const aborted = signal?.aborted === true;
 				const partial = makeSyntheticAssistant(model as Model<Api>);
 				if (aborted) {
 					partial.stopReason = "aborted";
@@ -238,7 +216,7 @@ export function streamPiNative<TApi extends Api>(
 		} catch (err) {
 			stream.fail(err);
 		} finally {
-			if (callerSignal) callerSignal.removeEventListener("abort", onAbort);
+			if (signal) signal.removeEventListener("abort", onAbort);
 		}
 	})();
 

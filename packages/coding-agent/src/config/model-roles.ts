@@ -13,7 +13,11 @@ export type ModelRole =
 	| "plan"
 	| "designer"
 	| "commit"
-	| "tiny"
+	| "title"
+	| "implementer"
+	| "qa"
+	| "operator"
+	| "synthesizer"
 	| "task"
 	| "advisor";
 
@@ -29,11 +33,16 @@ export const MODEL_ROLES: Record<ModelRole, ModelRoleInfo> = {
 	default: { tag: "DEFAULT", name: "Default", color: "success" },
 	smol: { tag: "SMOL", name: "Fast", color: "warning" },
 	slow: { tag: "SLOW", name: "Thinking", color: "accent" },
+	// Capability role for image inspection; model effort remains an independent setting.
 	vision: { tag: "VISION", name: "Vision", color: "error" },
 	plan: { tag: "PLAN", name: "Architect", color: "muted" },
 	designer: { tag: "DESIGNER", name: "Designer", color: "muted" },
 	commit: { tag: "COMMIT", name: "Commit", color: "dim" },
-	tiny: { tag: "TINY", name: "Tiny", color: "dim" },
+	title: { tag: "TITLE", name: "Title", color: "dim", hidden: true },
+	implementer: { tag: "IMPLEMENTER", name: "Implementer", color: "muted" },
+	qa: { tag: "QA", name: "QA", color: "warning" },
+	operator: { tag: "OPERATOR", name: "Operator", color: "muted" },
+	synthesizer: { tag: "SYNTHESIZER", name: "Synthesizer", color: "accent" },
 	task: { tag: "TASK", name: "Subtask", color: "muted" },
 	advisor: { tag: "ADVISOR", name: "Advisor", color: "accent" },
 };
@@ -46,7 +55,11 @@ export const MODEL_ROLE_IDS: ModelRole[] = [
 	"plan",
 	"designer",
 	"commit",
-	"tiny",
+	"title",
+	"implementer",
+	"qa",
+	"operator",
+	"synthesizer",
 	"task",
 	"advisor",
 ];

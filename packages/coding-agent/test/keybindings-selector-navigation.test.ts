@@ -1,4 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { ExtensionList } from "@oh-my-pi/pi-coding-agent/modes/components/extensions/extension-list";
@@ -12,7 +15,6 @@ import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storag
 import type { SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { setKeybindings } from "@oh-my-pi/pi-tui";
-import { TempDir } from "@oh-my-pi/pi-utils";
 
 const CTRL_N = "\x0e";
 const CTRL_P = "\x10";
@@ -21,7 +23,7 @@ const TEST_KEYBINDINGS = KeybindingsManager.inMemory({
 	"tui.select.down": "ctrl+n",
 });
 
-const tempDirs: TempDir[] = [];
+const tempDirs: string[] = [];
 
 beforeAll(() => {
 	initTheme();
@@ -30,8 +32,7 @@ beforeAll(() => {
 afterEach(async () => {
 	setKeybindings(KeybindingsManager.inMemory());
 	HistoryStorage.resetInstance();
-	await Bun.sleep(0);
-	await Promise.all(tempDirs.splice(0).map(tempDir => tempDir.remove().catch(() => {})));
+	await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
 });
 
 function createSession(id: string, title: string): SessionInfo {
@@ -82,10 +83,10 @@ function createExtension(id: string, displayName: string): Extension {
 }
 
 async function createHistoryStorage(prompts: string[]): Promise<HistoryStorage> {
-	const dir = TempDir.createSync("@omp-history-nav-");
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-history-nav-"));
 	tempDirs.push(dir);
 	HistoryStorage.resetInstance();
-	const storage = HistoryStorage.open(dir.join("history.db"));
+	const storage = HistoryStorage.open(path.join(dir, "history.db"));
 	// add() batches writes behind a 100ms AsyncDrain timer. Drive that timer with
 	// fake timers so the flush is instant instead of waiting real wall-clock time.
 	vi.useFakeTimers();

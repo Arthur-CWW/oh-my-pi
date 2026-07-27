@@ -8,10 +8,8 @@ import { resolveEvalBackends } from "@oh-my-pi/pi-coding-agent/tools/eval-backen
 
 let originalPiPy: string | undefined;
 let originalPiJs: string | undefined;
-let originalPiRb: string | undefined;
-let originalPiJl: string | undefined;
 
-function restoreEnv(name: "PI_PY" | "PI_JS" | "PI_RB" | "PI_JL", value: string | undefined): void {
+function restoreEnv(name: "PI_PY" | "PI_JS", value: string | undefined): void {
 	if (value === undefined) {
 		delete Bun.env[name];
 		return;
@@ -45,20 +43,14 @@ describe("EvalTool language dispatch", () => {
 	beforeEach(() => {
 		originalPiPy = Bun.env.PI_PY;
 		originalPiJs = Bun.env.PI_JS;
-		originalPiRb = Bun.env.PI_RB;
-		originalPiJl = Bun.env.PI_JL;
 		delete Bun.env.PI_PY;
 		delete Bun.env.PI_JS;
-		delete Bun.env.PI_RB;
-		delete Bun.env.PI_JL;
 	});
 
 	afterEach(() => {
 		vi.restoreAllMocks();
 		restoreEnv("PI_PY", originalPiPy);
 		restoreEnv("PI_JS", originalPiJs);
-		restoreEnv("PI_RB", originalPiRb);
-		restoreEnv("PI_JL", originalPiJl);
 	});
 
 	it('dispatches to the JS backend when cell.language === "js"', async () => {
@@ -67,8 +59,7 @@ describe("EvalTool language dispatch", () => {
 
 		const tool = new EvalTool(makeSession());
 		await tool.execute("call-js", {
-			language: "js",
-			code: "const x = 1;",
+			cells: [{ language: "js", code: "const x = 1;" }],
 		});
 
 		expect(jsExecuteSpy).toHaveBeenCalledTimes(1);
@@ -83,23 +74,26 @@ describe("EvalTool language dispatch", () => {
 
 		const tool = new EvalTool(makeSession());
 		await tool.execute("call-py", {
-			language: "py",
-			code: "print('hi')",
+			cells: [{ language: "py", code: "print('hi')" }],
 		});
 
 		expect(pythonExecuteSpy).toHaveBeenCalledTimes(1);
 		expect(jsExecuteSpy).not.toHaveBeenCalled();
 	});
 
-	it("dispatches each call to the backend named by its language", async () => {
+	it("interleaves backends across cells in a single call", async () => {
 		vi.spyOn(pyKernel, "checkPythonKernelAvailability").mockResolvedValue({ ok: true });
 		vi.spyOn(evalIndex.pythonBackend, "isAvailable").mockResolvedValue(true);
 		const pythonExecuteSpy = vi.spyOn(evalIndex.pythonBackend, "execute").mockResolvedValue(mockResult);
 		const jsExecuteSpy = vi.spyOn(evalIndex.jsBackend, "execute").mockResolvedValue(mockResult);
 
 		const tool = new EvalTool(makeSession());
-		await tool.execute("call-py", { language: "py", code: "x = 1" });
-		await tool.execute("call-js", { language: "js", code: "const y = 2;" });
+		await tool.execute("call-mixed", {
+			cells: [
+				{ language: "py", code: "x = 1" },
+				{ language: "js", code: "const y = 2;" },
+			],
+		});
 
 		expect(pythonExecuteSpy).toHaveBeenCalledTimes(1);
 		expect(jsExecuteSpy).toHaveBeenCalledTimes(1);
@@ -111,8 +105,7 @@ describe("EvalTool language dispatch", () => {
 		const tool = new EvalTool(makeSession(settings));
 		await expect(
 			tool.execute("call-py-disabled", {
-				language: "py",
-				code: "print('hi')",
+				cells: [{ language: "py", code: "print('hi')" }],
 			}),
 		).rejects.toThrow(/eval\.py = false/);
 	});
@@ -123,8 +116,7 @@ describe("EvalTool language dispatch", () => {
 		const tool = new EvalTool(makeSession(settings));
 		await expect(
 			tool.execute("call-js-disabled", {
-				language: "js",
-				code: "const x = 1;",
+				cells: [{ language: "js", code: "const x = 1;" }],
 			}),
 		).rejects.toThrow(/eval\.js = false/);
 	});
@@ -135,12 +127,7 @@ describe("EvalTool language dispatch", () => {
 		settings.set("eval.py", false);
 		settings.set("eval.js", false);
 
-		expect(resolveEvalBackends(makeSession(settings))).toEqual({
-			python: true,
-			js: false,
-			ruby: false,
-			julia: false,
-		});
+		expect(resolveEvalBackends(makeSession(settings))).toEqual({ python: true, js: false });
 	});
 
 	it("lets PI_JS disable js execution even when eval.js is enabled", async () => {
@@ -151,8 +138,7 @@ describe("EvalTool language dispatch", () => {
 
 		await expect(
 			tool.execute("call-js-env-disabled", {
-				language: "js",
-				code: "const x = 1;",
+				cells: [{ language: "js", code: "const x = 1;" }],
 			}),
 		).rejects.toThrow(/PI_JS=0/);
 	});

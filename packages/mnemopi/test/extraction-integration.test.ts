@@ -113,7 +113,7 @@ describe("extraction integration", () => {
 				const callback = handler as (...callbackArgs: unknown[]) => void;
 				queueMicrotask(() => callback(...args));
 			}
-			return 0 as unknown as Timer;
+			return 0 as unknown as ReturnType<typeof setTimeout>;
 		}) as typeof setTimeout;
 
 		class RateLimitedClient extends ExtractionClient {

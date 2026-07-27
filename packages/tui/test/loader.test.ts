@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, setSystemTime, spyOn, vi } from "bun:test";
-import { Container, TUI } from "@oh-my-pi/pi-tui";
+import { TUI } from "@oh-my-pi/pi-tui";
 import { Loader, type LoaderMessageColorFn } from "@oh-my-pi/pi-tui/components/loader";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
 import { VirtualTerminal } from "./virtual-terminal";
@@ -92,7 +92,7 @@ describe("Loader component", () => {
 	it("requests render when animated message bytes change between spinner frames", () => {
 		vi.useFakeTimers();
 		setSystemTime(new Date(1_000));
-		const ui = { synchronizedOutput: true, requestComponentRender: vi.fn() } as unknown as TUI;
+		const ui = { requestComponentRender: vi.fn() } as unknown as TUI;
 		const colorMessage = ((text: string) => `${text}-${Date.now()}`) as LoaderMessageColorFn & { animated: true };
 		colorMessage.animated = true;
 		const loader = new Loader(ui, text => text, colorMessage, "Checking", ["0"]);
@@ -102,26 +102,6 @@ describe("Loader component", () => {
 		vi.advanceTimersByTime(34);
 		expect(ui.requestComponentRender).toHaveBeenCalledTimes(2);
 		expect(loader.render(40).join("\n")).toContain("0 Checking-");
-
-		loader.stop();
-	});
-
-	it("holds animated message-only frames when synchronized output is unavailable", () => {
-		vi.useFakeTimers();
-		setSystemTime(new Date(1_000));
-		const ui = { synchronizedOutput: false, requestComponentRender: vi.fn() } as unknown as TUI;
-		const colorMessage = ((text: string) => `${text}-${Date.now()}`) as LoaderMessageColorFn & { animated: true };
-		colorMessage.animated = true;
-		const loader = new Loader(ui, text => text, colorMessage, "Checking", ["0", "1"]);
-
-		expect(ui.requestComponentRender).toHaveBeenCalledTimes(1);
-
-		vi.advanceTimersByTime(34);
-		expect(ui.requestComponentRender).toHaveBeenCalledTimes(1);
-
-		vi.advanceTimersByTime(67);
-		expect(ui.requestComponentRender).toHaveBeenCalledTimes(2);
-		expect(loader.render(40).join("\n")).toContain("1 Checking-");
 
 		loader.stop();
 	});
@@ -142,30 +122,6 @@ describe("Loader component", () => {
 		await Bun.sleep(40); // longer than the spinner interval
 		expect(spy.mock.calls.length).toBe(after);
 		expect(() => loader.dispose()).not.toThrow(); // idempotent
-		tui.stop();
-	});
-
-	it("container disposeChildren stops detached loader repaints", () => {
-		vi.useFakeTimers();
-		const term = new VirtualTerminal(20, 4);
-		const tui = new TUI(term);
-		const spy = spyOn(tui, "requestComponentRender");
-		const container = new Container();
-		const loader = new Loader(
-			tui,
-			text => text,
-			text => text,
-			"Checking",
-			["0", "1"],
-		);
-		container.addChild(loader);
-		const afterMount = spy.mock.calls.length;
-
-		container.disposeChildren();
-		vi.advanceTimersByTime(200);
-
-		expect(spy.mock.calls.length).toBe(afterMount);
-		expect(container.children).toEqual([]);
 		tui.stop();
 	});
 });

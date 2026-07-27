@@ -1,14 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type ExtensionModule, extensionModuleCapability } from "@oh-my-pi/pi-coding-agent/capability/extension-module";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getCapability, initializeWithSettings } from "@oh-my-pi/pi-coding-agent/discovery";
-import {
-	discoverAndLoadExtensions,
-	discoverExtensionPaths,
-	loadExtensions,
-} from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
+import { discoverAndLoadExtensions, loadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import { filterUserScoped } from "./utils/filter-user-extensions";
 
@@ -20,10 +13,8 @@ describe("extensions discovery", () => {
 		tempDir = TempDir.createSync("@pi-ext-test-");
 		extensionsDir = path.join(getProjectAgentDir(tempDir.path()), "extensions");
 		fs.mkdirSync(extensionsDir, { recursive: true });
-		resetSettingsForTest();
 	});
 	afterEach(() => {
-		resetSettingsForTest();
 		tempDir.removeSync();
 	});
 
@@ -31,8 +22,8 @@ describe("extensions discovery", () => {
 		const result = await discoverAndLoadExtensions(configuredPaths, tempDir.path());
 		return {
 			...result,
-			extensions: filterUserScoped(result.extensions, [tempDir.path(), ...configuredPaths]),
-			errors: filterUserScoped(result.errors, [tempDir.path(), ...configuredPaths]),
+			extensions: filterUserScoped(result.extensions),
+			errors: filterUserScoped(result.errors),
 		};
 	};
 
@@ -158,7 +149,7 @@ describe("extensions discovery", () => {
 
 		expect(result.errors).toHaveLength(0);
 		expect(result.extensions).toHaveLength(1);
-		expect(result.extensions[0].path).toContain(path.join("linked-package", "src", "main.ts"));
+		expect(result.extensions[0].path).toContain("linked-package/src/main.ts");
 	});
 
 	it("discovers index.ts in a symlinked extension directory", async () => {
@@ -171,7 +162,7 @@ describe("extensions discovery", () => {
 
 		expect(result.errors).toHaveLength(0);
 		expect(result.extensions).toHaveLength(1);
-		expect(result.extensions[0].path).toContain(path.join("linked-index-ts", "index.ts"));
+		expect(result.extensions[0].path).toContain("linked-index-ts/index.ts");
 	});
 
 	it("discovers index.js in a symlinked extension directory", async () => {
@@ -184,7 +175,7 @@ describe("extensions discovery", () => {
 
 		expect(result.errors).toHaveLength(0);
 		expect(result.extensions).toHaveLength(1);
-		expect(result.extensions[0].path).toContain(path.join("linked-index-js", "index.js"));
+		expect(result.extensions[0].path).toContain("linked-index-js/index.js");
 	});
 
 	it("package.json can declare multiple extensions", async () => {
@@ -447,7 +438,7 @@ describe("extensions discovery", () => {
 
 	it("resolves 3rd party npm dependencies (chalk)", async () => {
 		// Load the real chalk-logger extension from examples
-		const chalkLoggerPath = path.resolve(import.meta.dirname, "..", "examples", "extensions", "chalk-logger.ts");
+		const chalkLoggerPath = path.resolve(import.meta.dirname, "../examples/extensions/chalk-logger.ts");
 
 		const result = await discoverForTest([chalkLoggerPath]);
 
@@ -600,59 +591,6 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].handlers.has("agent_end")).toBe(true);
 	});
 
-	it("loads hookCapability JS factories as extension handlers", async () => {
-		const hookDir = path.join(getProjectAgentDir(tempDir.path()), "hooks", "pre");
-		fs.mkdirSync(hookDir, { recursive: true });
-		const hookPath = path.join(hookDir, "guard-test.ts");
-		fs.writeFileSync(
-			hookPath,
-			`
-				export default function(pi) {
-					pi.on("tool_call", async () => ({ block: true, reason: "blocked by hook" }));
-				}
-			`,
-		);
-
-		const result = await discoverForTest();
-		const loadedHook = result.extensions.find(extension => extension.path === hookPath);
-
-		expect(result.errors).toHaveLength(0);
-		expect(loadedHook).toBeDefined();
-		expect(loadedHook?.handlers.has("tool_call")).toBe(true);
-	});
-
-	it("keeps discovered hooks separate from disabled extension-module ids", async () => {
-		const extensionPath = path.join(extensionsDir, "guard.ts");
-		fs.writeFileSync(extensionPath, extensionCode);
-
-		const hookDir = path.join(getProjectAgentDir(tempDir.path()), "hooks", "pre");
-		fs.mkdirSync(hookDir, { recursive: true });
-		const hookPath = path.join(hookDir, "guard.ts");
-		fs.writeFileSync(
-			hookPath,
-			`
-				export default function(pi) {
-					pi.on("tool_call", async () => ({ block: true, reason: "blocked by hook" }));
-				}
-			`,
-		);
-
-		const settings = await Settings.init({
-			inMemory: true,
-			cwd: tempDir.path(),
-			overrides: { disabledExtensions: ["extension-module:guard"] },
-		});
-		initializeWithSettings(settings);
-
-		const result = await discoverForTest();
-		const loadedHook = result.extensions.find(extension => extension.path === hookPath);
-
-		expect(result.errors).toHaveLength(0);
-		expect(result.extensions.find(extension => extension.path === extensionPath)).toBeUndefined();
-		expect(loadedHook).toBeDefined();
-		expect(loadedHook?.handlers.has("tool_call")).toBe(true);
-	});
-
 	it("loads extension with shortcuts", async () => {
 		const extCode = `
 			export default function(pi) {
@@ -715,33 +653,5 @@ describe("extensions discovery", () => {
 
 		expect(result.errors).toHaveLength(0);
 		expect(result.extensions).toHaveLength(0);
-	});
-	it("discoverExtensionPaths only invokes the native extension-module provider (#4198)", async () => {
-		// The extension-module capability has multiple providers
-		// (native, claude, codex, gemini, opencode), but discoverExtensionPaths
-		// only surfaces native-provider paths. Regression: pre-fix it still
-		// invoked every provider's load() and then dropped foreign items,
-		// running four unused directory walks per startup (worst on Windows).
-		const capability = getCapability<ExtensionModule>(extensionModuleCapability.id);
-		expect(capability, "extension-modules capability must be registered").toBeDefined();
-
-		const providers = capability?.providers ?? [];
-		const foreignIds = providers.map(p => p.id).filter(id => id !== "native");
-		// Guard the invariant this test is defending — without foreign providers
-		// the test would trivially pass and hide a future regression.
-		expect(foreignIds.length).toBeGreaterThan(0);
-
-		const spies = providers.map(provider => vi.spyOn(provider, "load"));
-		try {
-			await discoverExtensionPaths([], tempDir.path());
-
-			const callsById = new Map(providers.map((provider, i) => [provider.id, spies[i].mock.calls.length]));
-			expect(callsById.get("native")).toBe(1);
-			for (const id of foreignIds) {
-				expect(callsById.get(id), `foreign provider ${id} must not be walked`).toBe(0);
-			}
-		} finally {
-			for (const spy of spies) spy.mockRestore();
-		}
 	});
 });

@@ -12,7 +12,11 @@ afterAll(async () => {
 	await initTheme();
 });
 
-function createSession(id: string, status: SessionStatus | undefined): SessionInfo {
+function createSession(
+	id: string,
+	status: SessionStatus | undefined,
+	workstream?: SessionInfo["workstream"],
+): SessionInfo {
 	return {
 		path: `/work/${id}.jsonl`,
 		id,
@@ -25,6 +29,7 @@ function createSession(id: string, status: SessionStatus | undefined): SessionIn
 		firstMessage: `first message ${id}`,
 		allMessagesText: `first message ${id}`,
 		status,
+		workstream,
 	};
 }
 
@@ -44,6 +49,22 @@ function renderPlain(sessions: SessionInfo[]): string {
 		.join("\n")
 		.replace(/\x1b\[[0-9;]*m/g, "");
 }
+
+describe("SessionSelectorComponent workstream badges", () => {
+	it("renders the workstream slug and adhoc badges without classifying legacy sessions", () => {
+		const rendered = renderPlain([
+			createSession("harness", undefined, { kind: "workstream", id: "harness" }),
+			createSession("adhoc", undefined, { kind: "adhoc" }),
+		]);
+
+		expect(rendered).toContain("[harness]");
+		expect(rendered).toContain("[adhoc]");
+
+		const legacy = renderPlain([createSession("legacy", undefined)]);
+		expect(legacy).not.toContain("[harness]");
+		expect(legacy).not.toContain("[adhoc]");
+	});
+});
 
 describe("SessionSelectorComponent status labels", () => {
 	it("renders each derived status as a themed glyph + label on the metadata line", () => {
@@ -86,5 +107,23 @@ describe("SessionSelectorComponent status labels", () => {
 		for (const label of ["done", "interrupted", "aborted", "error", "pending"]) {
 			expect(rendered).not.toContain(label);
 		}
+	});
+});
+
+describe("SessionSelectorComponent owner identity", () => {
+	it("renders the active owner pid, cwd, mux hint, and start time", () => {
+		const session = createSession("owned", "pending");
+		session.owner = {
+			ownerEpoch: "owner-epoch",
+			pid: 4242,
+			cwd: "/w",
+			startedAt: "2026-07-12T13:40:00.000Z",
+			muxHint: "tab-7",
+		};
+		const rendered = renderPlain([session]);
+		expect(rendered).toContain("active pid 4242");
+		expect(rendered).toContain("/w");
+		expect(rendered).toContain("mux tab-7");
+		expect(rendered).toContain("started 2026-07-12T13:40:00.000Z");
 	});
 });

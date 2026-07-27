@@ -3,6 +3,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tool-execution";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import type { TranscriptDisplayContext } from "@oh-my-pi/pi-coding-agent/modes/transcript-display";
 import { Text, type TUI } from "@oh-my-pi/pi-tui";
 
 /**
@@ -51,10 +52,14 @@ describe("ToolExecutionComponent tool-result render memoization", () => {
 		return { content: [{ type: "text", text }] };
 	}
 
+	function makeUi(requestComponentRender: () => void = () => {}): TUI {
+		return { requestRender() {}, requestComponentRender } as unknown as TUI;
+	}
+
 	it("re-shapes once per meaningful change, never per invalidate() frame", () => {
 		const tool = makeShapingTool();
 		const shapeSpy = vi.spyOn(tool, "renderResult");
-		const ui = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+		const ui = makeUi();
 
 		const component = new ToolExecutionComponent(
 			"custom_render",
@@ -108,7 +113,7 @@ describe("ToolExecutionComponent tool-result render memoization", () => {
 			},
 		};
 		const callSpy = vi.spyOn(tool, "renderCall");
-		const ui = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+		const ui = makeUi();
 
 		const component = new ToolExecutionComponent(
 			"custom_render",
@@ -143,6 +148,61 @@ describe("ToolExecutionComponent tool-result render memoization", () => {
 		expect(callSpy.mock.calls.length).toBe(afterReal);
 	});
 
+	it("re-shapes when transcript display settings mutate", () => {
+		let transcriptWrap = false;
+		let richTranscript = true;
+		const transcriptDisplay: TranscriptDisplayContext = {
+			get transcriptWrap() {
+				return transcriptWrap;
+			},
+			get richTranscript() {
+				return richTranscript;
+			},
+		};
+		const tool = {
+			name: "custom_render",
+			label: "Custom",
+			renderResult(
+				_result: unknown,
+				options: { transcriptDisplay?: TranscriptDisplayContext },
+			): Text {
+				const display = options.transcriptDisplay;
+				return new Text(
+					`display:${display?.transcriptWrap ? "wrapped" : "single-line"}:${display?.richTranscript ? "rich" : "plain"}`,
+					0,
+					0,
+				);
+			},
+		};
+		const shapeSpy = vi.spyOn(tool, "renderResult");
+		const ui = makeUi();
+		const component = new ToolExecutionComponent(
+			"custom_render",
+			{},
+			{ transcriptDisplay },
+			tool as unknown as AgentTool,
+			ui,
+			process.cwd(),
+		);
+
+		component.updateResult(finalResult("RESULT"), false);
+		expect(shapeSpy).toHaveBeenCalledTimes(1);
+		expect(stripVTControlCharacters(component.render(80).join("\n"))).toContain("display:single-line:rich");
+
+		transcriptWrap = true;
+		component.invalidate();
+		expect(shapeSpy).toHaveBeenCalledTimes(2);
+		expect(stripVTControlCharacters(component.render(80).join("\n"))).toContain("display:wrapped:rich");
+
+		richTranscript = false;
+		component.invalidate();
+		expect(shapeSpy).toHaveBeenCalledTimes(3);
+		expect(stripVTControlCharacters(component.render(80).join("\n"))).toContain("display:wrapped:plain");
+
+		component.invalidate();
+		expect(shapeSpy).toHaveBeenCalledTimes(3);
+	});
+
 	// Regression: freezing a backgrounded task (seal()) flips #backgroundTaskFrozen,
 	// which the render context consumes (context.frozen) — so it must be in the memo
 	// key. The bug: the key omitted it, so once the display was built seal()'s
@@ -150,7 +210,8 @@ describe("ToolExecutionComponent tool-result render memoization", () => {
 	it("re-shapes when a background task freezes via seal(), not only on key fields", () => {
 		const tool = makeShapingTool();
 		const shapeSpy = vi.spyOn(tool, "renderResult");
-		const ui = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+		const requestComponentRender = vi.fn();
+		const ui = makeUi(requestComponentRender);
 
 		const component = new ToolExecutionComponent(
 			"custom_render",
@@ -171,5 +232,6 @@ describe("ToolExecutionComponent tool-result render memoization", () => {
 		// change), so the memo must still re-shape to settle the row to its frozen form.
 		component.seal();
 		expect(shapeSpy.mock.calls.length).toBe(afterResult + 1);
+		expect(requestComponentRender).toHaveBeenCalledTimes(1);
 	});
 });

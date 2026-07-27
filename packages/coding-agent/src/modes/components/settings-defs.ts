@@ -68,16 +68,7 @@ export interface TextInputSettingDef extends BaseSettingDef {
 	type: "text";
 }
 
-export interface ProviderLimitsSettingDef extends BaseSettingDef {
-	type: "providerLimits";
-}
-
-export type SettingDef =
-	| BooleanSettingDef
-	| EnumSettingDef
-	| SubmenuSettingDef
-	| TextInputSettingDef
-	| ProviderLimitsSettingDef;
+export type SettingDef = BooleanSettingDef | EnumSettingDef | SubmenuSettingDef | TextInputSettingDef;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Condition Functions
@@ -85,13 +76,6 @@ export type SettingDef =
 
 const CONDITIONS: Record<string, () => boolean> = {
 	hasImageProtocol: () => !!TERMINAL.imageProtocol,
-	advisorEnabled: () => {
-		try {
-			return Settings.instance.get("advisor.enabled") === true;
-		} catch {
-			return false;
-		}
-	},
 	hindsightActive: () => {
 		try {
 			return Settings.instance.get("memory.backend") === "hindsight";
@@ -177,10 +161,6 @@ function pathToSettingDef(path: SettingPath): SettingDef | null {
 			return { ...base, type: "submenu", options };
 		}
 		return { ...base, type: "text" };
-	}
-
-	if (schemaType === "record") {
-		return path === "providers.maxInFlightRequests" ? { ...base, type: "providerLimits" } : { ...base, type: "text" };
 	}
 
 	return null;

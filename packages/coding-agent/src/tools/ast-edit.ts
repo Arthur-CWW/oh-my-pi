@@ -6,7 +6,7 @@ import { type AstReplaceChange, type AstReplaceFileChange, astEdit } from "@oh-m
 import type { Component } from "@oh-my-pi/pi-tui";
 import { replaceTabs, Text } from "@oh-my-pi/pi-tui";
 import { $envpos, prompt, untilAborted } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import { canonicalSnapshotKey, getFileSnapshotStore } from "../edit/file-snapshot-store";
 import { normalizeToLF } from "../edit/normalize";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
@@ -16,7 +16,6 @@ import { Ellipsis, fileHyperlink, framedBlock, renderStatusLine, truncateToWidth
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import type { ToolSession } from ".";
 import { truncateForPrompt } from "./approval";
-import { parseReadUrlTarget } from "./fetch";
 import { createFileRecorder, formatResultPath } from "./file-recorder";
 import { classifyGroupedLines, formatGroupedFiles, groupLineIndicesByBlank } from "./grouped-file-output";
 import type { OutputMeta } from "./output-meta";
@@ -36,17 +35,16 @@ import { queueResolveHandler } from "./resolve";
 import { ToolError } from "./tool-errors";
 import { toolResult } from "./tool-result";
 
-const astEditOpSchema = type({
-	pat: type("string").describe("ast pattern"),
-	out: type("string").describe("replacement template"),
+const astEditOpSchema = z.object({
+	pat: z.string().describe("ast pattern"),
+	out: z.string().describe("replacement template"),
 });
 
-const astEditSchema = type({
-	ops: astEditOpSchema.array().atLeastLength(1).describe("rewrite ops"),
-	paths: type("string")
-		.describe("file, directory, glob, or internal URL to rewrite")
-		.array()
-		.atLeastLength(1)
+const astEditSchema = z.object({
+	ops: z.array(astEditOpSchema).min(1).describe("rewrite ops"),
+	paths: z
+		.array(z.string().describe("file, directory, glob, or internal URL to rewrite"))
+		.min(1)
 		.describe("files, directories, globs, or internal URLs to rewrite"),
 });
 
@@ -167,18 +165,16 @@ export interface AstEditToolDetails {
 	cwd?: string;
 }
 
-type AstEditSchemaInfer = typeof astEditSchema.infer;
-
 export class AstEditTool implements AgentTool<typeof astEditSchema, AstEditToolDetails> {
 	readonly name = "ast_edit";
 	readonly approval = (args: unknown) => {
-		const paths = Array.isArray((args as Partial<AstEditSchemaInfer>).paths)
-			? ((args as Partial<AstEditSchemaInfer>).paths as string[])
+		const paths = Array.isArray((args as Partial<z.infer<typeof astEditSchema>>).paths)
+			? ((args as Partial<z.infer<typeof astEditSchema>>).paths as string[])
 			: [];
 		return paths.length > 0 && paths.every(path => isInternalUrlPath(path)) ? "read" : "write";
 	};
 	readonly formatApprovalDetails = (args: unknown): string[] => {
-		const params = args as Partial<AstEditSchemaInfer>;
+		const params = args as Partial<z.infer<typeof astEditSchema>>;
 		const lines: string[] = [];
 		const ops = Array.isArray(params.ops) ? params.ops : [];
 		const firstOp = ops[0];
@@ -200,7 +196,7 @@ export class AstEditTool implements AgentTool<typeof astEditSchema, AstEditToolD
 	readonly parameters = astEditSchema;
 	readonly strict = true;
 
-	readonly examples: readonly ToolExample<AstEditSchemaInfer>[] = [
+	readonly examples: readonly ToolExample<z.input<typeof astEditSchema>>[] = [
 		{
 			caption: "Rename a call site across TypeScript files",
 			call: {
@@ -252,7 +248,7 @@ export class AstEditTool implements AgentTool<typeof astEditSchema, AstEditToolD
 
 	async execute(
 		_toolCallId: string,
-		params: AstEditSchemaInfer,
+		params: z.infer<typeof astEditSchema>,
 		signal?: AbortSignal,
 		_onUpdate?: AgentToolUpdateCallback<AstEditToolDetails>,
 		_context?: AgentToolContext,
@@ -284,13 +280,6 @@ export class AstEditTool implements AgentTool<typeof astEditSchema, AstEditToolD
 				settings: this.session.settings,
 				signal,
 				localProtocolOptions: this.session.localProtocolOptions,
-				skills: this.session.skills,
-				resolveExternalUrl: async rawPath => {
-					if (!parseReadUrlTarget(rawPath)) return undefined;
-					throw new ToolError(
-						`Cannot rewrite external URL: ${rawPath}. Use \`read\` or \`search\` to inspect fetched web content; ast_edit only applies to local files.`,
-					);
-				},
 			});
 			const { searchPath: resolvedSearchPath, scopePath, isDirectory, multiTargets, globFilter } = scope;
 
@@ -692,7 +681,7 @@ export const astEditToolRenderer = {
 		}
 		return framedBlock(uiTheme, width => {
 			const changeLines = buildChangeBody(changeGroups, Boolean(options.expanded), COLLAPSED_CHANGE_LIMIT, uiTheme);
-			const innerWidth = Math.max(1, width - 3);
+			const innerWidth = Math.max(1, width - 1);
 			const bodyLines = [...changeLines, ...extraLines].map(l => truncateToWidth(l, innerWidth, Ellipsis.Omit));
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
 			return {

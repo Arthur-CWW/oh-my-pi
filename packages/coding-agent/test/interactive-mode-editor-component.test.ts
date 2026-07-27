@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { resetSettingsForTest, settings, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { CustomEditor } from "@oh-my-pi/pi-coding-agent/modes/components/custom-editor";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -73,4 +73,30 @@ describe("InteractiveMode.setEditorComponent", () => {
 		expect(mode.editor.onEscape).toBeDefined();
 		expect(refreshSpy).toHaveBeenCalled();
 	});
+	it("preserves the compact borderless frame across replacement and status refreshes", () => {
+		settings.set("statusLine.preset", "compact");
+		mode.statusLine.updateSettings({ preset: "compact" });
+		mode.setEditorComponent((_tui, editorTheme) => new TestModalEditor(editorTheme));
+
+		mode.updateEditorTopBorder();
+		mode.updateEditorBorderColor();
+		mode.statusLine.setGoalModeStatus({ enabled: true, paused: false });
+		mode.updateEditorTopBorder();
+
+		const rendered = mode.editor.render(80).join("\n");
+		expect(rendered).not.toMatch(/[╭╮╰╯]/);
+		expect(rendered).toContain("❯");
+	});
+	it("falls through to editor history when dequeue declines Alt+Up", () => {
+		const editor = mode.editor;
+		editor.addToHistory("older prompt");
+		editor.setText("");
+		editor.setActionKeys("app.message.dequeue", ["alt+up"]);
+		editor.onDequeue = () => false;
+
+		editor.handleInput("\x1b[1;3A");
+
+		expect(editor.getText()).toBe("older prompt");
+	});
+
 });

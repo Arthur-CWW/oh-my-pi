@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, postmortem } from "@oh-my-pi/pi-utils";
 import type { Subprocess } from "bun";
 import type { Browser, CDPSession } from "puppeteer-core";
 import { ToolAbortError, ToolError } from "../tool-errors";
@@ -7,6 +7,11 @@ import { findFreeCdpPort, findReusableCdp, gracefulKillTreeOnce, killExistingByP
 import type { CmuxKind } from "./cmux/rpc";
 import { CmuxSocketClient } from "./cmux/socket-client";
 import { BROWSER_PROTOCOL_TIMEOUT_MS, launchHeadlessBrowser, loadPuppeteer, type UserAgentOverride } from "./launch";
+import {
+	recordOwnedBrowserActiveTabs,
+	removeOwnedBrowserProfile,
+	type OwnedBrowserProfile,
+} from "./process-ownership";
 
 export type PuppeteerBrowserKind =
 	| { kind: "headless"; headless: boolean }
@@ -29,6 +34,7 @@ export interface PuppeteerBrowserHandle extends BrowserHandleCommon {
 	cdpUrl?: string;
 	pid?: number;
 	subprocess?: Subprocess;
+	ownership?: OwnedBrowserProfile;
 	stealth: { browserSession: CDPSession | null; override: UserAgentOverride | null };
 }
 
@@ -41,6 +47,7 @@ export interface CmuxBrowserHandle extends BrowserHandleCommon {
 export type BrowserHandle = PuppeteerBrowserHandle | CmuxBrowserHandle;
 
 const browsers = new Map<string, BrowserHandle>();
+const activeTabUpdates = new WeakMap<BrowserHandle, Promise<void>>();
 
 function browserKey(kind: BrowserKind): string {
 	switch (kind.kind) {
@@ -57,9 +64,12 @@ function browserKey(kind: BrowserKind): string {
 
 export interface AcquireBrowserOptions {
 	cwd: string;
+	sessionId: string;
 	viewport?: { width: number; height: number; deviceScaleFactor?: number };
 	appArgs?: string[];
 	signal?: AbortSignal;
+	maxOwnedPerSession?: number;
+	maxOwnedGlobal?: number;
 }
 
 export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOptions): Promise<BrowserHandle> {
@@ -71,28 +81,8 @@ export async function acquireBrowser(kind: BrowserKind, opts: AcquireBrowserOpti
 		browsers.delete(key);
 		await disposeBrowserHandle(existing, { kill: false });
 	}
-	// Short-circuit before launching: the tool wrapper's `untilAborted` only
-	// rejects its outer promise on abort; without this check `openBrowserHandle`
-	// would still fire and its result would land in `browsers` below.
-	if (opts.signal?.aborted) throw new ToolAbortError("Browser open aborted");
 
 	const handle = await openBrowserHandle(kind, opts);
-	// The launch may resolve AFTER the caller has already aborted (the outer
-	// `untilAborted` rejects immediately on abort but does not cancel the
-	// inner promise, and `launchHeadlessBrowser` does not accept a signal).
-	// Without this branch the completed handle sits in `browsers` at
-	// refCount:0 forever — no tab ever takes a hold, `releaseBrowser` never
-	// fires, and `releaseAllTabs` walks `tabs`, not `browsers`, so the
-	// orphaned Chromium/app process / puppeteer handle survives to process
-	// exit. (Issue #3963.)
-	if (opts.signal?.aborted) {
-		await disposeBrowserHandle(handle, { kill: kind.kind === "spawned" }).catch(err => {
-			logger.debug("Failed to dispose orphan browser after abort", {
-				error: err instanceof Error ? err.message : String(err),
-			});
-		});
-		throw new ToolAbortError("Browser open aborted");
-	}
 	browsers.set(key, handle);
 	return handle;
 }
@@ -120,11 +110,19 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 		};
 	}
 	if (kind.kind === "headless") {
-		const browser = await launchHeadlessBrowser({ headless: kind.headless, viewport: opts.viewport });
+		const launch = await launchHeadlessBrowser({
+			headless: kind.headless,
+			sessionId: opts.sessionId,
+			viewport: opts.viewport,
+			maxOwnedPerSession: opts.maxOwnedPerSession,
+			maxOwnedGlobal: opts.maxOwnedGlobal,
+		});
 		return {
 			key: browserKey(kind),
 			kind,
-			browser,
+			browser: launch.browser,
+			pid: launch.pid,
+			ownership: launch.ownership,
 			refCount: 0,
 			stealth: { browserSession: null, override: null },
 		};
@@ -212,10 +210,12 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 
 export function holdBrowser(handle: BrowserHandle): void {
 	handle.refCount++;
+	updateOwnedBrowserActiveTabs(handle);
 }
 
 export async function releaseBrowser(handle: BrowserHandle, opts: { kill: boolean }): Promise<void> {
 	handle.refCount = Math.max(0, handle.refCount - 1);
+	updateOwnedBrowserActiveTabs(handle);
 	if (handle.refCount === 0) {
 		// Only evict if the registry still points at THIS handle. After a disconnect,
 		// `acquireBrowser` may have already replaced the entry with a fresh live handle
@@ -225,18 +225,33 @@ export async function releaseBrowser(handle: BrowserHandle, opts: { kill: boolea
 	}
 }
 
+export async function disposeAllBrowsers(): Promise<void> {
+	const handles = [...browsers.values()];
+	browsers.clear();
+	const results = await Promise.allSettled(handles.map(handle => disposeBrowserHandle(handle, { kill: true })));
+	for (const result of results) {
+		if (result.status === "rejected") {
+			logger.debug("Failed to dispose browser during shutdown", { error: String(result.reason) });
+		}
+	}
+}
+
 async function disposeBrowserHandle(handle: BrowserHandle, opts: { kill: boolean }): Promise<void> {
 	if ("client" in handle) {
 		handle.client.close();
 		return;
 	}
 	if (handle.kind.kind === "headless") {
-		if (handle.browser.connected) {
-			try {
-				await handle.browser.close();
-			} catch (err) {
-				logger.debug("Failed to close headless browser", { error: (err as Error).message });
+		try {
+			if (handle.browser.connected) {
+				const close = handle.browser.close().catch(err => {
+					logger.debug("Failed to close headless browser", { error: (err as Error).message });
+				});
+				await Promise.race([close, Bun.sleep(2000)]);
 			}
+			if (handle.pid !== undefined) await gracefulKillTreeOnce(handle.pid);
+		} finally {
+			await removeOwnedBrowserProfile(handle.ownership);
 		}
 		return;
 	}
@@ -257,10 +272,21 @@ async function disposeBrowserHandle(handle: BrowserHandle, opts: { kill: boolean
 			logger.debug("Failed to disconnect from spawned browser", { error: (err as Error).message });
 		}
 	}
-	if (opts.kill && handle.pid !== undefined) await gracefulKillTreeOnce(handle.pid);
+	if (opts.kill && handle.subprocess) await gracefulKillTreeOnce(handle.subprocess.pid);
 }
 
-/** Test-only accessor for the module-global browsers map. */
-export function getBrowsersMapForTest(): ReadonlyMap<string, BrowserHandle> {
-	return browsers;
+postmortem.register("browser-processes", disposeAllBrowsers);
+
+function updateOwnedBrowserActiveTabs(handle: BrowserHandle): void {
+	if (!("browser" in handle) || handle.kind.kind !== "headless") return;
+	const ownership = handle.ownership;
+	if (!ownership) return;
+	const previous = activeTabUpdates.get(handle) ?? Promise.resolve();
+	const update = previous
+		.catch(() => undefined)
+		.then(() => recordOwnedBrowserActiveTabs(ownership, handle.refCount));
+	activeTabUpdates.set(handle, update);
+	void update.catch(error => {
+		logger.debug("Failed to update owned browser activity", { error: String(error) });
+	});
 }

@@ -15,7 +15,6 @@ try {
  * lightweight CLI runner from pi-utils.
  */
 import { parentPort } from "node:worker_threads";
-import type { CliConfig } from "@oh-my-pi/pi-utils/cli";
 import {
 	APP_NAME,
 	getActiveProfile,
@@ -43,15 +42,6 @@ process.title = APP_NAME;
 // `@oh-my-pi/pi-utils/env` eagerly loads `.env` from the agent directory at
 // import time, so it must not be imported before `setProfile` runs.
 
-async function showHelp(config: CliConfig): Promise<void> {
-	const { renderRootHelp } = await import("@oh-my-pi/pi-utils/cli");
-	const { getExtraHelpText } = await import("./cli/args");
-	renderRootHelp(config);
-	const extra = getExtraHelpText();
-	if (extra.trim().length > 0) {
-		process.stdout.write(`\n${extra}\n`);
-	}
-}
 /**
  * Smoke-test entry. Spawns bundled workers, serves the stats dashboard once,
  * pings everything, then exits.
@@ -68,7 +58,6 @@ async function runSmokeTest(): Promise<void> {
 	const { smokeTestTinyTitleWorker } = await import("./tiny/title-client");
 	const { smokeTestSttWorker } = await import("./stt/asr-client");
 	const { smokeTestTtsWorker } = await import("./tts/tts-client");
-	const { smokeTestMnemopiEmbedWorker } = await import("./mnemopi/embed-client");
 	const { smokeTestJsEvalWorker } = await import("./eval/js/context-manager");
 	await smokeTestSyncWorker();
 
@@ -88,7 +77,6 @@ async function runSmokeTest(): Promise<void> {
 	await smokeTestSttWorker();
 	await smokeTestJsEvalWorker();
 	await smokeTestTtsWorker();
-	await smokeTestMnemopiEmbedWorker();
 	process.stdout.write("smoke-test: ok\n");
 }
 
@@ -98,7 +86,7 @@ const TAB_WORKER_ARG = "__omp_worker_tab";
 const JS_EVAL_WORKER_ARG = "__omp_worker_js_eval";
 const STT_WORKER_ARG = "__omp_worker_stt";
 const TTS_WORKER_ARG = "__omp_worker_tts";
-const MNEMOPI_EMBED_WORKER_ARG = "__omp_worker_mnemopi_embed";
+const TASK_SPAWN_WORKER_ARG = "__omp_worker_task_spawn";
 
 async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 	if (arg === TINY_WORKER_ARG) {
@@ -112,8 +100,8 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 		// this dispatch completes — so anything the parent posted right after
 		// spawning (the smoke ping, the first parse request) would be dropped.
 		// Park early events and replay them once the module's handler is live.
-		// Worker-thread entries using `parentPort` need the same sync-prefix
-		// buffering; the tab/eval cases install that inbox below before import.
+		// (The tab/eval workers are immune: `parentPort.on("message")` queues
+		// until a listener attaches.)
 		const scope = globalThis as unknown as { onmessage: ((event: MessageEvent) => void) | null };
 		const pending: MessageEvent[] = [];
 		const buffer = (event: MessageEvent): void => {
@@ -154,9 +142,9 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
 		await runIpcSubprocessWorker(startTtsWorker);
 		return true;
 	}
-	if (arg === MNEMOPI_EMBED_WORKER_ARG) {
-		const { startMnemopiEmbedWorker } = await import("./mnemopi/embed-worker");
-		await runIpcSubprocessWorker(startMnemopiEmbedWorker);
+	if (arg === TASK_SPAWN_WORKER_ARG) {
+		const { startSpawnWorker } = await import("./task/spawn-worker-entry");
+		await startSpawnWorker();
 		return true;
 	}
 	return false;
@@ -173,20 +161,14 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
  * worker is idle, and hard-kills the process on parent `disconnect`.
  */
 async function runIpcSubprocessWorker<In, Out>(
-	start: (transport: {
-		send(message: Out): void;
-		sendAndFlush(message: Out): Promise<void>;
-		onMessage(handler: (message: In) => void): () => void;
-	}) => void,
+	start: (transport: { send(message: Out): void; onMessage(handler: (message: In) => void): () => void }) => void,
 ): Promise<void> {
 	const { promise: shuttingDown, resolve: shutdown } = Promise.withResolvers<void>();
-	type IpcSend = (this: NodeJS.Process, message: unknown, callback?: (error: Error | null) => void) => boolean;
-	// `process.send` only exists when spawned with an IPC channel; the parent
-	// always spawns us that way. If it's missing, the parent vanished and
-	// there's no one to talk to.
-	const ipcSend = (): IpcSend | undefined => (process as NodeJS.Process & { send?: IpcSend }).send;
 	const send = (message: Out): void => {
-		const sender = ipcSend();
+		// `process.send` only exists when spawned with an IPC channel; the
+		// parent always spawns us that way. If it's missing, the parent
+		// vanished and there's no one to talk to.
+		const sender = (process as NodeJS.Process & { send?: (m: unknown) => boolean }).send;
 		if (!sender) {
 			shutdown();
 			return;
@@ -197,24 +179,8 @@ async function runIpcSubprocessWorker<In, Out>(
 			shutdown();
 		}
 	};
-	const sendAndFlush = (message: Out): Promise<void> => {
-		const sender = ipcSend();
-		if (!sender) {
-			shutdown();
-			return Promise.resolve();
-		}
-		const { promise, resolve } = Promise.withResolvers<void>();
-		try {
-			sender.call(process, message, () => resolve());
-		} catch {
-			shutdown();
-			resolve();
-		}
-		return promise;
-	};
 	start({
 		send,
-		sendAndFlush,
 		onMessage(handler) {
 			const wrap = (data: unknown): void => handler(data as In);
 			process.on("message", wrap);
@@ -250,7 +216,25 @@ async function runTinyWorker(): Promise<void> {
 }
 
 /** Run the CLI with the given argv (no `process.argv` prefix). */
+const RUNNER_BUILD_REVISION_FLAG = "--runner-build-revision";
+const RUNNER_CANARY_WORKER_FLAG = "--runner-canary-readiness-worker";
+
+async function runRunnerCanaryEntrypoint(argv: string[]): Promise<boolean> {
+	if (argv.length === 1 && argv[0] === RUNNER_BUILD_REVISION_FLAG) {
+		const { candidateBuildRevision } = await import("./runner/canary-readiness-worker");
+		process.stdout.write(`${JSON.stringify(candidateBuildRevision())}\n`);
+		return true;
+	}
+	if (argv[0] === RUNNER_CANARY_WORKER_FLAG) {
+		const { runCandidateReadinessWorker } = await import("./runner/canary-readiness-worker");
+		await runCandidateReadinessWorker(argv.slice(1));
+		return true;
+	}
+	return false;
+}
+
 export async function runCli(argv: string[]): Promise<void> {
+	if (await runRunnerCanaryEntrypoint(argv)) return;
 	let resolvedArgv = argv;
 	try {
 		const extracted = extractProfileFlags(resolvedArgv);
@@ -299,37 +283,55 @@ export async function runCli(argv: string[]): Promise<void> {
 	// top-level evaluation finishes.
 	if (resolvedArgv[0]?.startsWith("__omp_worker_")) {
 		await runWorkerEntrypoint(resolvedArgv[0]);
+		if (resolvedArgv[0] === TASK_SPAWN_WORKER_ARG) process.exit(0);
 		return;
 	}
 
 	// Declare this module as the worker-host entry now that the active profile
 	// is resolved. The worker-host module is side-effect-free; importing
 	// `@oh-my-pi/pi-utils/env` here would snapshot the wrong agent `.env`.
-	// Gated on `import.meta.main`: only the real CLI process entry is a valid
-	// worker host. Worker-thread re-entry already returned above at the
-	// `__omp_worker_` dispatch, and importers (`runCli` in profile-CLI tests,
-	// SDK embedding) have `import.meta.main === false` — declaring there would
-	// poison `workerHostEntry()` for the whole test process, forcing eval/stats/
-	// browser workers onto the same-realm inline fallback.
-	if (import.meta.main) declareWorkerHostEntry();
+	declareWorkerHostEntry();
 
 	if (resolvedArgv[0] === "--smoke-test") {
 		await runSmokeTest();
 		return;
 	}
-	const [{ run }, { commands, resolveCliArgv }] = await Promise.all([
-		import("@oh-my-pi/pi-utils/cli"),
-		import("./cli-commands"),
-	]);
-	// --help and --version are handled by run() directly, don't rewrite those.
-	// Everything else that isn't a known subcommand routes to "launch".
+	// --help and --version pass through untouched; everything that is not a known
+	// subcommand routes to "launch".
+	const { commands, resolveCliArgv } = await import("./cli-commands");
 	const resolved = resolveCliArgv(resolvedArgv);
 	if ("error" in resolved) {
 		process.stderr.write(`error: ${resolved.error}\n`);
 		process.exitCode = 1;
 		return;
 	}
-	return run({ bin: APP_NAME, version: VERSION, argv: resolved.argv, commands, help: showHelp });
+	// launch/acp tolerate unknown extension flags and hand raw argv to the
+	// two-pass reparse in runRootCommand — semantics Effect's strict handler
+	// dispatch cannot express — so their execution forks here to the exported
+	// raw-argv runners. Their descriptors remain in the registry only for root
+	// help and shell completions. Everything else (root help/version, the
+	// join/setup handlers, and every other Effect descriptor) dispatches
+	// through the foundation run().
+	const [command, ...commandArgs] = resolved.argv;
+	if (command === "launch") {
+		const { runLaunch } = await import("./commands/launch");
+		return runLaunch(commandArgs);
+	}
+	if (command === "acp") {
+		const { runAcp } = await import("./commands/acp");
+		return runAcp(commandArgs);
+	}
+	const { run } = await import("@oh-my-pi/pi-utils/cli");
+	return run({
+		bin: APP_NAME,
+		version: VERSION,
+		argv: resolved.argv,
+		commands,
+		extraHelp: async () => {
+			const { getExtraHelpText } = await import("./cli/args");
+			return getExtraHelpText();
+		},
+	});
 }
 
 // Floating call instead of top-level await: TLA forces `--bytecode` (CJS

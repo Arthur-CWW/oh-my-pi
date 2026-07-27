@@ -37,7 +37,6 @@ export function readArgsTargetInternalUrl(args: unknown): boolean {
 type ReadRenderArgs = {
 	path?: string;
 	file_path?: string;
-	selector?: string;
 	// Legacy field from the old schema; tolerated for rebuilt transcripts.
 	sel?: string;
 };
@@ -58,7 +57,6 @@ type ReadToolResultDetails = {
 	displayContent?: {
 		text?: string;
 		startLine?: number;
-		lineNumbers?: Array<number | null>;
 	};
 	meta?: {
 		source?: {
@@ -88,8 +86,6 @@ type ReadEntry = {
 	correctedFrom?: string;
 	contentText?: string;
 	conflictCount?: number;
-	codeStartLine?: number;
-	codeLineNumbers?: Array<number | null>;
 };
 
 /** Number of code lines to show in collapsed preview mode */
@@ -345,10 +341,7 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 	updateArgs(args: ReadRenderArgs, toolCallId?: string): void {
 		if (!toolCallId) return;
 		const basePath = args.file_path || args.path || "";
-		const rawSelector =
-			typeof args.selector === "string" ? args.selector : typeof args.sel === "string" ? args.sel : undefined;
-		const selector = rawSelector?.trim().replace(/^:+/, "");
-		const rawPath = selector && selector.length > 0 ? `${basePath}:${selector}` : basePath;
+		const rawPath = args.sel ? `${basePath}:${args.sel}` : basePath;
 		const entry: ReadEntry = this.#entries.get(toolCallId) ?? {
 			toolCallId,
 			path: rawPath,
@@ -386,12 +379,11 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		entry.status = result.isError ? "error" : suffixResolution ? "warning" : "success";
 		// Store clean display content for preview/expanded display when the read
 		// tool provides it; fall back to model-facing text for legacy results.
-		const displayContent = details?.displayContent;
+		const displayContent =
+			typeof details?.displayContent?.text === "string" ? details.displayContent.text : undefined;
 		const textContent = result.content?.find(c => c.type === "text")?.text;
 		if (displayContent !== undefined || textContent !== undefined) {
-			entry.contentText = displayContent?.text ?? textContent;
-			entry.codeStartLine = displayContent?.startLine;
-			entry.codeLineNumbers = displayContent?.lineNumbers;
+			entry.contentText = displayContent ?? textContent;
 		}
 		this.#updateDisplay();
 	}
@@ -445,8 +437,8 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		const entriesWithoutPreview = entries.filter(entry => !this.#shouldRenderPreview(entry));
 		const summaryTargets = this.#displayTargetsForEntries(entriesWithoutPreview);
 		const rows = this.#buildSummaryRows(summaryTargets);
-		for (const [index, row] of rows.entries()) {
-			this.#appendSummaryRow(lines, row, index, rows.length);
+		for (const row of rows) {
+			this.#appendSummaryRow(lines, row);
 		}
 
 		this.#text.setText(lines.join("\n"));
@@ -521,9 +513,8 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		return rows;
 	}
 
-	#appendSummaryRow(lines: string[], row: ReadSummaryRow, index: number, total: number): void {
-		const connector = index === total - 1 ? theme.tree.last : theme.tree.branch;
-		lines.push(`   ${theme.fg("dim", connector)} ${this.#formatRow(row)}`.trimEnd());
+	#appendSummaryRow(lines: string[], row: ReadSummaryRow): void {
+		lines.push(`      ${this.#formatRow(row)}`.trimEnd());
 	}
 
 	#formatRow(row: ReadSummaryRow): string {
@@ -644,8 +635,6 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 						status: entry.status === "success" ? "complete" : entry.status,
 						expanded,
 						codeMaxLines: expanded ? undefined : COLLAPSED_PREVIEW_LINES,
-						codeStartLine: entry.codeStartLine,
-						codeLineNumbers: entry.codeLineNumbers,
 						width,
 					},
 					theme,

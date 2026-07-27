@@ -1,19 +1,21 @@
 import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import retainDescription from "../prompts/tools/retain.md" with { type: "text" };
 import type { ToolSession } from ".";
 
-const memoryRetainSchema = type({
-	items: type({
-		content: type("string").describe("information to remember"),
-		"context?": type("string").describe("source context"),
-	})
-		.array()
-		.atLeastLength(1)
+const memoryRetainSchema = z.object({
+	items: z
+		.array(
+			z.object({
+				content: z.string().describe("information to remember"),
+				context: z.string().describe("source context").optional(),
+			}),
+		)
+		.min(1)
 		.describe("memories to retain"),
 });
 
-export type MemoryRetainParams = typeof memoryRetainSchema.infer;
+export type MemoryRetainParams = z.infer<typeof memoryRetainSchema>;
 export class MemoryRetainTool implements AgentTool<typeof memoryRetainSchema> {
 	readonly name = "retain";
 	readonly approval = "read" as const;

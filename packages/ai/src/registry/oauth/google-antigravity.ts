@@ -3,7 +3,6 @@
  * Uses different OAuth credentials than google-gemini-cli for access to additional models.
  */
 import { getAntigravityUserAgent } from "@oh-my-pi/pi-catalog/wire/gemini-headers";
-import * as AIError from "../../error";
 import { runGoogleOAuthLogin } from "./google-oauth-shared";
 import type { OAuthController, OAuthCredentials } from "./types";
 
@@ -90,10 +89,7 @@ async function onboardProjectWithRetries(
 
 		if (!onboardResponse.ok) {
 			const errorText = await onboardResponse.text();
-			throw new AIError.OAuthError(
-				`onboardUser failed: ${onboardResponse.status} ${onboardResponse.statusText}: ${errorText}`,
-				{ kind: "provisioning", status: onboardResponse.status },
-			);
+			throw new Error(`onboardUser failed: ${onboardResponse.status} ${onboardResponse.statusText}: ${errorText}`);
 		}
 
 		const operation = (await onboardResponse.json()) as LongRunningOperationResponse;
@@ -107,9 +103,8 @@ async function onboardProjectWithRetries(
 		}
 	}
 
-	throw new AIError.OAuthError(
+	throw new Error(
 		`onboardUser did not return a provisioned project id after ${PROJECT_ONBOARD_MAX_ATTEMPTS} attempts`,
-		{ kind: "provisioning" },
 	);
 }
 
@@ -133,10 +128,7 @@ async function discoverProject(accessToken: string, onProgress?: (message: strin
 
 		if (!loadResponse.ok) {
 			const errorText = await loadResponse.text();
-			throw new AIError.OAuthError(
-				`loadCodeAssist failed: ${loadResponse.status} ${loadResponse.statusText}: ${errorText}`,
-				{ kind: "discovery", status: loadResponse.status },
-			);
+			throw new Error(`loadCodeAssist failed: ${loadResponse.status} ${loadResponse.statusText}: ${errorText}`);
 		}
 
 		const loadPayload = (await loadResponse.json()) as LoadCodeAssistPayload;
@@ -154,9 +146,8 @@ async function discoverProject(accessToken: string, onProgress?: (message: strin
 		const provisionedProject = await onboardProjectWithRetries(endpoint, headers, onboardBody, onProgress);
 		return provisionedProject;
 	} catch (error) {
-		throw new AIError.OAuthError(
+		throw new Error(
 			`Could not discover or provision an Antigravity project. ${error instanceof Error ? error.message : String(error)}`,
-			{ kind: "discovery", cause: error },
 		);
 	}
 }
@@ -191,7 +182,7 @@ export async function refreshAntigravityToken(refreshToken: string, projectId: s
 
 	if (!response.ok) {
 		const error = await response.text();
-		throw new AIError.OAuthError(`Antigravity token refresh failed: ${error}`, { kind: "token-refresh" });
+		throw new Error(`Antigravity token refresh failed: ${error}`);
 	}
 
 	const data = (await response.json()) as {

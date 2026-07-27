@@ -117,27 +117,14 @@ class CountingViewportTerminal extends VirtualTerminal {
 	}
 }
 
-class LegacyKeyboardVirtualTerminal extends VirtualTerminal {
-	get keyboardEnhancementEnterSequence(): string | null {
-		return undefined as unknown as string | null;
-	}
-
-	get keyboardEnhancementExitSequence(): string | null {
-		return undefined as unknown as string | null;
-	}
-}
-
 function rows(prefix: string, count: number): string[] {
 	return Array.from({ length: count }, (_v, i) => `${prefix}${i}`);
 }
 
 async function settle(term: VirtualTerminal): Promise<void> {
-	// The render scheduler defers its immediate hop with setImmediate (so queued
-	// stdin such as Esc is read before an ordinary render). Drain that hop so the
-	// throttled setTimeout(0) render is scheduled, let it fire, then flush.
-	const immediate = Promise.withResolvers<void>();
-	setImmediate(immediate.resolve);
-	await immediate.promise;
+	const nextTick = Promise.withResolvers<void>();
+	process.nextTick(nextTick.resolve);
+	await nextTick.promise;
 	await Bun.sleep(1);
 	await term.flush();
 }
@@ -201,18 +188,10 @@ async function withEnvPatch<T>(patch: Record<string, string | undefined>, run: (
 
 describe("TUI terminal-state regressions", () => {
 	let monotonicNow = 0;
-	let savedTerminalEnv: Record<string, string | undefined> = {};
 	// Keep TUI's ~33ms render throttle deterministic without sleeping a real frame per render.
 
 	beforeEach(() => {
 		monotonicNow = 0;
-		// Resize classification now depends on TERM_PROGRAM (Warp takes the
-		// in-place path), so neutralize the ambient terminal identity to keep
-		// these direct-terminal assertions deterministic on any dev machine.
-		for (const key of ["TERM_PROGRAM", "PI_TUI_RESIZE_IN_PLACE"]) {
-			savedTerminalEnv[key] = Bun.env[key];
-			delete Bun.env[key];
-		}
 		vi.spyOn(performance, "now").mockImplementation(() => {
 			monotonicNow += 40;
 			return monotonicNow;
@@ -220,12 +199,6 @@ describe("TUI terminal-state regressions", () => {
 	});
 
 	afterEach(() => {
-		for (const key in savedTerminalEnv) {
-			const value = savedTerminalEnv[key];
-			if (value === undefined) delete Bun.env[key];
-			else Bun.env[key] = value;
-		}
-		savedTerminalEnv = {};
 		vi.restoreAllMocks();
 	});
 
@@ -432,7 +405,7 @@ describe("TUI terminal-state regressions", () => {
 				tui.resetDisplay();
 				await settle(term);
 
-				expect(writes.some(write => write.includes("\x1b[H\x1b[3J") && !write.includes("\x1b[2J"))).toBe(true);
+				expect(writes.some(write => write.includes("\x1b[2J\x1b[H\x1b[3J"))).toBe(true);
 				expect(term.getScrollBuffer().map(line => line.trimEnd())).toEqual(rows("L", 8));
 				expect(visible(term)).toEqual(["L5", "L6", "L7"]);
 			} finally {
@@ -1357,28 +1330,24 @@ describe("TUI terminal-state regressions", () => {
 			}
 		});
 
-		it("uses ED3 without blanking the viewport for destructive rebuilds even when CSI 22 J is supported", async () => {
+		it("uses ED3 for destructive rebuilds even when CSI 22 J is supported", async () => {
 			const saved = TERMINAL.supportsScreenToScrollback;
 			setTerminalScreenToScrollback(true);
 			const term = new VirtualTerminal(20, 3);
 			const tui = new TUI(term);
-			const component = new MutableLinesComponent(rows("line-", 6));
-			tui.addChild(component);
+			tui.addChild(new MutableLinesComponent(rows("line-", 6)));
 			const writes = captureWrites(term);
 
 			try {
 				tui.start();
 				await settle(term);
 				writes.length = 0;
-				component.setLines(["new"]);
 
 				tui.requestRender(true, { clearScrollback: true });
 				await settle(term);
 				const out = writes.join("");
-				expect(out).toContain("\x1b[H\x1b[3J");
-				expect(out).not.toContain("\x1b[2J");
+				expect(out).toContain("\x1b[2J\x1b[H\x1b[3J");
 				expect(out).not.toContain("\x1b[22J");
-				expect(visible(term)).toEqual(["new", "", ""]);
 			} finally {
 				tui.stop();
 				setTerminalScreenToScrollback(saved);
@@ -3267,10 +3236,10 @@ describe("TUI terminal-state regressions", () => {
 				// is per-screen, so without this Esc reverts to legacy bare \x1b
 				// inside fullscreen overlays (settings Esc bug).
 				expect(modalWrites).toContain("\x1b[?1049h\x1b[>1u");
-				// … enabled mouse tracking for click/scroll/hover support …
-				expect(modalWrites).toContain("\x1b[?1000h");
-				expect(modalWrites).toContain("\x1b[?1003h"); // any-motion tracking drives hover
-				expect(modalWrites).toContain("\x1b[?1006h");
+				// Mouse tracking is opt-in so fullscreen startup preserves native selection/copy.
+				expect(modalWrites).not.toContain("\x1b[?1000h");
+				expect(modalWrites).not.toContain("\x1b[?1003h");
+				expect(modalWrites).not.toContain("\x1b[?1006h");
 				// … and never erased scrollback (ED3) or otherwise touched the transcript.
 				expect(modalWrites).not.toContain("\x1b[3J");
 				expect(visible(term).some(line => line.includes("MODAL-0"))).toBeTrue();
@@ -3283,10 +3252,8 @@ describe("TUI terminal-state regressions", () => {
 				expect(hideWrites).toContain("\x1b[?1049l");
 				// The alt screen's kitty frame is popped before leaving it.
 				expect(hideWrites).toContain("\x1b[<u\x1b[?1049l");
-				// Mouse tracking is disabled again so the rest of the app keeps native
-				// terminal selection.
-				expect(hideWrites).toContain("\x1b[?1003l"); // motion tracking torn down too
-				expect(hideWrites).toContain("\x1b[?1000l");
+				expect(hideWrites).not.toContain("\x1b[?1003l");
+				expect(hideWrites).not.toContain("\x1b[?1000l");
 				// Transcript is back on the normal screen after leaving the alt buffer.
 				expect(visible(term).some(line => line.includes("base-"))).toBeTrue();
 				expect(visible(term).some(line => line.includes("MODAL-0"))).toBeFalse();
@@ -3295,60 +3262,62 @@ describe("TUI terminal-state regressions", () => {
 			}
 		});
 
-		it("falls back to kittyEnableSequence for legacy custom terminals", async () => {
-			const term = new LegacyKeyboardVirtualTerminal(40, 8, 200);
+		it("emits mouse reporting only when explicitly enabled", async () => {
+			const term = new VirtualTerminal(40, 8, 200);
 			const writes = captureWrites(term);
-			const tui = new TUI(term);
-			tui.addChild(new MutableLinesComponent(rows("base-", 8)));
-
+			const tui = new TUI(term, undefined, { mouseTracking: true });
 			try {
 				tui.start();
 				await settle(term);
-
 				const showFrom = writes.length;
-				tui.showOverlay(new MutableLinesComponent(["MODAL-0"]), {
-					width: "100%",
-					maxHeight: "100%",
-					margin: 0,
-					fullscreen: true,
-				});
+				const handle = tui.showOverlay(new MutableLinesComponent(["MODAL"]), { fullscreen: true });
 				await settle(term);
-
 				const modalWrites = writes.slice(showFrom).join("");
-				expect(modalWrites).toContain("\x1b[?1049h\x1b[>1u");
+				expect(modalWrites).toContain("\x1b[?1000h");
+				expect(modalWrites).toContain("\x1b[?1003h");
+				expect(modalWrites).toContain("\x1b[?1006h");
+				handle.hide();
+				await settle(term);
 			} finally {
 				tui.stop();
 			}
 		});
 
-		it("leaves native scrollback untouched across the modal lifetime", async () => {
-			const term = new VirtualTerminal(40, 6, 200);
-			const tui = new TUI(term);
-			// Base transcript overflows the viewport, so rows land in scrollback.
-			tui.addChild(new MutableLinesComponent(rows("base-", 24)));
+		it("preserves both a followed tail and a scrolled-up reader across the modal lifetime", async () => {
+			for (const readerState of ["at-bottom", "scrolled-up"] as const) {
+				const term = new VirtualTerminal(40, 6, 200);
+				const tui = new TUI(term);
+				// Base transcript overflows the viewport, so rows land in scrollback.
+				tui.addChild(new MutableLinesComponent(rows("base-", 24)));
 
-			try {
-				tui.start();
-				await settle(term);
-				const scrollbackBefore = term.getScrollBuffer().map(line => line.trimEnd());
+				try {
+					tui.start();
+					await settle(term);
+					if (readerState === "scrolled-up") {
+						term.scrollLines(-3);
+						await term.flush();
+					}
+					const viewportBefore = term.getBufferPosition().viewportY;
+					const scrollbackBefore = term.getScrollBuffer().map(line => line.trimEnd());
+					expect(term.isNativeViewportAtBottom()).toBe(readerState === "at-bottom");
 
-				const handle = tui.showOverlay(new MutableLinesComponent(["MODAL"]), {
-					anchor: "bottom-center",
-					width: "100%",
-					maxHeight: "100%",
-					margin: 0,
-					fullscreen: true,
-				});
-				await settle(term);
-				handle.hide();
-				await settle(term);
+					const handle = tui.showOverlay(new MutableLinesComponent(["MODAL"]), {
+						anchor: "bottom-center",
+						width: "100%",
+						maxHeight: "100%",
+						margin: 0,
+						fullscreen: true,
+					});
+					await settle(term);
+					handle.hide();
+					await settle(term);
 
-				// The modal borrowed/returned the alt buffer without rewriting the
-				// normal screen's scrollback — the transcript a reader scrolled up to
-				// see is identical before and after.
-				expect(term.getScrollBuffer().map(line => line.trimEnd())).toEqual(scrollbackBefore);
-			} finally {
-				tui.stop();
+					expect(term.getBufferPosition().viewportY).toBe(viewportBefore);
+					expect(term.isNativeViewportAtBottom()).toBe(readerState === "at-bottom");
+					expect(term.getScrollBuffer().map(line => line.trimEnd())).toEqual(scrollbackBefore);
+				} finally {
+					tui.stop();
+				}
 			}
 		});
 	});

@@ -11,9 +11,9 @@
  */
 
 import type { TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
-import { countTokens } from "../tokenizer";
+import { countTokens } from "@oh-my-pi/pi-natives";
 import type { AgentMessage } from "../types";
-import { estimateTokens } from "./compaction";
+import { estimateTokens, VIDEO_TOKEN_CONTROL_FLOW_FLOOR } from "./compaction";
 import type { CustomMessageEntry, SessionEntry, SessionMessageEntry } from "./entries";
 import {
 	collectToolCallsById,
@@ -31,14 +31,6 @@ export interface ShakeConfig {
 	protectedTools: ProtectedToolMatcher[];
 	/** Minimum token size for a fenced/XML block to be eligible. */
 	fenceMinTokens: number;
-	/**
-	 * Compaction boundary (`firstKeptEntryId` of the latest compaction). Entries
-	 * before it are summarized away and never sent, so they are skipped — shaking
-	 * them only churns persisted history. Undefined = no compaction (whole branch
-	 * is sent). Note: shake still elides the warm cached prefix at/after the
-	 * boundary — that is its job as a compaction-class reducer.
-	 */
-	keepBoundaryId?: string;
 }
 
 /** Auto-shake config: protects the live tail, conservative thresholds. */
@@ -114,7 +106,9 @@ function entryTokens(entry: SessionEntry): number {
 		const content = entry.content;
 		if (typeof content === "string") return content.length === 0 ? 0 : countTokens(content);
 		const fragments = content.filter((block): block is TextContent => block.type === "text").map(block => block.text);
-		return fragments.length === 0 ? 0 : countTokens(fragments);
+		const videoFloor =
+			content.filter(block => block.type === "video").length * VIDEO_TOKEN_CONTROL_FLOW_FLOOR;
+		return videoFloor + (fragments.length === 0 ? 0 : countTokens(fragments));
 	}
 	return 0;
 }
@@ -297,20 +291,9 @@ export function collectShakeRegions(entries: SessionEntry[], config: ShakeConfig
 
 	const toolCallsById = collectToolCallsById(entries);
 
-	// Entries before the compaction boundary are summarized away and never sent —
-	// shaking them only churns persisted history (no prompt/cache effect).
-	const boundaryIndex =
-		config.keepBoundaryId === undefined
-			? 0
-			: Math.max(
-					0,
-					entries.findIndex(entry => entry.id === config.keepBoundaryId),
-				);
-
 	const regions: ShakeRegion[] = [];
 	for (let i = 0; i < n; i++) {
 		const entry = entries[i];
-		if (i < boundaryIndex) continue;
 		const toolResult = getToolResultMessage(entry);
 		// Useless-flagged results carry no information once consumed; they are
 		// eligible even inside the protect-recent window.

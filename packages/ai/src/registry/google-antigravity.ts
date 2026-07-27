@@ -1,4 +1,3 @@
-import * as AIError from "../error";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
 
@@ -12,7 +11,7 @@ export const googleAntigravityProvider = {
 	},
 	refreshToken: async (credentials: OAuthCredentials) => {
 		if (!credentials.projectId) {
-			throw new AIError.ConfigurationError("Antigravity credentials missing projectId");
+			throw new Error("Antigravity credentials missing projectId");
 		}
 		const { refreshAntigravityToken } = await import("./oauth/google-antigravity");
 		return refreshAntigravityToken(credentials.refresh, credentials.projectId);

@@ -1,12 +1,9 @@
 /**
  * Remote compaction utilities.
  *
- * Provider-side conversation summarization endpoints. Three flavors:
+ * Provider-side conversation summarization endpoints. Two flavors:
  *
- * - **OpenAI remote compaction V2** (Responses streaming): appends a
- *   `compaction_trigger` input item to the normal stream and stores the returned
- *   `compaction` item with retained real user messages in `preserveData`.
- * - **OpenAI remote compaction V1** (`/responses/compact`): preserves encrypted
+ * - **OpenAI remote compaction** (`/responses/compact`): preserves encrypted
  *   reasoning across compactions by submitting the full responses-API native
  *   history and storing the returned `compaction` / `compaction_summary`
  *   item in `preserveData` so future turns can replay the encrypted state.
@@ -15,23 +12,10 @@
  *   with `{ summary, shortSummary? }`.
  */
 
-import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
-import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
-import {
-	createOpenAICodexCompactionRequestContext,
-	createOpenAICodexCompatibilityMetadata,
-} from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
-import { parseAzureDeploymentNameMap, parseTextSignature } from "@oh-my-pi/pi-ai/providers/openai-shared";
+import { ProviderHttpError } from "@oh-my-pi/pi-ai/errors";
+import { parseTextSignature } from "@oh-my-pi/pi-ai/providers/openai-responses-shared";
 import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import type {
-	Api,
-	AssistantMessage,
-	CodexCompactionContext,
-	FetchImpl,
-	Message,
-	Model,
-	ProviderSessionState,
-} from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, FetchImpl, Message, Model } from "@oh-my-pi/pi-ai/types";
 import {
 	getOpenAIResponsesHistoryItems,
 	getOpenAIResponsesHistoryPayload,
@@ -43,9 +27,7 @@ import {
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 } from "@oh-my-pi/pi-catalog/wire/codex";
-import { $env, logger, stringifyJson } from "@oh-my-pi/pi-utils";
-
-export * from "./compaction-v2-streaming";
+import { logger } from "@oh-my-pi/pi-utils";
 
 // ============================================================================
 // Public types
@@ -62,8 +44,6 @@ export const OPENAI_REMOTE_COMPACTION_PRESERVE_KEY = "openaiRemoteCompaction";
  * behind it). On timeout the caller falls back to local summarization.
  */
 export const REMOTE_COMPACTION_TIMEOUT_MS = 180_000;
-
-const DEFAULT_AZURE_API_VERSION = "v1";
 
 /** Race the caller's signal against the request timeout; `timeoutMs <= 0` disables the watchdog. */
 function withRequestTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal | undefined {
@@ -88,11 +68,6 @@ export interface OpenAiRemoteCompactionRequest {
 	model: string;
 	input: Array<Record<string, unknown>>;
 	instructions: string;
-	reasoning?: {
-		context?: string;
-		[key: string]: unknown;
-	};
-	include?: string[];
 }
 
 export interface OpenAiRemoteCompactionResponse extends OpenAiRemoteCompactionPreserveData {}
@@ -111,25 +86,12 @@ export interface RemoteCompactionResponse {
 // OpenAI provider gating + endpoint resolution
 // ============================================================================
 
-function isOpenAiRemoteCompactionApi(api: Api | undefined): boolean {
-	return api === "openai-responses" || api === "azure-openai-responses" || api === "openai-codex-responses";
-}
-
 export function shouldUseOpenAiRemoteCompaction(model: Model): boolean {
-	if (model.remoteCompaction?.enabled === false) return false;
-	if (model.provider === "openai" || model.provider === "openai-codex") return true;
-	if (model.remoteCompaction?.enabled !== true) return false;
-	return isOpenAiRemoteCompactionApi(model.remoteCompaction.api ?? model.api);
+	return model.provider === "openai" || model.provider === "openai-codex";
 }
 
 function resolveOpenAiCompactEndpoint(model: Model): string {
-	const configuredEndpoint = model.remoteCompaction?.endpoint;
-	const compactionApi = model.remoteCompaction?.api ?? model.api;
-	if (compactionApi === "azure-openai-responses") {
-		return resolveAzureOpenAiCompactEndpoint(model, configuredEndpoint);
-	}
-	if (configuredEndpoint && configuredEndpoint.length > 0) return configuredEndpoint;
-	if (model.provider === "openai-codex" || compactionApi === "openai-codex-responses") {
+	if (model.provider === "openai-codex") {
 		return resolveOpenAiCodexCompactEndpoint(model.baseUrl);
 	}
 
@@ -138,41 +100,6 @@ function resolveOpenAiCompactEndpoint(model: Model): string {
 	const normalizedBase = rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
 	if (normalizedBase.endsWith("/v1")) return `${normalizedBase}/responses/compact`;
 	return `${normalizedBase}/v1/responses/compact`;
-}
-
-function resolveAzureOpenAiCompactEndpoint(model: Model, configuredEndpoint: string | undefined): string {
-	const endpoint =
-		configuredEndpoint && configuredEndpoint.length > 0
-			? configuredEndpoint
-			: `${resolveAzureOpenAiBaseUrl(model)}/responses/compact`;
-	return appendAzureApiVersion(endpoint);
-}
-
-function resolveAzureOpenAiBaseUrl(model: Model): string {
-	const baseUrl = $env.AZURE_OPENAI_BASE_URL?.trim() || undefined;
-	const resourceName = $env.AZURE_OPENAI_RESOURCE_NAME;
-	const resolvedBaseUrl =
-		baseUrl ?? (resourceName ? `https://${resourceName}.openai.azure.com/openai/v1` : undefined) ?? model.baseUrl;
-	if (!resolvedBaseUrl) {
-		throw new Error(
-			"Azure OpenAI base URL is required. Set AZURE_OPENAI_BASE_URL or AZURE_OPENAI_RESOURCE_NAME, or configure model.baseUrl.",
-		);
-	}
-	return resolvedBaseUrl.replace(/\/+$/, "");
-}
-
-function appendAzureApiVersion(endpoint: string): string {
-	if (/[?&]api-version=/.test(endpoint)) return endpoint;
-	const separator = endpoint.includes("?") ? "&" : "?";
-	return `${endpoint}${separator}api-version=${encodeURIComponent($env.AZURE_OPENAI_API_VERSION || DEFAULT_AZURE_API_VERSION)}`;
-}
-
-function resolveOpenAiCompactModel(model: Model): string {
-	const requestModel = model.remoteCompaction?.model ?? model.requestModelId ?? model.id;
-	const compactionApi = model.remoteCompaction?.api ?? model.api;
-	if (compactionApi !== "azure-openai-responses") return requestModel;
-	const mappedDeployment = parseAzureDeploymentNameMap($env.AZURE_OPENAI_DEPLOYMENT_NAME_MAP).get(requestModel);
-	return mappedDeployment ?? requestModel;
 }
 
 function resolveOpenAiCodexCompactEndpoint(baseUrl: string | undefined): string {
@@ -237,10 +164,55 @@ export function withOpenAiRemoteCompactionPreserveData(
 // Input/output filtering for OpenAI compact endpoint
 // ============================================================================
 
+function shouldTrimOpenAiCompactInputItem(item: Record<string, unknown>): boolean {
+	return item.type === "function_call_output" || (item.type === "message" && item.role === "developer");
+}
+
 function shouldKeepOpenAiCompactOutputItem(item: Record<string, unknown>): boolean {
 	if (item.type === "compaction" || item.type === "compaction_summary") return true;
 	if (item.type !== "message") return false;
 	return item.role === "assistant" || item.role === "user";
+}
+
+function trimOpenAiCompactInput(
+	input: Array<Record<string, unknown>>,
+	contextWindow: number,
+	instructions: string,
+): Array<Record<string, unknown>> {
+	const trimmed = [...input];
+	// Per-item serialized sizes are cached and decremented on removal.
+	// Re-stringifying the whole input per popped item was O(N²) in total chars
+	// — hundreds of MB of stringify churn on a 200k-token codex history,
+	// blocking the event loop for seconds (same class as the addOpenAiCallIds
+	// fix above).
+	const sizes = trimmed.map(item => JSON.stringify(item).length);
+	let chars = instructions.length;
+	for (const size of sizes) chars += size;
+	const removeAt = (index: number): void => {
+		chars -= sizes[index] ?? 0;
+		trimmed.splice(index, 1);
+		sizes.splice(index, 1);
+	};
+	while (trimmed.length > 0 && Math.ceil(chars / 4) > contextWindow) {
+		const last = trimmed[trimmed.length - 1];
+		if (last?.type === "function_call_output" || last?.type === "custom_tool_call_output") {
+			const callId = typeof last.call_id === "string" ? last.call_id : undefined;
+			const callType = last.type === "custom_tool_call_output" ? "custom_tool_call" : "function_call";
+			removeAt(trimmed.length - 1);
+			if (callId) {
+				const matchingCallIndex = trimmed.findLastIndex(item => item.type === callType && item.call_id === callId);
+				if (matchingCallIndex >= 0) {
+					removeAt(matchingCallIndex);
+				}
+			}
+			continue;
+		}
+		if (!last || !shouldTrimOpenAiCompactInputItem(last)) {
+			break;
+		}
+		removeAt(trimmed.length - 1);
+	}
+	return trimmed;
 }
 
 // Register every tool-call id in `items` (and the subset using the custom-tool
@@ -419,7 +391,7 @@ export function buildOpenAiNativeHistory(
 						id: itemId,
 						call_id: normalized.callId,
 						name: block.name,
-						arguments: stringifyJson(block.arguments) ?? "null",
+						arguments: JSON.stringify(block.arguments),
 					});
 				}
 			}
@@ -472,84 +444,41 @@ export function buildOpenAiNativeHistory(
 // ============================================================================
 // Endpoint requests
 // ============================================================================
+
 export async function requestOpenAiRemoteCompaction(
 	model: Model,
 	apiKey: string,
 	compactInput: Array<Record<string, unknown>>,
 	instructions: string,
 	signal?: AbortSignal,
-	opts?: {
-		fetch?: FetchImpl;
-		timeoutMs?: number;
-		sessionId?: string;
-		providerSessionState?: Map<string, ProviderSessionState>;
-		codexCompaction?: CodexCompactionContext;
-	},
+	opts?: { fetch?: FetchImpl; timeoutMs?: number },
 ): Promise<OpenAiRemoteCompactionResponse> {
 	const endpoint = resolveOpenAiCompactEndpoint(model);
-	const requestModel = resolveOpenAiCompactModel(model);
 	const request: OpenAiRemoteCompactionRequest = {
-		model: requestModel,
-		// Send full history to the endpoint - don't trim locally.
-		// The provider handles compression via the compaction endpoint.
-		// Trimming before sending loses assistant messages and thinking blocks.
-		input: compactInput,
+		model: model.id,
+		input: trimOpenAiCompactInput(compactInput, model.contextWindow ?? Number.POSITIVE_INFINITY, instructions),
 		instructions,
 	};
-	const isAzureOpenAiResponses = (model.remoteCompaction?.api ?? model.api) === "azure-openai-responses";
-	const isCodexResponses =
-		model.provider === "openai-codex" || (model.remoteCompaction?.api ?? model.api) === "openai-codex-responses";
-	const headers: Record<string, string> = isAzureOpenAiResponses
-		? {
-				"content-type": "application/json",
-				"api-key": apiKey,
-				...(model.headers ?? {}),
-			}
-		: {
-				"content-type": "application/json",
-				Authorization: `Bearer ${apiKey}`,
-				...(model.headers ?? {}),
-			};
+	const headers: Record<string, string> = {
+		"content-type": "application/json",
+		Authorization: `Bearer ${apiKey}`,
+		...(model.headers ?? {}),
+	};
 
 	// Codex endpoints require additional auth headers
-	if (isCodexResponses) {
+	if (model.provider === "openai-codex") {
 		const accountId = getCodexAccountId(apiKey);
 		if (accountId) {
 			headers[OPENAI_HEADERS.ACCOUNT_ID] = accountId;
 		}
 		headers[OPENAI_HEADERS.BETA] = OPENAI_HEADER_VALUES.BETA_RESPONSES;
 		headers[OPENAI_HEADERS.ORIGINATOR] = OPENAI_HEADER_VALUES.ORIGINATOR_CODEX;
-		Object.assign(
-			headers,
-			createOpenAICodexCompatibilityMetadata({
-				sessionId: opts?.sessionId,
-				providerSessionState: opts?.providerSessionState,
-				requestKind: "compaction",
-				compaction: createOpenAICodexCompactionRequestContext({
-					context: opts?.codexCompaction,
-					implementation: "responses_compact",
-				}),
-				includeInstallationHeader: true,
-			}).headers,
-		);
-		// Responses Lite models take the same rewrite on `/responses/compact`:
-		// instructions ride as an input item and the lite marker header is set
-		// (codex-rs routes compaction through `build_responses_request`).
-		if (model.useResponsesLite) {
-			applyCodexResponsesLiteShape(request);
-			headers[OPENAI_HEADERS.RESPONSES_LITE] = "true";
-			request.reasoning = {
-				...request.reasoning,
-				context: "all_turns",
-			};
-			request.include = Array.from(new Set([...(request.include ?? []), "reasoning.encrypted_content"]));
-		}
 	}
 
 	const response = await (opts?.fetch ?? fetch)(endpoint, {
 		method: "POST",
 		headers,
-		body: stringifyJson(request),
+		body: JSON.stringify(request),
 		signal: withRequestTimeout(signal, opts?.timeoutMs ?? REMOTE_COMPACTION_TIMEOUT_MS),
 	});
 
@@ -598,55 +527,16 @@ export async function requestOpenAiRemoteCompaction(
 	return { provider: model.provider, replacementHistory, compactionItem };
 }
 
-/**
- * Generic remote-compaction POST. Two wire shapes are auto-selected by
- * endpoint suffix so a single `compaction.remoteEndpoint` setting can point at
- * either a purpose-built omp summarizer (`{systemPrompt, prompt}` → `{summary}`)
- * or any OpenAI-compatible chat-completions server (`/chat/completions`,
- * `/v1/chat/completions`, …) as reported for llama.cpp / vLLM / etc. in
- * issue #4630: without this, the omp payload was rejected with
- * HTTP 400 `"'messages' is required"`, compaction silently fell back to
- * local summarization, and context grew unbounded.
- *
- * When `context.model` is provided the chat-completions body is tagged with
- * that model's wire id (llama.cpp requires the field) and `context.apiKey` is
- * forwarded as `Authorization: Bearer`. Callers wrap this in `withAuth` so
- * 401s force-refresh through the standard credential rotation policy.
- */
 export async function requestRemoteCompaction(
 	endpoint: string,
 	request: RemoteCompactionRequest,
 	signal?: AbortSignal,
-	opts?: { fetch?: FetchImpl; timeoutMs?: number; model?: Model; apiKey?: string },
+	opts?: { fetch?: FetchImpl; timeoutMs?: number },
 ): Promise<RemoteCompactionResponse> {
-	let endpointPath = endpoint;
-	try {
-		endpointPath = new URL(endpoint).pathname;
-	} catch {
-		// Keep the raw endpoint for relative/custom fetch implementations.
-	}
-	const isChatCompletions = /\/chat\/completions\/?$/.test(endpointPath);
-	const headers: Record<string, string> = { "content-type": "application/json" };
-	if (isChatCompletions) {
-		if (opts?.apiKey) headers.Authorization = `Bearer ${opts.apiKey}`;
-		if (opts?.model?.headers) Object.assign(headers, opts.model.headers);
-	}
-
-	const body: Record<string, unknown> = isChatCompletions
-		? {
-				model: opts?.model ? resolveOpenAiCompactModel(opts.model) : undefined,
-				messages: [
-					{ role: "system", content: request.systemPrompt },
-					{ role: "user", content: request.prompt },
-				],
-				stream: false,
-			}
-		: { systemPrompt: request.systemPrompt, prompt: request.prompt };
-
 	const response = await (opts?.fetch ?? fetch)(endpoint, {
 		method: "POST",
-		headers,
-		body: stringifyJson(body),
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(request),
 		signal: withRequestTimeout(signal, opts?.timeoutMs ?? REMOTE_COMPACTION_TIMEOUT_MS),
 	});
 
@@ -665,31 +555,6 @@ export async function requestRemoteCompaction(
 				headers: response.headers,
 			},
 		);
-	}
-
-	if (isChatCompletions) {
-		type ChatCompletionsResponse = {
-			choices?: Array<{
-				message?: {
-					content?: string | Array<{ type?: string; text?: string }> | null;
-				};
-			}>;
-		};
-		const data = (await response.json()) as ChatCompletionsResponse | undefined;
-		const choice = data?.choices?.[0]?.message?.content;
-		let summary: string | undefined;
-		if (typeof choice === "string") {
-			summary = choice;
-		} else if (Array.isArray(choice)) {
-			summary = choice
-				.filter((part): part is { type?: string; text: string } => typeof part?.text === "string")
-				.map(part => part.text)
-				.join("");
-		}
-		if (typeof summary !== "string" || summary.length === 0) {
-			throw new Error("Remote compaction response missing choices[0].message.content");
-		}
-		return { summary };
 	}
 
 	const data = (await response.json()) as RemoteCompactionResponse | undefined;

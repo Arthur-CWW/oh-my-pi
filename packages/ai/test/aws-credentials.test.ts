@@ -7,7 +7,6 @@ import {
 	resolveAwsCredentials,
 	tokenizeCredentialProcessCommand,
 } from "@oh-my-pi/pi-ai/providers/aws-credentials";
-import { removeWithRetries } from "../../utils/src/temp";
 
 // `credential_process` integration coverage. Drives a real `Bun.spawn`
 // against a fixture script so the JSON envelope contract, exit-code
@@ -95,7 +94,7 @@ describe("resolveAwsCredentials credential_process", () => {
 			else Bun.env[k] = v;
 		}
 		saved.clear();
-		await removeWithRetries(tmp);
+		await fs.rm(tmp, { recursive: true, force: true });
 		clearAwsCredentialCache();
 	});
 

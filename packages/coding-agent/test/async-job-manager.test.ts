@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
+import { AsyncJobManager, isAsyncJobInterruptReason } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 
 describe("AsyncJobManager", () => {
 	test("forwards progress updates and delivers completion", async () => {
@@ -31,6 +31,65 @@ describe("AsyncJobManager", () => {
 		expect(progressEvents).toEqual([{ text: "running step", details: { async: { state: "running" } } }]);
 		expect(completions).toEqual([{ jobId, text: "final output" }]);
 		expect(manager.getJob(jobId)?.status).toBe("completed");
+	});
+
+	test("coalesces a same-turn progress burst to the latest snapshot", async () => {
+		const progressEvents: Array<{ text: string; sequence?: unknown }> = [];
+		const manager = new AsyncJobManager({ onJobComplete: async () => {} });
+		manager.register(
+			"task",
+			"bursting task",
+			async ({ reportProgress }) => {
+				const pending: Promise<void>[] = [];
+				for (let sequence = 0; sequence < 100; sequence++) {
+					pending.push(reportProgress(`step ${sequence}`, { sequence }));
+				}
+				await Promise.all(pending);
+				return "done";
+			},
+			{
+				onProgress: async (text, details) => {
+					progressEvents.push({ text, sequence: details?.sequence });
+				},
+			},
+		);
+
+		await manager.waitForAll();
+		expect(progressEvents).toEqual([{ text: "step 99", sequence: 99 }]);
+	});
+
+	test("snapshots future group reporting and explicitly escalates a hub completion", async () => {
+		const reports: string[] = [];
+		const manager = new AsyncJobManager({
+			onJobComplete: async (_jobId, _text, job) => {
+				reports.push(job?.group?.reporting ?? "ungrouped");
+			},
+		});
+
+		manager.configureGroup("Main", { topology: "flat", reporting: "hub" });
+		const hubJobId = manager.register("task", "hub task", async () => "hub result", {
+			group: { groupId: "Main" },
+		});
+		manager.configureGroup("Main", { topology: "supervised", reporting: "main" });
+		const mainJobId = manager.register("task", "main task", async () => "main result", {
+			group: { groupId: "Main", coordinatorId: "Coordinator" },
+		});
+
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(manager.getJob(hubJobId)?.group).toEqual({ groupId: "Main", topology: "flat", reporting: "hub" });
+		expect(manager.getJob(mainJobId)?.group).toEqual({
+			groupId: "Main",
+			coordinatorId: "Coordinator",
+			topology: "supervised",
+			reporting: "main",
+		});
+		expect(reports).toEqual(["hub", "main"]);
+
+		expect(manager.escalateCompletion(hubJobId)).toBe(true);
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(reports).toEqual(["hub", "main", "main"]);
+		expect(manager.escalateCompletion(mainJobId)).toBe(false);
 	});
 
 	test("swallows progress callback errors without failing the job", async () => {
@@ -111,6 +170,135 @@ describe("AsyncJobManager", () => {
 
 		expect(manager.getJob(jobId)?.status).toBe("cancelled");
 		expect(completions).toHaveLength(0);
+	});
+
+	test("refreshResultText updates terminal jobs without re-enqueueing delivery", async () => {
+		const completions: Array<{ jobId: string; text: string }> = [];
+		const manager = new AsyncJobManager({
+			onJobComplete: async (jobId, text) => {
+				completions.push({ jobId, text });
+			},
+		});
+
+		const completedJobId = manager.register("task", "done", async () => "original");
+		const failedJobId = manager.register("task", "failed", async () => {
+			throw new Error("first failure");
+		});
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(completions).toEqual([
+			{ jobId: completedJobId, text: "original" },
+			{ jobId: failedJobId, text: "first failure" },
+		]);
+
+		expect(manager.refreshResultText(completedJobId, "fresh result")).toBe(true);
+		expect(manager.refreshResultText(failedJobId, "recovered result")).toBe(true);
+		expect(manager.getJob(completedJobId)?.resultText).toBe("fresh result");
+		expect(manager.getJob(failedJobId)?.status).toBe("failed");
+		expect(manager.getJob(failedJobId)?.resultText).toBe("recovered result");
+		expect(manager.getJob(failedJobId)?.errorText).toBeUndefined();
+		expect(manager.hasPendingDeliveries()).toBe(false);
+		await manager.drainDeliveries({ timeoutMs: 50 });
+		expect(completions).toHaveLength(2);
+	});
+
+	test("refreshResultText rejects running jobs", async () => {
+		const manager = new AsyncJobManager({ onJobComplete: async () => {} });
+		const release = Promise.withResolvers<void>();
+		const jobId = manager.register("task", "running", async () => {
+			await release.promise;
+			return "done";
+		});
+
+		expect(manager.refreshResultText(jobId, "too early")).toBe(false);
+		expect(manager.getJob(jobId)?.resultText).toBeUndefined();
+		release.resolve();
+		await manager.waitForAll();
+	});
+
+	test("interrupt aborts with a typed reason and leaves completion delivery to the job", async () => {
+		const completions: Array<{ jobId: string; text: string }> = [];
+		let abortReason: { type: string; requestedBy?: string; reason?: string } | undefined;
+		const manager = new AsyncJobManager({
+			onJobComplete: async (jobId, text) => {
+				completions.push({ jobId, text });
+			},
+		});
+
+		const jobId = manager.register(
+			"task",
+			"interruptible",
+			async ({ signal }) => {
+				await new Promise<void>(resolve => {
+					signal.addEventListener(
+						"abort",
+						() => {
+							abortReason = isAsyncJobInterruptReason(signal.reason) ? signal.reason : undefined;
+							resolve();
+						},
+						{ once: true },
+					);
+				});
+				return "[interrupted: operator]\n\npartial";
+			},
+			{ ownerId: "Main" },
+		);
+
+		expect(manager.interrupt(jobId, { ownerId: "Other" }, "operator")).toBe(false);
+		expect(manager.interrupt(jobId, { ownerId: "Main" }, "operator")).toBe(true);
+		expect(manager.interrupt(jobId, { ownerId: "Main" }, "again")).toBe(false);
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+
+		expect(abortReason).toEqual({ type: "omp:async-job-interrupt", requestedBy: "Main", reason: "operator" });
+		expect(manager.getJob(jobId)?.status).toBe("completed");
+		expect(manager.getJob(jobId)?.interrupted).toBe(true);
+		expect(manager.getJob(jobId)?.interruptRequested).toBe(true);
+		expect(completions).toEqual([{ jobId, text: "[interrupted: operator]\n\npartial" }]);
+	});
+
+	test("cancel after interrupt marks the job hard-cancelled and suppresses delivery", async () => {
+		const completions: Array<{ jobId: string; text: string }> = [];
+		const release = Promise.withResolvers<void>();
+		let abortReason: { type: string; requestedBy?: string; reason?: string } | undefined;
+		const manager = new AsyncJobManager({
+			onJobComplete: async (jobId, text) => {
+				completions.push({ jobId, text });
+			},
+		});
+
+		const jobId = manager.register(
+			"task",
+			"interrupt-then-cancel",
+			async ({ signal }) => {
+				await new Promise<void>(resolve => {
+					signal.addEventListener(
+						"abort",
+						() => {
+							abortReason = isAsyncJobInterruptReason(signal.reason) ? signal.reason : undefined;
+							resolve();
+						},
+						{ once: true },
+					);
+				});
+				await release.promise;
+				return "late completion";
+			},
+			{ ownerId: "Main" },
+		);
+
+		expect(manager.interrupt(jobId, { ownerId: "Main" }, "checkpoint")).toBe(true);
+		expect(manager.cancel(jobId, { ownerId: "Main" })).toBe(true);
+		release.resolve();
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 50 });
+
+		const job = manager.getJob(jobId);
+		expect(abortReason).toEqual({ type: "omp:async-job-interrupt", requestedBy: "Main", reason: "checkpoint" });
+		expect(job?.status).toBe("cancelled");
+		expect(job?.hardCancelled).toBe(true);
+		expect(job?.interrupted).toBeUndefined();
+		expect(completions).toEqual([]);
 	});
 
 	test("enforces maxRunningJobs cap", () => {
@@ -270,28 +458,6 @@ describe("AsyncJobManager", () => {
 		expect(manager.hasPendingDeliveries()).toBe(false);
 	});
 
-	test("dispose honors timeout when a cancelled job never settles", async () => {
-		const manager = new AsyncJobManager({
-			onJobComplete: async () => {},
-		});
-
-		manager.register("bash", "ignores-abort", async () => {
-			await Promise.withResolvers<never>().promise;
-			return "unreachable";
-		});
-
-		const startedAt = Date.now();
-		const result = await Promise.race([
-			manager.dispose({ timeoutMs: 25 }).then(drained => ({ drained, settled: true })),
-			Bun.sleep(150).then(() => ({ drained: true, settled: false })),
-		]);
-
-		expect(result.settled).toBe(true);
-		expect(result.drained).toBe(false);
-		expect(Date.now() - startedAt).toBeLessThan(150);
-		expect(manager.getAllJobs()).toHaveLength(0);
-	});
-
 	test("scoped delivery drain returns once matching owner deliveries finish", async () => {
 		let mainJobId = "";
 		let releaseMainDelivery = (): void => {};
@@ -436,6 +602,72 @@ describe("AsyncJobManager", () => {
 		manager.cancelAll();
 		await manager.waitForAll();
 		expect(manager.getJob(parentJobId)?.status).toBe("cancelled");
+	});
+
+	test("bounds delivered completion retention at 300 jobs", async () => {
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {},
+			maxRunningJobs: 300,
+			completionSummaryBytes: 8 * 1024,
+		});
+		const largeResult = "x".repeat(256 * 1024);
+		for (let index = 0; index < 300; index++) {
+			manager.register("task", `child-${index}`, async () => largeResult);
+		}
+
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 5_000 });
+
+		const report = manager.getMemoryReport();
+		expect(report.terminal.count).toBe(300);
+		expect(report.deliveries.count).toBe(0);
+		expect(report.terminal.estimatedBytes / report.terminal.count).toBeLessThan(10 * 1024);
+		expect(report.totalEstimatedBytes).toBeLessThan(3 * 1024 * 1024);
+	});
+
+	test("pressure eviction preserves pending delivery authority", async () => {
+		let rejectFirst = true;
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {
+				if (rejectFirst) {
+					rejectFirst = false;
+					throw new Error("retry");
+				}
+			},
+			memoryPressureBytes: 1,
+		});
+		const jobId = manager.register("task", "journal-backed child", async () => "summary");
+		await manager.waitForAll();
+		await Bun.sleep(10);
+
+		expect(manager.enforceMemoryPressure(Number.MAX_SAFE_INTEGER)).toBe(0);
+		expect(manager.getJob(jobId)).toBeDefined();
+		expect(manager.hasPendingDeliveries()).toBe(true);
+
+		manager.watchJobs([jobId]);
+		manager.unwatchJobs([jobId]);
+		manager.resumeDeliveries([jobId]);
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+		expect(manager.getJob(jobId)).toBeUndefined();
+		expect(manager.getMemoryReport().pressureEvictions).toBe(1);
+	});
+
+	test("pressure eviction preserves watched terminal jobs until unwatch", async () => {
+		const manager = new AsyncJobManager({
+			onJobComplete: async () => {},
+			memoryPressureBytes: 1,
+		});
+		const jobId = manager.register("task", "watched child", async () => "summary");
+		manager.watchJobs([jobId]);
+		await manager.waitForAll();
+		await manager.drainDeliveries({ timeoutMs: 2_000 });
+
+		expect(manager.enforceMemoryPressure(Number.MAX_SAFE_INTEGER)).toBe(0);
+		expect(manager.getJob(jobId)?.resultText).toBe("summary");
+
+		manager.unwatchJobs([jobId]);
+		expect(manager.enforceMemoryPressure(Number.MAX_SAFE_INTEGER)).toBe(1);
+		expect(manager.getJob(jobId)).toBeUndefined();
 	});
 });
 

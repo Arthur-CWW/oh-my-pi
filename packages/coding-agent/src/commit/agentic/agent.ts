@@ -1,8 +1,7 @@
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { INTENT_FIELD, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { Markdown } from "@oh-my-pi/pi-tui";
 import { prompt } from "@oh-my-pi/pi-utils";
-import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import chalk from "chalk";
 import typesDescriptionPrompt from "../../commit/prompts/types-description.md" with { type: "text" };
 import type { ModelRegistry } from "../../config/model-registry";
@@ -42,7 +41,7 @@ export async function runCommitAgentSession(input: CommitAgentInput): Promise<Co
 		types_description: typesDescription,
 	});
 	const state: CommitAgentState = { diffText: input.diffText };
-	const spawns = "sonic";
+	const spawns = "quick_task";
 	const tools = createCommitTools({
 		cwd: input.cwd,
 		authStorage: input.authStorage,
@@ -277,8 +276,7 @@ function formatToolArgsBlock(lines: string[]): string {
 	return lines
 		.map((line, index) => {
 			if (index === 0) return `  ⎿ ${line}`;
-			const branch = index === lines.length - 1 ? "└" : "├";
-			return `    ${branch} ${line}`;
+			return `      ${line}`;
 		})
 		.join("\n");
 }

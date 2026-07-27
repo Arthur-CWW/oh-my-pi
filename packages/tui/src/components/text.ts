@@ -1,5 +1,5 @@
 import type { Component } from "../tui";
-import { applyBackgroundToLine, getPaddingX, padding, replaceTabs, visibleWidth, wrapTextWithAnsi } from "../utils";
+import { applyBackgroundToLine, padding, replaceTabs, visibleWidth, wrapTextWithAnsi } from "../utils";
 
 /**
  * Text component - displays multi-line text with word wrapping
@@ -9,14 +9,6 @@ export class Text implements Component {
 	#paddingX: number; // Left/right padding
 	#paddingY: number; // Top/bottom padding
 	#customBgFn?: (text: string) => string;
-
-	#ignoreTight = false;
-
-	setIgnoreTight(ignore: boolean): this {
-		this.#ignoreTight = ignore;
-		this.invalidate();
-		return this;
-	}
 
 	// Cache for rendered output
 	#cachedText?: string;
@@ -77,14 +69,14 @@ export class Text implements Component {
 		const normalizedText = replaceTabs(this.#text);
 
 		// Calculate content width (subtract left/right margins)
-		const paddingX = this.#ignoreTight ? this.#paddingX : getPaddingX(this.#paddingX);
-		const contentWidth = Math.max(1, width - paddingX * 2);
+		const contentWidth = Math.max(1, width - this.#paddingX * 2);
+
 		// Wrap text (this preserves ANSI codes but does NOT pad)
 		const wrappedLines = wrapTextWithAnsi(normalizedText, contentWidth);
 
 		// Add margins and background to each line
-		const leftMargin = padding(paddingX);
-		const rightMargin = padding(paddingX);
+		const leftMargin = padding(this.#paddingX);
+		const rightMargin = padding(this.#paddingX);
 		const contentLines: string[] = [];
 
 		for (const line of wrappedLines) {

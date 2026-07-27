@@ -1,4 +1,4 @@
-/** `goal` — goal-mode lifecycle: set/check/complete/resume/drop an objective with an optional token budget. */
+/** `goal` — goal-mode lifecycle: set/check/complete/resume/drop an objective. */
 import type { ReactNode } from "react";
 import type { Tone } from "../parts";
 import { Badge, InvalidArg, Kv, KvGrid, Note, Output, ResultText } from "../parts";
@@ -8,7 +8,6 @@ import { detailsRecord, isRecord, normalizeWs, num, str, truncate } from "../uti
 interface GoalView {
 	objective: string;
 	status: string;
-	tokenBudget: number | null;
 	tokensUsed: number | null;
 	timeUsedSeconds: number | null;
 }
@@ -23,7 +22,6 @@ function goalOf(details: Record<string, unknown> | null): GoalView | null {
 	return {
 		objective,
 		status,
-		tokenBudget: num(g.tokenBudget),
 		tokensUsed: num(g.tokensUsed),
 		timeUsedSeconds: num(g.timeUsedSeconds),
 	};
@@ -45,8 +43,6 @@ function statusTone(status: string): Tone | undefined {
 	switch (status) {
 		case "complete":
 			return "ok";
-		case "budget-limited":
-			return "warn";
 		case "paused":
 		case "dropped":
 			return undefined;
@@ -78,12 +74,9 @@ function fmtDuration(seconds: number): string {
 	return `${Math.round(h / 24)}d`;
 }
 
-/** "12K / 100K tokens (88K left)" or "12K tokens" without a budget. */
+/** Compact usage label. */
 function tokensLine(goal: GoalView): string {
-	const used = fmtNum(goal.tokensUsed ?? 0);
-	if (goal.tokenBudget === null) return `${used} tokens`;
-	const left = Math.max(0, goal.tokenBudget - (goal.tokensUsed ?? 0));
-	return `${used} / ${fmtNum(goal.tokenBudget)} tokens (${fmtNum(left)} left)`;
+	return `${fmtNum(goal.tokensUsed ?? 0)} tokens`;
 }
 
 function Summary({ args, result }: ToolRenderProps): ReactNode {
@@ -91,7 +84,6 @@ function Summary({ args, result }: ToolRenderProps): ReactNode {
 	const goal = goalOf(details);
 	const op = str(details?.op) ?? str(args.op);
 	const objective = goal?.objective ?? str(args.objective);
-	const budget = num(args.token_budget);
 	return (
 		<>
 			{op === null && args.op !== undefined ? <InvalidArg what="op" /> : <span>{describeOp(op)}</span>}
@@ -99,7 +91,6 @@ function Summary({ args, result }: ToolRenderProps): ReactNode {
 			{objective !== null && objective.trim() !== "" && (
 				<span className="tv-muted">“{truncate(normalizeWs(objective), 64)}”</span>
 			)}
-			{budget !== null && <span className="tv-faint">budget {fmtNum(budget)}</span>}
 		</>
 	);
 }
@@ -109,9 +100,8 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 	const goal = goalOf(details);
 	const op = str(details?.op) ?? str(args.op);
 	const objective = goal?.objective ?? str(args.objective);
-	const budgetArg = num(args.token_budget);
-	const report = str(details?.completionBudgetReport);
-	const hasTokens = goal !== null && (goal.tokensUsed !== null || goal.tokenBudget !== null);
+	const report = str(details?.completionUsageReport);
+	const hasTokens = goal?.tokensUsed !== null;
 	return (
 		<>
 			<KvGrid>
@@ -122,11 +112,7 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 					</Kv>
 				)}
 				{objective !== null && objective.trim() !== "" && <Kv k="objective">{objective.trim()}</Kv>}
-				{hasTokens && goal ? (
-					<Kv k="tokens">{tokensLine(goal)}</Kv>
-				) : (
-					budgetArg !== null && <Kv k="budget">{fmtNum(budgetArg)} tokens</Kv>
-				)}
+				{hasTokens && goal && <Kv k="tokens">{tokensLine(goal)}</Kv>}
 				{goal !== null && goal.timeUsedSeconds !== null && goal.timeUsedSeconds > 0 && (
 					<Kv k="elapsed">{fmtDuration(goal.timeUsedSeconds)}</Kv>
 				)}

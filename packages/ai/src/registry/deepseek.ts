@@ -1,4 +1,3 @@
-import * as AIError from "../error";
 import { createApiKeyLogin } from "./api-key-login";
 import type { OAuthController, OAuthLoginCallbacks, OAuthPrompt } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
@@ -23,7 +22,7 @@ export function normalizeDeepSeekApiKey(raw: string): string {
 	}
 	const stripped = trimmed.replace(/^bearer\b\s*/i, "");
 	if (!stripped) {
-		throw new AIError.ApiKeyRequiredError("DeepSeek API key is empty after stripping Bearer prefix");
+		throw new Error("DeepSeek API key is empty after stripping Bearer prefix");
 	}
 	return stripped;
 }

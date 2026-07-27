@@ -1,6 +1,6 @@
 import type { TextContent } from "@oh-my-pi/pi-ai";
 import { Container, Markdown, Text } from "@oh-my-pi/pi-tui";
-import type { CollabPromptDetails } from "../../collab/protocol";
+import type { CollabPromptDetails } from "../collab-presentation-types";
 import type { CustomMessage } from "../../session/messages";
 import { getMarkdownTheme, theme } from "../theme/theme";
 
@@ -12,9 +12,7 @@ export class CollabPromptMessageComponent extends Container {
 	constructor(message: CustomMessage<CollabPromptDetails>) {
 		super();
 		const from = message.details?.from?.trim() || "guest";
-		const authorText = new Text(theme.fg("accent", `\x1b[1m«${from}»\x1b[22m ›`), 1, 0);
-		authorText.setIgnoreTight(true);
-		this.addChild(authorText);
+		this.addChild(new Text(theme.fg("accent", `\x1b[1m«${from}»\x1b[22m ›`), 1, 0));
 		const text =
 			typeof message.content === "string"
 				? message.content
@@ -22,11 +20,11 @@ export class CollabPromptMessageComponent extends Container {
 						.filter((content): content is TextContent => content.type === "text")
 						.map(content => content.text)
 						.join("");
-		const md = new Markdown(text, 1, 1, getMarkdownTheme(), {
-			bgColor: (value: string) => theme.bg("userMessageBg", value),
-			color: (value: string) => theme.fg("userMessageText", value),
-		});
-		md.setIgnoreTight(true);
-		this.addChild(md);
+		this.addChild(
+			new Markdown(text, 1, 1, getMarkdownTheme(), {
+				bgColor: (value: string) => theme.bg("userMessageBg", value),
+				color: (value: string) => theme.fg("userMessageText", value),
+			}),
+		);
 	}
 }

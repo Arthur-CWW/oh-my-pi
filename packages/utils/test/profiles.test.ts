@@ -8,6 +8,7 @@ import {
 	getActiveProfile,
 	getAgentDbPath,
 	getAgentDir,
+	getBlobsDir,
 	getConfigAgentDirName,
 	getConfigRootDir,
 	getPythonGatewayDir,
@@ -185,6 +186,42 @@ describe("profile directories", () => {
 		setProfile(undefined);
 		setProfile("work");
 		expect(getAgentDir()).toBe(firstAgentDir);
+	});
+
+	it("does not activate XDG when release storage creates only the data app root", async () => {
+		if (process.platform === "win32") return;
+
+		process.env.XDG_DATA_HOME = path.join(tempRoot, "data");
+		process.env.XDG_STATE_HOME = path.join(tempRoot, "state");
+		process.env.XDG_CACHE_HOME = path.join(tempRoot, "cache");
+		await fs.mkdir(path.join(process.env.XDG_DATA_HOME, "omp", "releases"), { recursive: true });
+
+		setProfile(undefined);
+
+		const legacyAgentDir = path.join(os.homedir(), configDir, "agent");
+		expect(getAgentDbPath()).toBe(path.join(legacyAgentDir, "agent.db"));
+		expect(getSessionsDir()).toBe(path.join(legacyAgentDir, "sessions"));
+		expect(getBlobsDir()).toBe(path.join(legacyAgentDir, "blobs"));
+		expect(getPythonGatewayDir()).toBe(path.join(legacyAgentDir, "python-gateway"));
+	});
+
+	it("activates XDG atomically after all category roots exist", async () => {
+		if (process.platform === "win32") return;
+
+		process.env.XDG_DATA_HOME = path.join(tempRoot, "data");
+		process.env.XDG_STATE_HOME = path.join(tempRoot, "state");
+		process.env.XDG_CACHE_HOME = path.join(tempRoot, "cache");
+		await Promise.all(
+			[process.env.XDG_DATA_HOME, process.env.XDG_STATE_HOME, process.env.XDG_CACHE_HOME].map(home =>
+				fs.mkdir(path.join(home, "omp"), { recursive: true }),
+			),
+		);
+
+		setProfile(undefined);
+
+		expect(getAgentDbPath()).toBe(path.join(process.env.XDG_DATA_HOME, "omp", "agent.db"));
+		expect(getSessionsDir()).toBe(path.join(process.env.XDG_DATA_HOME, "omp", "sessions"));
+		expect(getPythonGatewayDir()).toBe(path.join(process.env.XDG_STATE_HOME, "omp", "python-gateway"));
 	});
 
 	it("rejects path-like profile names", () => {
@@ -419,7 +456,9 @@ describe("dirs module import behavior", () => {
 		if (process.platform === "win32") return;
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "pi-utils-profile-env-xdg-"));
 		const homeDir = path.join(root, "home");
+		const xdgDataRoot = path.join(root, "xdg-data");
 		const xdgStateRoot = path.join(root, "xdg-state");
+		const xdgCacheRoot = path.join(root, "xdg-cache");
 		const profileConfigDir = `.omp-env-xdg-${Snowflake.next()}`;
 		try {
 			const envUrl = url.pathToFileURL(path.join(import.meta.dir, "..", "src", "env.ts")).href;
@@ -429,10 +468,19 @@ describe("dirs module import behavior", () => {
 			// The profile's agent .env sets a directory-affecting key. env.ts parses
 			// and applies it to the environment *after* dirs.ts froze the resolver at
 			// import time — the exact ordering refreshDirsFromEnv() guards.
-			await Bun.write(path.join(agentDir, ".env"), `XDG_STATE_HOME=${xdgStateRoot}\n`);
-			// Named profiles only adopt XDG when their own XDG path already exists.
+			await Bun.write(
+				path.join(agentDir, ".env"),
+				[`XDG_DATA_HOME=${xdgDataRoot}`, `XDG_STATE_HOME=${xdgStateRoot}`, `XDG_CACHE_HOME=${xdgCacheRoot}`].join(
+					"\n",
+				),
+			);
+			// Named profiles adopt XDG atomically when all category roots exist.
 			const xdgProfileRoot = path.join(xdgStateRoot, "omp", "profiles", "work");
-			await fs.mkdir(xdgProfileRoot, { recursive: true });
+			await Promise.all(
+				[xdgDataRoot, xdgStateRoot, xdgCacheRoot].map(xdgRoot =>
+					fs.mkdir(path.join(xdgRoot, "omp", "profiles", "work"), { recursive: true }),
+				),
+			);
 
 			const probePath = path.join(root, "probe.ts");
 			await Bun.write(

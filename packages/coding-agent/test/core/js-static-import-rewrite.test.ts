@@ -86,12 +86,6 @@ describe("rewriteImports", () => {
 	it("routes dynamic import through the helper when present and native import when serialized into a foreign realm", async () => {
 		const out = await rewriteImports(`const load = async () => await ${dyn('("node:path")')}; load;`);
 		const globals = globalThis as Record<string, unknown>;
-		const hasOriginal = "__omp_import__" in globals;
-		const originalOmpImport = globals.__omp_import__;
-		if (hasOriginal) {
-			delete globals.__omp_import__;
-		}
-
 		expect("__omp_import__" in globals).toBe(false);
 
 		// Worker realm: helper global exists, call must route through it.
@@ -112,11 +106,7 @@ describe("rewriteImports", () => {
 			const mod = await serialized();
 			expect(typeof mod.join).toBe("function");
 		} finally {
-			if (hasOriginal) {
-				globals.__omp_import__ = originalOmpImport;
-			} else {
-				delete globals.__omp_import__;
-			}
+			delete globals.__omp_import__;
 		}
 	});
 

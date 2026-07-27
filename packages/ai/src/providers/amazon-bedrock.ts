@@ -7,12 +7,11 @@
  * Bun's native `HTTPS_PROXY` support.
  */
 
-import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { Effort, THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { mapEffortToAnthropicAdaptiveEffort, requireSupportedEffort } from "@oh-my-pi/pi-catalog/model-thinking";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
-import { $env, $flag, fetchWithRetry, parseStreamingJson, parseStreamingJsonThrottled } from "@oh-my-pi/pi-utils";
-import { renderDemotedThinking } from "../dialect/demotion";
-import * as AIError from "../error";
+import { $env, $flag, extractHttpStatusFromError, fetchWithRetry } from "@oh-my-pi/pi-utils";
+import { ProviderHttpError } from "../errors";
 import type {
 	Api,
 	AssistantMessage,
@@ -30,20 +29,20 @@ import type {
 	ToolResultMessage,
 } from "../types";
 import { normalizeToolCallId, resolveCacheRetention } from "../utils";
-import {
-	clearStreamingPartialJson,
-	kStreamingBlockIndex,
-	kStreamingLastParseLen,
-	kStreamingPartialJson,
-} from "../utils/block-symbols";
 import { AssistantMessageEventStream } from "../utils/event-stream";
-import type { RawHttpRequestDump } from "../utils/http-inspector";
-import { armPreResponseTimeout, getStreamFirstEventTimeoutMs } from "../utils/idle-iterator";
+import { appendRawHttpRequestDumpFor400, type RawHttpRequestDump } from "../utils/http-inspector";
+import { getStreamFirstEventTimeoutMs } from "../utils/idle-iterator";
+import { parseStreamingJson, parseStreamingJsonThrottled } from "../utils/json-parse";
 import { toolWireSchema } from "../utils/schema/wire";
 import { invalidateAwsCredentialCache, resolveAwsCredentials } from "./aws-credentials";
 import { decodeEventStream } from "./aws-eventstream";
 import { signRequest } from "./aws-sigv4";
 import { transformMessages } from "./transform-messages";
+
+/** Non-2xx response (or in-stream exception event) from the Bedrock runtime API. */
+export class BedrockApiError extends ProviderHttpError {
+	override readonly name = "BedrockApiError";
+}
 
 export type BedrockThinkingDisplay = "summarized" | "omitted";
 
@@ -81,87 +80,10 @@ function resolveBearerToken(options: BedrockOptions): string | undefined {
 	return options.bearerToken || apiKey || $env.AWS_BEARER_TOKEN_BEDROCK;
 }
 
-function inferRegionFromBedrockArn(modelId: string): string | undefined {
-	const parts = modelId.split(":", 6);
-	if (parts[0] !== "arn" || parts[2] !== "bedrock") return undefined;
-	const region = parts[3];
-	return region || undefined;
-}
-
-/**
- * Default AWS region for each Bedrock cross-region inference-profile geo prefix.
- * A geo-prefixed profile (e.g. `eu.anthropic.claude-…`) is only servable from
- * regions in its own geo, so routing one to `us-east-1` yields HTTP 400 "The
- * provided model identifier is invalid." `global.` profiles are anchored in the
- * us regions and intentionally absent here (they resolve fine via `us-east-1`).
- */
-const INFERENCE_PROFILE_GEO_DEFAULT_REGION: Record<string, string> = {
-	us: "us-east-1",
-	"us-gov": "us-gov-west-1",
-	eu: "eu-west-1",
-	apac: "ap-southeast-1",
-	au: "ap-southeast-2",
-	jp: "ap-northeast-1",
-};
-
-/** Geo prefix of a cross-region inference-profile id, e.g. `eu.anthropic.…` → `eu`. */
-function inferenceProfileGeo(modelId: string): string | undefined {
-	const dot = modelId.indexOf(".");
-	if (dot <= 0) return undefined;
-	const prefix = modelId.slice(0, dot);
-	return prefix in INFERENCE_PROFILE_GEO_DEFAULT_REGION ? prefix : undefined;
-}
-
-/**
- * Whether a concrete AWS region can serve a given inference-profile geo. The
- * `ap-` regions overlap across `apac`/`au`/`jp` profiles, so the Australia and
- * Japan geos pin their specific source regions rather than matching all `ap-*`.
- */
-function regionServesGeo(region: string, geo: string): boolean {
-	switch (geo) {
-		case "us-gov":
-			return region.startsWith("us-gov-");
-		case "us":
-			return region.startsWith("us-") && !region.startsWith("us-gov-");
-		case "eu":
-			return region.startsWith("eu-");
-		case "apac":
-			return region.startsWith("ap-");
-		case "au":
-			return region === "ap-southeast-2" || region === "ap-southeast-4";
-		case "jp":
-			return region === "ap-northeast-1" || region === "ap-northeast-3";
-		default:
-			return false;
-	}
-}
-
-/**
- * Resolve the Bedrock runtime region for a request. An explicit per-request
- * region and an ARN-embedded region win outright. Otherwise, for a geo-prefixed
- * cross-region inference profile (`us.`/`eu.`/`apac.`/`au.`/`jp.`/`us-gov.`), an
- * ambient region (`AWS_REGION` / `AWS_DEFAULT_REGION`) is honored only when it
- * can serve the profile's geo; a mismatched or absent ambient region is
- * corrected to the geo default so an `eu.`/`apac.` profile never POSTs to a `us`
- * endpoint (and vice versa). `global.` profiles have no geo entry, so the
- * ambient region (or `us-east-1`) is used unchanged.
- */
-function resolveBedrockRegion(modelId: string, options: BedrockOptions): string {
-	const explicit = options.region || inferRegionFromBedrockArn(modelId);
-	if (explicit) return explicit;
-	const ambient = $env.AWS_REGION || $env.AWS_DEFAULT_REGION;
-	const geo = inferenceProfileGeo(modelId);
-	if (geo) {
-		if (ambient && regionServesGeo(ambient, geo)) return ambient;
-		return INFERENCE_PROFILE_GEO_DEFAULT_REGION[geo];
-	}
-	return ambient || "us-east-1";
-}
-
 type Block = (TextContent | ThinkingContent | ToolCall) & {
-	[kStreamingBlockIndex]?: number;
-	[kStreamingPartialJson]?: string;
-	[kStreamingLastParseLen]?: number;
+	index?: number;
+	partialJson?: string;
+	lastParseLen?: number;
 };
 
 // ---------- Bedrock wire-format types ----------
@@ -213,28 +135,6 @@ interface WireToolConfig {
 	toolChoice?: WireToolChoice;
 }
 
-/**
- * Bedrock validates that requests carrying any `toolUse`/`toolResult` history
- * include a `toolConfig`. For no-tool ephemeral turns (`/btw`, IRC auto-replies)
- * we have nothing real to send, so we inject this placeholder. Its presence is
- * tracked by a per-request flag — never the wire name — so callers who happen
- * to register a real tool literally called `__no_tools__` are not affected.
- */
-const NO_TOOLS_SENTINEL_NAME = "__no_tools__";
-
-const NO_TOOLS_SENTINEL: WireToolSpec = {
-	toolSpec: {
-		name: NO_TOOLS_SENTINEL_NAME,
-		description: "Placeholder required by Bedrock validation. Do not call; answer with text.",
-		inputSchema: { json: { type: "object", properties: {} } },
-	},
-};
-
-interface BedrockToolPlan {
-	toolConfig: WireToolConfig | undefined;
-	sentinelInjected: boolean;
-}
-
 interface ConverseStreamRequest {
 	messages: WireMessage[];
 	system?: SystemContent[];
@@ -283,7 +183,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const startTime = performance.now();
+		const startTime = Date.now();
 		let firstTokenTime: number | undefined;
 
 		const output: AssistantMessage = {
@@ -306,14 +206,14 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 
 		const blocks = output.content as Block[];
 		let rawRequestDump: RawHttpRequestDump | undefined;
-		const region = resolveBedrockRegion(model.id, options);
+		const region = options.region || $env.AWS_REGION || $env.AWS_DEFAULT_REGION || "us-east-1";
 
 		try {
 			const cacheRetention = resolveCacheRetention(options.cacheRetention);
-			const convertedMessages = convertMessages(context, model, cacheRetention);
-			const toolPlan = planToolConfig(context.tools, options.toolChoice, convertedMessages);
-			const toolConfig = toolPlan.toolConfig;
-			const sentinelInjected = toolPlan.sentinelInjected;
+			const historyHasToolBlocks = context.messages.some(
+				m => m.role === "toolResult" || (m.role === "assistant" && m.content.some(b => b.type === "toolCall")),
+			);
+			const toolConfig = convertToolConfig(context.tools, options.toolChoice, historyHasToolBlocks);
 			let additionalModelRequestFields = buildAdditionalModelRequestFields(model, options);
 
 			// Bedrock rejects thinking + forced tool_choice ("any" or specific tool).
@@ -324,7 +224,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 			}
 
 			const commandInput: ConverseStreamRequest = {
-				messages: convertedMessages,
+				messages: convertMessages(context, model, cacheRetention),
 				system: buildSystemPrompt(context.systemPrompt, model, cacheRetention),
 				inferenceConfig: {
 					maxTokens: options.maxTokens,
@@ -368,7 +268,6 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 						profile: options.profile,
 						region,
 						signal: options.signal,
-						fetch: options.fetch,
 					});
 				}
 				const signed = await signRequest({
@@ -391,23 +290,23 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 			// timer, otherwise a Bedrock/proxy that accepts the POST and never
 			// sends headers would hang forever.
 			const firstEventTimeoutMs = options.streamFirstEventTimeoutMs ?? getStreamFirstEventTimeoutMs();
-			// Clear the pre-response timer the instant headers arrive (below): an
-			// absolute `AbortSignal.timeout` would keep aborting the actively
-			// streaming body, not just a stalled time-to-first-byte (issue #2422).
-			const watchdog = armPreResponseTimeout(options.signal, firstEventTimeoutMs);
-			let response: Response;
-			try {
-				response = await fetchWithRetry(url, {
-					method: "POST",
-					headers: requestHeaders,
-					body,
-					signal: watchdog.signal,
-					fetch: options.fetch,
-					timeout: false,
-				});
-			} finally {
-				watchdog.clear();
-			}
+			const preResponseWatchdog =
+				firstEventTimeoutMs !== undefined && firstEventTimeoutMs > 0
+					? AbortSignal.timeout(firstEventTimeoutMs)
+					: undefined;
+			const fetchSignal = preResponseWatchdog
+				? options.signal
+					? AbortSignal.any([options.signal, preResponseWatchdog])
+					: preResponseWatchdog
+				: options.signal;
+			const response = await fetchWithRetry(url, {
+				method: "POST",
+				headers: requestHeaders,
+				body,
+				signal: fetchSignal,
+				fetch: options.fetch,
+				timeout: false,
+			});
 
 			if (!response.ok) {
 				if (!bearerToken && (response.status === 401 || response.status === 403)) {
@@ -416,15 +315,11 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 					invalidateAwsCredentialCache({ profile: options.profile, region });
 				}
 				const errBody = await response.text().catch(() => "");
-				throw new AIError.BedrockApiError(
-					`Bedrock HTTP ${response.status}: ${errBody.slice(0, 1000)}`,
-					response.status,
-					{
-						headers: response.headers,
-					},
-				);
+				throw new BedrockApiError(`Bedrock HTTP ${response.status}: ${errBody.slice(0, 1000)}`, response.status, {
+					headers: response.headers,
+				});
 			}
-			if (!response.body) throw new AIError.BedrockApiError("Bedrock response has no body", response.status);
+			if (!response.body) throw new Error("Bedrock response has no body");
 
 			// Track first event for the abort/diagnostic path (currently informational).
 			for await (const message of decodeEventStream(response.body)) {
@@ -436,12 +331,14 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 					const payload = safeParsePayload(message.payload) as { message?: string } | undefined;
 					const errorMessage = payload?.message || new TextDecoder().decode(message.payload);
 					const text = `${exceptionType}: ${errorMessage}`;
-					throw new AIError.BedrockApiError(text, 400, { code: exceptionType });
+					throw exceptionType === "validationException"
+						? new BedrockApiError(text, 400, { code: exceptionType })
+						: new Error(text);
 				}
 				if (messageType === "error") {
 					const code = message.headers[":error-code"] || "UnknownError";
 					const errorMessage = message.headers[":error-message"] || new TextDecoder().decode(message.payload);
-					throw new AIError.BedrockApiError(`${code}: ${errorMessage}`, 400, { code });
+					throw new Error(`${code}: ${errorMessage}`);
 				}
 				if (messageType !== "event") continue;
 
@@ -453,21 +350,18 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 						// no-op: first event marker is implicit by stream entry.
 						const ev = payload as MessageStartEvent;
 						if (ev.role !== "assistant") {
-							throw new AIError.BedrockApiError(
-								"Unexpected assistant message start but got user message start instead",
-								0,
-							);
+							throw new Error("Unexpected assistant message start but got user message start instead");
 						}
 						stream.push({ type: "start", partial: output });
 						break;
 					}
 					case "contentBlockStart": {
-						if (!firstTokenTime) firstTokenTime = performance.now();
-						handleContentBlockStart(payload as ContentBlockStartEvent, blocks, output, stream, sentinelInjected);
+						if (!firstTokenTime) firstTokenTime = Date.now();
+						handleContentBlockStart(payload as ContentBlockStartEvent, blocks, output, stream);
 						break;
 					}
 					case "contentBlockDelta": {
-						if (!firstTokenTime) firstTokenTime = performance.now();
+						if (!firstTokenTime) firstTokenTime = Date.now();
 						handleContentBlockDelta(payload as ContentBlockDeltaEvent, blocks, output, stream);
 						break;
 					}
@@ -477,10 +371,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 					}
 					case "messageStop": {
 						const ev = payload as MessageStopEvent;
-						// A sentinel-only request must never surface a tool-use stop:
-						// no real tool exists for the agent to dispatch.
-						output.stopReason =
-							sentinelInjected && ev.stopReason === "tool_use" ? "stop" : mapStopReason(ev.stopReason);
+						output.stopReason = mapStopReason(ev.stopReason);
 						if (output.stopReason === "error") {
 							output.errorMessage = `Generation failed with stop reason: ${ev.stopReason ?? "unknown"}`;
 						}
@@ -496,20 +387,23 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 				}
 			}
 
-			if (options.signal?.aborted) throw new AIError.AbortError();
+			if (options.signal?.aborted) throw new Error("Request was aborted");
 
 			if (output.stopReason === "error" || output.stopReason === "aborted") {
-				throw new AIError.BedrockApiError(output.errorMessage ?? "An unknown error occurred", 0);
+				throw new Error(output.errorMessage ?? "An unknown error occurred");
 			}
 
-			output.duration = performance.now() - startTime;
+			output.duration = Date.now() - startTime;
 			if (firstTokenTime) output.ttft = firstTokenTime - startTime;
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
 			for (const block of output.content) {
-				if (block.type === "toolCall") clearStreamingPartialJson(block);
+				delete (block as Block).index;
+				delete (block as Block).partialJson;
 			}
+			output.stopReason = options.signal?.aborted ? "aborted" : "error";
+			output.errorStatus = extractHttpStatusFromError(error);
 			const baseMessage = error instanceof Error ? error.message : JSON.stringify(error);
 			// Enrich error with thinking block diagnostics for signature-related failures
 			let diagnostics = "";
@@ -531,12 +425,8 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 					diagnostics = `\n[thinking-diag] ${JSON.stringify(thinkingBlocks)}`;
 				}
 			}
-			const result = await AIError.finalize(error, { api: model.api, signal: options.signal, rawRequestDump });
-			output.stopReason = result.stopReason;
-			output.errorStatus = result.status;
-			output.errorId = result.id;
-			output.errorMessage = result.message + diagnostics;
-			output.duration = performance.now() - startTime;
+			output.errorMessage = await appendRawHttpRequestDumpFor400(baseMessage + diagnostics, error, rawRequestDump);
+			output.duration = Date.now() - startTime;
 			if (firstTokenTime) output.ttft = firstTokenTime - startTime;
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
@@ -560,15 +450,9 @@ function handleContentBlockStart(
 	blocks: Block[],
 	output: AssistantMessage,
 	stream: AssistantMessageEventStream,
-	sentinelInjected: boolean,
 ): void {
 	const index = event.contentBlockIndex;
 	const start = event.start;
-
-	// Drop the sentinel call only when we injected it ourselves. A caller that
-	// registers a real tool named `__no_tools__` would otherwise lose its
-	// legitimate tool-use events on normal turns.
-	if (sentinelInjected && start?.toolUse?.name === NO_TOOLS_SENTINEL_NAME) return;
 
 	if (start?.toolUse) {
 		const block: Block = {
@@ -576,8 +460,8 @@ function handleContentBlockStart(
 			id: normalizeToolCallId(start.toolUse.toolUseId || ""),
 			name: start.toolUse.name || "",
 			arguments: {},
-			[kStreamingPartialJson]: "",
-			[kStreamingBlockIndex]: index,
+			partialJson: "",
+			index,
 		};
 		output.content.push(block);
 		stream.push({ type: "toolcall_start", contentIndex: blocks.length - 1, partial: output });
@@ -592,13 +476,13 @@ function handleContentBlockDelta(
 ): void {
 	const contentBlockIndex = event.contentBlockIndex;
 	const delta = event.delta;
-	let index = blocks.findIndex(b => b[kStreamingBlockIndex] === contentBlockIndex);
+	let index = blocks.findIndex(b => b.index === contentBlockIndex);
 	let block = blocks[index];
 
 	if (delta?.text !== undefined) {
 		// If no text block exists yet, create one — `handleContentBlockStart` is not sent for text blocks
 		if (!block) {
-			const newBlock: Block = { type: "text", text: "", [kStreamingBlockIndex]: contentBlockIndex };
+			const newBlock: Block = { type: "text", text: "", index: contentBlockIndex };
 			output.content.push(newBlock);
 			index = blocks.length - 1;
 			block = blocks[index];
@@ -609,11 +493,11 @@ function handleContentBlockDelta(
 			stream.push({ type: "text_delta", contentIndex: index, delta: delta.text, partial: output });
 		}
 	} else if (delta?.toolUse && block?.type === "toolCall") {
-		block[kStreamingPartialJson] = (block[kStreamingPartialJson] || "") + (delta.toolUse.input || "");
-		const throttled = parseStreamingJsonThrottled(block[kStreamingPartialJson], block[kStreamingLastParseLen] ?? 0);
+		block.partialJson = (block.partialJson || "") + (delta.toolUse.input || "");
+		const throttled = parseStreamingJsonThrottled(block.partialJson, block.lastParseLen ?? 0);
 		if (throttled) {
 			block.arguments = throttled.value;
-			block[kStreamingLastParseLen] = throttled.parsedLen;
+			block.lastParseLen = throttled.parsedLen;
 		}
 		stream.push({ type: "toolcall_delta", contentIndex: index, delta: delta.toolUse.input || "", partial: output });
 	} else if (delta?.reasoningContent) {
@@ -621,12 +505,7 @@ function handleContentBlockDelta(
 		let thinkingIndex = index;
 
 		if (!thinkingBlock) {
-			const newBlock: Block = {
-				type: "thinking",
-				thinking: "",
-				thinkingSignature: "",
-				[kStreamingBlockIndex]: contentBlockIndex,
-			};
+			const newBlock: Block = { type: "thinking", thinking: "", thinkingSignature: "", index: contentBlockIndex };
 			output.content.push(newBlock);
 			thinkingIndex = blocks.length - 1;
 			thinkingBlock = blocks[thinkingIndex];
@@ -668,9 +547,10 @@ function handleContentBlockStop(
 	output: AssistantMessage,
 	stream: AssistantMessageEventStream,
 ): void {
-	const index = blocks.findIndex(b => b[kStreamingBlockIndex] === event.contentBlockIndex);
+	const index = blocks.findIndex(b => b.index === event.contentBlockIndex);
 	const block = blocks[index];
 	if (!block) return;
+	delete (block as Block).index;
 
 	switch (block.type) {
 		case "text":
@@ -680,8 +560,9 @@ function handleContentBlockStop(
 			stream.push({ type: "thinking_end", contentIndex: index, content: block.thinking, partial: output });
 			break;
 		case "toolCall":
-			block.arguments = parseStreamingJson(block[kStreamingPartialJson]);
-			clearStreamingPartialJson(block);
+			block.arguments = parseStreamingJson(block.partialJson);
+			delete (block as Block).partialJson;
+			delete (block as Block).lastParseLen;
 			stream.push({ type: "toolcall_end", contentIndex: index, toolCall: block, partial: output });
 			break;
 	}
@@ -776,7 +657,7 @@ function convertMessages(
 								contentBlocks.push({ image: createImageBlock(c.mimeType, c.data) });
 								break;
 							default:
-								throw new AIError.ValidationError("Unknown user content type");
+								throw new Error("Unknown user content type");
 						}
 					}
 					// Skip message if all blocks filtered out
@@ -824,11 +705,11 @@ function convertMessages(
 								});
 							} else {
 								// Model requires signature but we don't have one — demote to text
-								contentBlocks.push({ text: renderDemotedThinking(model.id, c.thinking) });
+								contentBlocks.push({ text: `[Thinking]: ${c.thinking.toWellFormed()}` });
 							}
 							break;
 						default:
-							throw new AIError.ValidationError("Unknown assistant content type");
+							throw new Error("Unknown assistant content type");
 					}
 				}
 				// Skip if all content blocks were filtered out
@@ -874,7 +755,7 @@ function convertMessages(
 				break;
 			}
 			default:
-				throw new AIError.ValidationError("Unknown message role");
+				throw new Error("Unknown message role");
 		}
 	}
 
@@ -891,48 +772,28 @@ function convertMessages(
 	return result;
 }
 
-function messagesHaveToolBlocks(messages: WireMessage[]): boolean {
-	for (const message of messages) {
-		for (const block of message.content) {
-			if ("toolUse" in block || "toolResult" in block) return true;
-		}
-	}
-	return false;
-}
+function convertToolConfig(
+	tools: Tool[] | undefined,
+	toolChoice: BedrockOptions["toolChoice"],
+	historyHasToolBlocks: boolean,
+): WireToolConfig | undefined {
+	if (!tools?.length) return undefined;
 
-function convertToolSpec(tool: Tool): WireToolSpec {
-	return {
+	const bedrockTools: WireToolSpec[] = tools.map(tool => ({
 		toolSpec: {
 			name: tool.name,
 			description: tool.description || "",
 			inputSchema: { json: toolWireSchema(tool) },
 		},
-	};
-}
+	}));
 
-function planToolConfig(
-	tools: Tool[] | undefined,
-	toolChoice: BedrockOptions["toolChoice"],
-	messages: WireMessage[],
-): BedrockToolPlan {
-	const activeTools = tools ?? [];
-	const hasTools = activeTools.length > 0;
-	const historyHasToolBlocks = messagesHaveToolBlocks(messages);
-
+	// Bedrock rejects requests whose history contains toolUse/toolResult blocks without a
+	// toolConfig. With prior tool use we must keep the tool specs and merely omit the choice
+	// (there is no "none" choice on Converse); dropping toolConfig entirely would 400.
 	if (toolChoice === "none") {
-		if (!historyHasToolBlocks) return { toolConfig: undefined, sentinelInjected: false };
-		if (!hasTools) {
-			return {
-				toolConfig: { tools: [NO_TOOLS_SENTINEL], toolChoice: { auto: {} } },
-				sentinelInjected: true,
-			};
-		}
-		return { toolConfig: { tools: activeTools.map(convertToolSpec) }, sentinelInjected: false };
+		return historyHasToolBlocks ? { tools: bedrockTools } : undefined;
 	}
 
-	if (!hasTools) return { toolConfig: undefined, sentinelInjected: false };
-
-	const bedrockTools = activeTools.map(convertToolSpec);
 	let bedrockToolChoice: WireToolChoice | undefined;
 	switch (toolChoice) {
 		case "auto":
@@ -947,7 +808,7 @@ function planToolConfig(
 			}
 	}
 
-	return { toolConfig: { tools: bedrockTools, toolChoice: bedrockToolChoice }, sentinelInjected: false };
+	return { tools: bedrockTools, toolChoice: bedrockToolChoice };
 }
 
 function mapStopReason(reason: string | undefined): StopReason {
@@ -990,14 +851,17 @@ function buildAdditionalModelRequestFields(
 		};
 	}
 
-	const level = requireSupportedEffort(model, reasoning);
-	const defaultBudgets: Record<Effort, number> = {
+	const validatedLevel = requireSupportedEffort(model, reasoning);
+	if (!THINKING_EFFORTS.includes(validatedLevel as Effort)) {
+		throw new Error(`Model ${model.provider}/${model.id} advertises an effort unsupported by Bedrock: ${validatedLevel}`);
+	}
+	const level = validatedLevel as Effort;
+	const defaultBudgets: Partial<Record<Effort, number>> = {
 		minimal: 1024,
 		low: 2048,
 		medium: 8192,
 		high: 16384,
 		xhigh: 32768,
-		max: 32768,
 	};
 	const budget = options.thinkingBudgets?.[level] ?? defaultBudgets[level];
 
@@ -1037,7 +901,7 @@ function createImageBlock(mimeType: string, data: string): ImageBlockWire["image
 			format = "webp";
 			break;
 		default:
-			throw new AIError.ValidationError(`Unknown image type: ${mimeType}`);
+			throw new Error(`Unknown image type: ${mimeType}`);
 	}
 	return { source: { bytes: data }, format };
 }

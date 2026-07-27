@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { isFastModeUnsupported } from "@oh-my-pi/pi-ai/error";
-import { clearAnthropicFastModeFallback, streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
+import {
+	clearAnthropicFastModeFallback,
+	isAnthropicFastModeUnsupportedError,
+	streamAnthropic,
+} from "@oh-my-pi/pi-ai/providers/anthropic";
 import type { Context, Model, ProviderSessionState, ServiceTier } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
@@ -88,6 +91,22 @@ describe("Anthropic priority service tier → speed='fast'", () => {
 			expect(payload.speed).toBeUndefined();
 		}
 	});
+
+	it("sets speed='fast' on direct anthropic when serviceTier='claude-only'", async () => {
+		const payload = (await capturePayload(makeAnthropicModel("claude-opus-4-7"), {
+			serviceTier: "claude-only",
+		})) as { speed?: string };
+		expect(payload.speed).toBe("fast");
+	});
+
+	it("omits speed when serviceTier='openai-only' on an anthropic model", async () => {
+		// Scoped to OpenAI — on this anthropic request, the scope doesn't match,
+		// so `speed` must not be set on the wire.
+		const payload = (await capturePayload(makeAnthropicModel("claude-opus-4-7"), {
+			serviceTier: "openai-only",
+		})) as Record<string, unknown>;
+		expect(payload.speed).toBeUndefined();
+	});
 });
 
 describe("clearAnthropicFastModeFallback", () => {
@@ -118,7 +137,7 @@ describe("clearAnthropicFastModeFallback", () => {
 	});
 });
 
-describe("isFastModeUnsupported", () => {
+describe("isAnthropicFastModeUnsupportedError", () => {
 	function makeStatusError(status: number, message: string): Error {
 		const err = new Error(message) as Error & { status: number };
 		err.status = status;
@@ -130,7 +149,7 @@ describe("isFastModeUnsupported", () => {
 			400,
 			'400 {"type":"error","error":{"type":"invalid_request_error","message":"\'claude-opus-4-5-20251101\' does not support the `speed` parameter."}}',
 		);
-		expect(isFastModeUnsupported(err)).toBe(true);
+		expect(isAnthropicFastModeUnsupportedError(err)).toBe(true);
 	});
 
 	it("detects 429 rate_limit_error when fast mode requires extra usage", () => {
@@ -140,7 +159,7 @@ describe("isFastModeUnsupported", () => {
 			429,
 			'429 {"type":"error","error":{"type":"rate_limit_error","message":"Extra usage is required for fast mode."}}',
 		);
-		expect(isFastModeUnsupported(err)).toBe(true);
+		expect(isAnthropicFastModeUnsupportedError(err)).toBe(true);
 	});
 
 	it("ignores unrelated 429 rate limits", () => {
@@ -148,7 +167,7 @@ describe("isFastModeUnsupported", () => {
 			429,
 			'429 {"type":"error","error":{"type":"rate_limit_error","message":"Number of requests has exceeded your account\'s rate limit."}}',
 		);
-		expect(isFastModeUnsupported(err)).toBe(false);
+		expect(isAnthropicFastModeUnsupportedError(err)).toBe(false);
 	});
 
 	it("ignores unrelated 400 invalid_request errors", () => {
@@ -156,6 +175,6 @@ describe("isFastModeUnsupported", () => {
 			400,
 			'400 {"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}',
 		);
-		expect(isFastModeUnsupported(err)).toBe(false);
+		expect(isAnthropicFastModeUnsupportedError(err)).toBe(false);
 	});
 });

@@ -39,12 +39,12 @@ export interface SttDownloadProgress {
 }
 
 /**
- * Whether the selected model is fully present in the local cache. For
+ * Whether the selected model is already present in the local cache. For
  * transformers.js Whisper tiers a complete download leaves `config.json` plus
- * matching `encoder*.onnx` and `decoder*.onnx` shards under `onnx/` (a partial
- * fetch with only one shard, or a bare `config.json`, reads as not-cached); for
- * sherpa-onnx tiers every model file (encoder/decoder/joiner + tokens) must be
- * present (`.part` sidecars from an interrupted fetch are ignored).
+ * the `onnx/` weight files (a bare `config.json` from an interrupted fetch reads
+ * as not-cached); for sherpa-onnx tiers every model file (encoder/decoder/joiner
+ * + tokens) must be present (`.part` sidecars from an interrupted fetch are
+ * ignored).
  */
 export async function isSttModelCached(key: string): Promise<boolean> {
 	const spec = resolveSttModelSpec(key);
@@ -63,15 +63,8 @@ export async function isSttModelCached(key: string): Promise<boolean> {
 	try {
 		const root = await fs.readdir(repoDir);
 		if (!root.includes("config.json")) return false;
-		// Whisper tiers are encoder-decoder: a complete download leaves both an
-		// `encoder*.onnx` and a `decoder*.onnx` (the dtype suffix varies). Require
-		// both rather than any single `.onnx`, so an interrupted fetch that landed
-		// only one shard reads as not-cached and the caller takes the foreground
-		// download path with progress instead of silently fetching mid-recording.
 		const onnxFiles = await fs.readdir(path.join(repoDir, "onnx")).catch(() => [] as string[]);
-		const hasEncoder = onnxFiles.some(file => file.startsWith("encoder") && file.endsWith(".onnx"));
-		const hasDecoder = onnxFiles.some(file => file.startsWith("decoder") && file.endsWith(".onnx"));
-		return hasEncoder && hasDecoder;
+		return onnxFiles.some(file => file.endsWith(".onnx"));
 	} catch {
 		return false;
 	}
@@ -90,7 +83,7 @@ export async function downloadSttModel(
 ): Promise<void> {
 	const spec = resolveSttModelSpec(key);
 	const files = new Map<string, { loaded: number; total: number }>();
-	const result = await sttClient.downloadModel(spec.key, {
+	const ok = await sttClient.downloadModel(spec.key, {
 		signal: options?.signal,
 		onProgress: event => {
 			if ((event.status === "progress" || event.status === "progress_total") && event.file) {
@@ -117,13 +110,7 @@ export async function downloadSttModel(
 			});
 		},
 	});
-	if (!result.ok) {
-		const detail = result.error ? `: ${result.error}` : ". Check your network connection.";
-		throw new Error(`Failed to download speech model (${spec.repo})${detail}`);
-	}
-	if (!(await isSttModelCached(spec.key))) {
-		throw new Error(`Speech model download finished without required files (${spec.repo}).`);
-	}
+	if (!ok) throw new Error(`Failed to download speech model (${spec.repo}). Check your network connection.`);
 }
 
 // ── Public API ─────────────────────────────────────────────────────

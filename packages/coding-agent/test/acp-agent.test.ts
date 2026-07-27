@@ -20,7 +20,6 @@ import {
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { resolveLocalUrlToPath } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import {
 	ACP_BOOTSTRAP_RACE_GUARD_MS,
 	AcpAgent,
@@ -30,27 +29,8 @@ import type { PlanModeState } from "@oh-my-pi/pi-coding-agent/plan-mode/state";
 import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SILENT_ABORT_MARKER } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { DEFAULT_STT_MODEL_KEY, STT_MODEL_OPTIONS } from "@oh-my-pi/pi-coding-agent/stt/models";
-import {
-	DEFAULT_TTS_LOCAL_MODEL_KEY,
-	DEFAULT_TTS_VOICE,
-	TTS_LOCAL_MODELS,
-	TTS_LOCAL_VOICE_OPTIONS,
-} from "@oh-my-pi/pi-coding-agent/tts/models";
 import { getConfigRootDir, setAgentDir } from "@oh-my-pi/pi-utils";
-import type { z } from "zod/v4";
-
-/**
- * Validate an ACP wire payload against the external `@agentclientprotocol/sdk`
- * Zod schemas. Those schemas come from the ACP protocol SDK (external boundary)
- * and cannot be expressed as ArkType, so they stay on Zod and are validated via
- * `.safeParse` directly rather than through the ArkType-only `expectAcpStructure`
- * helper in `./helpers/acp-schema`.
- */
-function expectAcpStructure(schema: z.ZodType, value: unknown): void {
-	const result = schema.safeParse(value);
-	expect(result.success, result.success ? undefined : JSON.stringify(result.error.issues, null, 2)).toBe(true);
-}
+import { expectAcpStructure } from "./helpers/acp-schema";
 
 const TEST_MODELS: Model[] = [
 	buildModel({
@@ -124,7 +104,6 @@ class FakeAgentSession {
 	}
 	promptCalls: string[] = [];
 	customMessages: Array<{ customType: string; content: string; details?: unknown }> = [];
-	customMessageOptions: Array<{ streamingBehavior?: "steer" | "followUp"; queueChipText?: string } | undefined> = [];
 	skillsSettings = { enableSkillCommands: true };
 	skills: Array<{ name: string; description: string; filePath: string; baseDir: string; source: string }> = [];
 	planModeState: PlanModeState | undefined;
@@ -236,12 +215,8 @@ class FakeAgentSession {
 		this.isStreaming = false;
 	}
 
-	async promptCustomMessage(
-		message: { customType: string; content: string; details?: unknown },
-		options?: { streamingBehavior?: "steer" | "followUp"; queueChipText?: string },
-	): Promise<void> {
+	async promptCustomMessage(message: { customType: string; content: string; details?: unknown }): Promise<void> {
 		this.customMessages.push(message);
-		this.customMessageOptions.push(options);
 		this.isStreaming = true;
 		const assistantMessage = makeAssistantMessage("skill pong");
 		for (const listener of this.#listeners) {
@@ -341,9 +316,8 @@ class FakeAgentSession {
 		return this.fastMode;
 	}
 
-	setFastMode(enabled: boolean): boolean {
+	setFastMode(enabled: boolean): void {
 		this.fastMode = enabled;
-		return true;
 	}
 
 	isFastModeEnabled(): boolean {
@@ -659,14 +633,11 @@ describe("ACP agent", () => {
 		const session = harness.findSession(created.sessionId)!;
 		await harness.agent.setSessionMode({ sessionId: created.sessionId, modeId: "plan" });
 
-		const localOptions = {
-			getArtifactsDir: () => session.sessionManager.getArtifactsDir(),
-			getSessionId: () => session.sessionManager.getSessionId(),
-		};
-		cleanupRoots.push(resolveLocalUrlToPath("local://", localOptions));
-		// On Windows, long artifact roots are shortened by the local:// resolver to
-		// avoid MAX_PATH. Write through the same resolver the ACP handler reads from.
-		const planPath = resolveLocalUrlToPath("local://words-counter-plan.md", localOptions);
+		const artifactsDir = session.sessionManager.getArtifactsDir();
+		expect(artifactsDir).not.toBeNull();
+		// The agent writes to its chosen `local://<slug>-plan.md` and resolves with
+		// the matching slug — the file is never renamed.
+		const planPath = path.join(artifactsDir!, "local", "words-counter-plan.md");
 		await Bun.write(planPath, "# Words Counter\n\nFile contents.");
 
 		const updatesBefore = harness.updates.length;
@@ -732,12 +703,8 @@ describe("ACP agent", () => {
 		const session = harness.findSession(created.sessionId)!;
 		await harness.agent.setSessionMode({ sessionId: created.sessionId, modeId: "plan" });
 
-		const localOptions = {
-			getArtifactsDir: () => session.sessionManager.getArtifactsDir(),
-			getSessionId: () => session.sessionManager.getSessionId(),
-		};
-		cleanupRoots.push(resolveLocalUrlToPath("local://", localOptions));
-		const planPath = resolveLocalUrlToPath("local://PLAN.md", localOptions);
+		const artifactsDir = session.sessionManager.getArtifactsDir();
+		const planPath = path.join(artifactsDir!, "local", "PLAN.md");
 		await Bun.write(planPath, "# Words Counter\n\nFile contents.");
 
 		const updatesBefore = harness.updates.length;
@@ -751,7 +718,7 @@ describe("ACP agent", () => {
 		expect(result.content[0]?.text).toMatch(/refinement requested/i);
 		// Plan file stays put; no rename, no write-access grant.
 		expect(await Bun.file(planPath).exists()).toBe(true);
-		expect(await Bun.file(resolveLocalUrlToPath("local://words-counter.md", localOptions)).exists()).toBe(false);
+		expect(await Bun.file(path.join(artifactsDir!, "local", "words-counter.md")).exists()).toBe(false);
 		// Plan mode + standing handler stay active so the agent can iterate.
 		expect(session.planModeState?.enabled).toBe(true);
 		expect(typeof session.standingResolveHandler).toBe("function");
@@ -897,50 +864,7 @@ describe("ACP agent", () => {
 		await Bun.sleep(0);
 	});
 
-	it("lists static speech models for ACP mobile voice settings", async () => {
-		const harness = await createHarness();
-		const voices = TTS_LOCAL_VOICE_OPTIONS.map(({ value, label }) => ({ value, label }));
-
-		const result = await harness.agent.extMethod("speech.models.list", {});
-
-		expect(result).toEqual({
-			settings: {
-				speechToTextModel: "stt.modelName",
-				textToSpeechModel: "tts.localModel",
-				textToSpeechVoice: "tts.localVoice",
-				speechVoice: "speech.voice",
-			},
-			defaults: {
-				speechToTextModel: DEFAULT_STT_MODEL_KEY,
-				textToSpeechModel: DEFAULT_TTS_LOCAL_MODEL_KEY,
-				voice: DEFAULT_TTS_VOICE,
-			},
-			speechToText: {
-				setting: "stt.modelName",
-				defaultValue: DEFAULT_STT_MODEL_KEY,
-				models: STT_MODEL_OPTIONS.map(({ value, label, description }) => ({ value, label, description })),
-			},
-			textToSpeech: {
-				modelSetting: "tts.localModel",
-				voiceSetting: "tts.localVoice",
-				speechVoiceSetting: "speech.voice",
-				defaultModel: DEFAULT_TTS_LOCAL_MODEL_KEY,
-				defaultVoice: DEFAULT_TTS_VOICE,
-				models: TTS_LOCAL_MODELS.map(({ key, label, description, voices: modelVoices }) => ({
-					value: key,
-					label,
-					description,
-					voices: modelVoices.map(({ id, label: voiceLabel }) => ({ value: id, label: voiceLabel })),
-				})),
-				voices,
-			},
-		});
-
-		harness.abortController.abort();
-		await Bun.sleep(0);
-	});
-
-	it("accepts OMP extension methods and rejects unknown unprefixed methods", async () => {
+	it("accepts only ACP underscore-prefixed extension methods", async () => {
 		const harness = await createHarness();
 
 		const result = await harness.agent.extMethod("_omp/sessions/listAll", { limit: 2 });
@@ -1013,115 +937,6 @@ describe("ACP agent", () => {
 				update => typeof getChunkMessageId(update) === "string" && getChunkMessageId(update)!.length > 0,
 			),
 		).toBe(true);
-
-		harness.abortController.abort();
-		await Bun.sleep(0);
-	});
-
-	it("delivers the final visible answer when agent_end overtakes the assistant message_end (#4902)", async () => {
-		const harness = await createHarness();
-		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
-		const session = harness.findSession(created.sessionId);
-		if (!session) throw new Error("session not registered");
-
-		// Live turn as observed through the prompt subscription when the
-		// fire-and-forget assistant message_end handler loses the race against
-		// the agent_end flush: thinking streams, then the turn ends. No
-		// text_delta and no message_end ever reach this subscriber — the final
-		// text exists only on the agent_end payload.
-		const assistantMessage = makeAssistantMessage("Final visible answer.", "Considering the greeting.");
-		session.prompt = async (text: string): Promise<boolean> => {
-			session.promptCalls.push(text);
-			session.isStreaming = true;
-			for (const listener of session.listeners()) {
-				listener({
-					type: "message_update",
-					message: assistantMessage,
-					assistantMessageEvent: { type: "thinking_delta", delta: "Considering the greeting." },
-				} as AgentSessionEvent);
-			}
-			session.sessionManager.appendMessage(assistantMessage);
-			for (const listener of session.listeners()) {
-				listener({ type: "agent_end", messages: [assistantMessage] } as AgentSessionEvent);
-			}
-			session.isStreaming = false;
-			return true;
-		};
-
-		const response = await harness.agent.prompt({
-			sessionId: created.sessionId,
-			prompt: [{ type: "text", text: "Say hello" }],
-		});
-		expectAcpStructure(zPromptResponse, response);
-		expect(response.stopReason).toBe("end_turn");
-
-		const chunks = harness.updates.filter(update => update.sessionId === created.sessionId);
-		const thoughtChunks = chunks.filter(update => update.update.sessionUpdate === "agent_thought_chunk");
-		const messageChunks = chunks.filter(update => update.update.sessionUpdate === "agent_message_chunk");
-		expect(thoughtChunks).toHaveLength(1);
-		// The visible answer must reach the client exactly once even though the
-		// assistant message_end never arrived on this subscription.
-		expect(messageChunks).toHaveLength(1);
-		expect(messageChunks[0]?.update).toEqual(
-			expect.objectContaining({
-				sessionUpdate: "agent_message_chunk",
-				content: { type: "text", text: "Final visible answer." },
-			}),
-		);
-		// Flushed answer belongs to the same live message as the thought chunk.
-		expect(getChunkMessageId(messageChunks[0]!)).toBe(getChunkMessageId(thoughtChunks[0]!)!);
-		expectAcpNotifications(harness.updates);
-
-		harness.abortController.abort();
-		await Bun.sleep(0);
-	});
-
-	it("does not duplicate the final answer when the assistant message_end arrives before agent_end", async () => {
-		// Companion to the #4902 regression: when message_end IS delivered, its
-		// fallback emission wins and the agent_end flush must stay silent.
-		const harness = await createHarness();
-		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
-		const session = harness.findSession(created.sessionId);
-		if (!session) throw new Error("session not registered");
-
-		const assistantMessage = makeAssistantMessage("Composed offline.", "quiet planning");
-		session.prompt = async (text: string): Promise<boolean> => {
-			session.promptCalls.push(text);
-			session.isStreaming = true;
-			for (const listener of session.listeners()) {
-				listener({
-					type: "message_update",
-					message: assistantMessage,
-					assistantMessageEvent: { type: "thinking_delta", delta: "quiet planning" },
-				} as AgentSessionEvent);
-			}
-			for (const listener of session.listeners()) {
-				listener({ type: "message_end", message: assistantMessage } as AgentSessionEvent);
-			}
-			session.sessionManager.appendMessage(assistantMessage);
-			for (const listener of session.listeners()) {
-				listener({ type: "agent_end", messages: [assistantMessage] } as AgentSessionEvent);
-			}
-			session.isStreaming = false;
-			return true;
-		};
-
-		const response = await harness.agent.prompt({
-			sessionId: created.sessionId,
-			prompt: [{ type: "text", text: "Say hello" }],
-		});
-		expectAcpStructure(zPromptResponse, response);
-
-		const messageChunks = harness.updates.filter(
-			update => update.sessionId === created.sessionId && update.update.sessionUpdate === "agent_message_chunk",
-		);
-		expect(messageChunks).toHaveLength(1);
-		expect(messageChunks[0]?.update).toEqual(
-			expect.objectContaining({
-				content: { type: "text", text: "Composed offline." },
-			}),
-		);
-		expectAcpNotifications(harness.updates);
 
 		harness.abortController.abort();
 		await Bun.sleep(0);
@@ -1525,8 +1340,7 @@ describe("ACP agent", () => {
 	it("executes skill commands through custom skill messages", async () => {
 		const harness = await createHarness();
 		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
-		const session = harness.findSession(created.sessionId);
-		if (!session) throw new Error("expected ACP session to exist after newSession");
+		const session = harness.findSession(created.sessionId)!;
 		const skillDir = path.join(harness.cwdA, ".skills", "sample");
 		const skillPath = path.join(skillDir, "SKILL.md");
 		await fs.promises.mkdir(skillDir, { recursive: true });
@@ -1549,15 +1363,10 @@ describe("ACP agent", () => {
 
 		expect(session.promptCalls).toEqual([]);
 		expect(session.customMessages).toHaveLength(1);
-		const customMessage = session.customMessages[0];
-		if (!customMessage) throw new Error("expected ACP skill prompt custom message");
-		expect(customMessage.customType).toBe("skill-prompt");
-		expect(customMessage.content).toContain("# Sample\nDo work.");
-		expect(customMessage.content).toContain('The user has invoked the "sample" skill');
-		expect(customMessage.content).toContain(`[Skill directory: ${skillDir}]`);
-		expect(customMessage.content).toMatch(/[Rr]esolve any relative paths/);
-		expect(customMessage.content).toContain("User: extra context");
-		expect(session.customMessageOptions[0]).toEqual({ streamingBehavior: "steer" });
+		expect(session.customMessages[0]!.customType).toBe("skill-prompt");
+		expect(session.customMessages[0]!.content).toContain("# Sample\nDo work.");
+		expect(session.customMessages[0]!.content).toContain(`Skill: ${skillPath}`);
+		expect(session.customMessages[0]!.content).toContain("User: extra context");
 
 		harness.abortController.abort();
 		await Bun.sleep(0);

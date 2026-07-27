@@ -36,7 +36,6 @@ function fakeBeam(): FakeBeam {
 			importanceWeight: 0.2,
 			useCloud: false,
 			localLlmEnabled: false,
-			maxEpisodeChars: 100_000,
 		},
 		linearCalls: 0,
 		enhancedCalls: 0,

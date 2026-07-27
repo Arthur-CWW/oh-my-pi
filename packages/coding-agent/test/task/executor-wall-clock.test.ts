@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { getEventListeners } from "node:events";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
@@ -8,6 +9,7 @@ import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/p
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { logger } from "@oh-my-pi/pi-utils";
 
 /**
  * Contract: when `task.maxRuntimeMs` is set, a subagent whose inference call
@@ -68,7 +70,45 @@ function mockCreateAgentSession(session: AgentSession) {
 	} satisfies CreateAgentSessionResult);
 }
 
+function createFastYieldSession(): AgentSession {
+	const session: Partial<AgentSession> = {
+		state: { messages: [] } as never,
+		agent: { state: { systemPrompt: ["test"] } } as never,
+		extensionRunner: undefined as never,
+		sessionManager: { appendSessionInit: () => {} } as never,
+		getActiveToolNames: () => ["read", "yield"],
+		setActiveToolsByName: async () => {},
+		subscribe: (listener: (event: AgentSessionEvent) => void) => {
+			queueMicrotask(() => {
+				listener({
+					type: "tool_execution_end",
+					toolCallId: "tool-fast",
+					toolName: "yield",
+					result: {
+						content: [{ type: "text", text: "Result submitted." }],
+						details: { status: "success", data: { ok: true } },
+					},
+					isError: false,
+				} as AgentSessionEvent);
+			});
+			return () => {};
+		},
+		prompt: async () => true,
+		waitForIdle: async () => {},
+		getLastAssistantMessage: () => undefined,
+		abort: async () => {},
+		dispose: async () => {},
+	};
+	return session as AgentSession;
+}
+
 describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
+	beforeEach(() => {
+		vi.spyOn(logger, "warn").mockImplementation(() => {});
+		vi.spyOn(logger, "debug").mockImplementation(() => {});
+		vi.spyOn(logger, "error").mockImplementation(() => {});
+	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
 	});
@@ -117,37 +157,8 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 		// Stub session resolves immediately to a no-op yield so we don't actually
 		// hang; we only need to assert that NO timeout fires when maxRuntimeMs=0.
 		const settings = Settings.isolated({ "task.maxRuntimeMs": 0 });
-		const fastSession: Partial<AgentSession> = {
-			state: { messages: [] } as never,
-			agent: { state: { systemPrompt: ["test"] } } as never,
-			extensionRunner: undefined as never,
-			sessionManager: { appendSessionInit: () => {} } as never,
-			getActiveToolNames: () => ["read", "yield"],
-			setActiveToolsByName: async () => {},
-			subscribe: (listener: (event: AgentSessionEvent) => void) => {
-				// Fire a synthetic yield on the next tick to drive runSubprocess to
-				// completion without depending on the real agent loop.
-				queueMicrotask(() => {
-					listener({
-						type: "tool_execution_end",
-						toolCallId: "tool-fast",
-						toolName: "yield",
-						result: {
-							content: [{ type: "text", text: "Result submitted." }],
-							details: { status: "success", data: { ok: true } },
-						},
-						isError: false,
-					} as AgentSessionEvent);
-				});
-				return () => {};
-			},
-			prompt: async () => true,
-			waitForIdle: async () => {},
-			getLastAssistantMessage: () => undefined,
-			abort: async () => {},
-			dispose: async () => {},
-		};
-		mockCreateAgentSession(fastSession as AgentSession);
+		const fastSession = createFastYieldSession();
+		mockCreateAgentSession(fastSession);
 
 		const result = await runSubprocess({
 			...baseOptions,
@@ -157,6 +168,25 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 
 		expect(result.aborted).toBe(false);
 		expect(result.abortReason).toBeUndefined();
+	});
+
+	it("disarms its runtime timer and caller abort listener after terminal completion", async () => {
+		const controller = new AbortController();
+		const settings = Settings.isolated({ "task.maxRuntimeMs": 100 });
+		mockCreateAgentSession(createFastYieldSession());
+
+		const result = await runSubprocess({
+			...baseOptions,
+			id: "subagent-monitor-cleanup",
+			settings,
+			signal: controller.signal,
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+		vi.clearAllMocks();
+		await Bun.sleep(150);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("aborts before prompting when the timer fires during session setup", async () => {
@@ -260,191 +290,48 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 		expect(result.extractedToolData?.yield).toBeDefined();
 	});
 
-	it("commits a yield tool call before the soft request budget aborts the turn", async () => {
-		const settings = Settings.isolated({ "task.softRequestBudget": 1 });
-		const firstAssistantMessage = {
-			role: "assistant" as const,
-			content: [{ type: "text" as const, text: "finishing the task" }],
-			stopReason: "stop" as const,
-		};
-		const yieldAssistantMessage = {
-			role: "assistant" as const,
-			content: [
-				{
-					type: "toolCall" as const,
-					id: "tool-yield-budget",
-					name: "yield",
-					arguments: { result: { data: { finished: "unvalidated" } } },
-				},
-			],
-			stopReason: "toolUse" as const,
-		};
+	it("carries timeout partial progress from synthetic session events", async () => {
+		const settings = Settings.isolated({ "task.maxRuntimeMs": 30 });
+		const { promise: hang, resolve: releaseHang } = Promise.withResolvers<void>();
 		let listenerRef: ((event: AgentSessionEvent) => void) | undefined;
-		let waitForIdleCalls = 0;
-		let abortCount = 0;
-		let abortCountBeforeYieldExecutionEnd: number | undefined;
 		const session: Partial<AgentSession> = {
 			state: { messages: [] } as never,
 			agent: { state: { systemPrompt: ["test"] } } as never,
 			extensionRunner: undefined as never,
 			sessionManager: { appendSessionInit: () => {} } as never,
-			getActiveToolNames: () => ["read", "yield"],
+			getActiveToolNames: () => ["write", "edit", "yield"],
 			setActiveToolsByName: async () => {},
 			subscribe: (listener: (event: AgentSessionEvent) => void) => {
 				listenerRef = listener;
 				return () => {};
 			},
-			prompt: async () => true,
-			waitForIdle: async () => {
-				waitForIdleCalls += 1;
-				if (waitForIdleCalls !== 1) return;
+			prompt: async () => {
 				listenerRef?.({
-					type: "message_end",
-					message: firstAssistantMessage,
+					type: "tool_execution_start",
+					toolCallId: "tool-write",
+					toolName: "write",
+					args: { path: "src/new.ts", content: "new" },
 				} as unknown as AgentSessionEvent);
 				listenerRef?.({
-					type: "message_end",
-					message: yieldAssistantMessage,
+					type: "tool_execution_start",
+					toolCallId: "tool-edit",
+					toolName: "edit",
+					args: { path: "src/existing.ts" },
 				} as unknown as AgentSessionEvent);
-				abortCountBeforeYieldExecutionEnd = abortCount;
 				listenerRef?.({
-					type: "tool_execution_end",
-					toolCallId: "tool-yield-budget",
-					toolName: "yield",
-					result: {
-						content: [{ type: "text", text: "Result submitted." }],
-						details: { status: "success", data: { finished: "validated" } },
-					},
-					isError: false,
-				} as AgentSessionEvent);
-			},
-			getLastAssistantMessage: () => yieldAssistantMessage as never,
-			abort: async () => {
-				abortCount += 1;
-			},
-			dispose: async () => {},
-		};
-		mockCreateAgentSession(session as AgentSession);
-
-		const result = await runSubprocess({
-			...baseOptions,
-			id: "subagent-soft-budget-yield",
-			settings,
-		});
-
-		expect(abortCountBeforeYieldExecutionEnd).toBe(0);
-		expect(result.aborted).toBe(false);
-		expect(result.exitCode).toBe(0);
-		expect(result.requests).toBe(2);
-		expect(result.abortReason).toBeUndefined();
-		expect(JSON.parse(result.output)).toEqual({ finished: "validated" });
-	});
-
-	it("does not finalize rejected yield arguments after crossing the soft request budget", async () => {
-		const settings = Settings.isolated({ "task.softRequestBudget": 1 });
-		const firstAssistantMessage = {
-			role: "assistant" as const,
-			content: [{ type: "text" as const, text: "finishing the task" }],
-			stopReason: "stop" as const,
-		};
-		const rejectedYieldMessage = {
-			role: "assistant" as const,
-			content: [
-				{
-					type: "toolCall" as const,
-					id: "tool-yield-rejected",
-					name: "yield",
-					arguments: { result: { data: { finished: "rejected-before-validation" } } },
-				},
-			],
-			stopReason: "toolUse" as const,
-		};
-		const validYieldMessage = {
-			role: "assistant" as const,
-			content: [
-				{
-					type: "toolCall" as const,
-					id: "tool-yield-valid",
-					name: "yield",
-					arguments: { result: { data: { finished: "unvalidated-later" } } },
-				},
-			],
-			stopReason: "toolUse" as const,
-		};
-		let listenerRef: ((event: AgentSessionEvent) => void) | undefined;
-		let lastAssistantMessage:
-			| typeof firstAssistantMessage
-			| typeof rejectedYieldMessage
-			| typeof validYieldMessage
-			| undefined;
-		let waitForIdleCalls = 0;
-		let abortCount = 0;
-		let abortCountBeforeRejectedYieldExecutionEnd: number | undefined;
-		let abortCountBeforeValidYieldExecutionEnd: number | undefined;
-		const promptCalls: Array<{ text: string; options?: PromptOptions }> = [];
-		const session: Partial<AgentSession> = {
-			state: { messages: [] } as never,
-			agent: { state: { systemPrompt: ["test"] } } as never,
-			extensionRunner: undefined as never,
-			sessionManager: { appendSessionInit: () => {} } as never,
-			getActiveToolNames: () => ["read", "yield"],
-			setActiveToolsByName: async () => {},
-			subscribe: (listener: (event: AgentSessionEvent) => void) => {
-				listenerRef = listener;
-				return () => {};
-			},
-			prompt: async (text: string, options?: PromptOptions) => {
-				promptCalls.push({ text, options });
+					type: "message_update",
+					message: { role: "assistant", content: [] },
+					assistantMessageEvent: { type: "text_delta", delta: "Wrote src/new.ts and edited src/existing.ts." },
+				} as unknown as AgentSessionEvent);
+				await hang;
 				return true;
 			},
 			waitForIdle: async () => {
-				waitForIdleCalls += 1;
-				if (waitForIdleCalls === 1) {
-					lastAssistantMessage = firstAssistantMessage;
-					listenerRef?.({
-						type: "message_end",
-						message: firstAssistantMessage,
-					} as unknown as AgentSessionEvent);
-					lastAssistantMessage = rejectedYieldMessage;
-					listenerRef?.({
-						type: "message_end",
-						message: rejectedYieldMessage,
-					} as unknown as AgentSessionEvent);
-					abortCountBeforeRejectedYieldExecutionEnd = abortCount;
-					listenerRef?.({
-						type: "tool_execution_end",
-						toolCallId: "tool-yield-rejected",
-						toolName: "yield",
-						result: {
-							content: [{ type: "text", text: "Yield rejected." }],
-							details: { status: "error", data: { finished: "rejected-before-validation" } },
-						},
-						isError: true,
-					} as AgentSessionEvent);
-					return;
-				}
-				if (waitForIdleCalls === 2) {
-					lastAssistantMessage = validYieldMessage;
-					listenerRef?.({
-						type: "message_end",
-						message: validYieldMessage,
-					} as unknown as AgentSessionEvent);
-					abortCountBeforeValidYieldExecutionEnd = abortCount;
-					listenerRef?.({
-						type: "tool_execution_end",
-						toolCallId: "tool-yield-valid",
-						toolName: "yield",
-						result: {
-							content: [{ type: "text", text: "Result submitted." }],
-							details: { status: "success", data: { finished: "validated-later" } },
-						},
-						isError: false,
-					} as AgentSessionEvent);
-				}
+				await hang;
 			},
-			getLastAssistantMessage: () => lastAssistantMessage as never,
+			getLastAssistantMessage: () => undefined,
 			abort: async () => {
-				abortCount += 1;
+				releaseHang();
 			},
 			dispose: async () => {},
 		};
@@ -452,139 +339,18 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 
 		const result = await runSubprocess({
 			...baseOptions,
-			id: "subagent-soft-budget-rejected-yield",
+			id: "subagent-timeout-partial",
 			settings,
 		});
 
-		expect(abortCountBeforeRejectedYieldExecutionEnd).toBe(0);
-		expect(abortCountBeforeValidYieldExecutionEnd).toBe(0);
-		expect(promptCalls.length).toBeGreaterThanOrEqual(2);
-		expect(promptCalls[1]?.options?.synthetic).toBe(true);
-		expect(result.aborted).toBe(false);
-		expect(result.exitCode).toBe(0);
-		expect(result.requests).toBe(3);
-		expect(result.abortReason).toBeUndefined();
-		expect(JSON.parse(result.output)).toEqual({ finished: "validated-later" });
-		expect(result.extractedToolData?.yield).toEqual([
-			{
-				data: { finished: "validated-later" },
-				status: "success",
-				error: undefined,
-				type: undefined,
-				useLastTurn: undefined,
-				schemaOverridden: undefined,
-			},
-		]);
-	});
-
-	it("resumes the hard budget guard after an incremental yield commits", async () => {
-		const settings = Settings.isolated({ "task.softRequestBudget": 1 });
-		const firstAssistantMessage = {
-			role: "assistant" as const,
-			content: [{ type: "text" as const, text: "still working" }],
-			stopReason: "stop" as const,
-		};
-		const incrementalYieldMessage = {
-			role: "assistant" as const,
-			content: [
-				{
-					type: "toolCall" as const,
-					id: "tool-yield-incremental",
-					name: "yield",
-					arguments: { type: ["findings"], result: { data: { id: "saved" } } },
-				},
-			],
-			stopReason: "toolUse" as const,
-		};
-		const followingAssistantMessage = {
-			role: "assistant" as const,
-			content: [{ type: "text" as const, text: "continuing after the saved section" }],
-			stopReason: "stop" as const,
-		};
-		let listenerRef: ((event: AgentSessionEvent) => void) | undefined;
-		let lastAssistantMessage:
-			| typeof firstAssistantMessage
-			| typeof incrementalYieldMessage
-			| typeof followingAssistantMessage
-			| undefined;
-		let waitForIdleCalls = 0;
-		let abortCount = 0;
-		let abortCountBeforeYieldExecutionEnd: number | undefined;
-		let abortCountAfterFollowingTurn: number | undefined;
-		const session: Partial<AgentSession> = {
-			state: { messages: [] } as never,
-			agent: { state: { systemPrompt: ["test"] } } as never,
-			extensionRunner: undefined as never,
-			sessionManager: { appendSessionInit: () => {} } as never,
-			getActiveToolNames: () => ["read", "yield"],
-			setActiveToolsByName: async () => {},
-			subscribe: (listener: (event: AgentSessionEvent) => void) => {
-				listenerRef = listener;
-				return () => {};
-			},
-			prompt: async () => true,
-			waitForIdle: async () => {
-				waitForIdleCalls += 1;
-				if (waitForIdleCalls !== 1) return;
-				lastAssistantMessage = firstAssistantMessage;
-				listenerRef?.({
-					type: "message_end",
-					message: firstAssistantMessage,
-				} as unknown as AgentSessionEvent);
-				lastAssistantMessage = incrementalYieldMessage;
-				listenerRef?.({
-					type: "message_end",
-					message: incrementalYieldMessage,
-				} as unknown as AgentSessionEvent);
-				abortCountBeforeYieldExecutionEnd = abortCount;
-				listenerRef?.({
-					type: "tool_execution_end",
-					toolCallId: "tool-yield-incremental",
-					toolName: "yield",
-					result: {
-						content: [{ type: "text", text: "Section submitted." }],
-						details: {
-							status: "success",
-							data: { id: "saved" },
-							type: ["findings"],
-						},
-					},
-					isError: false,
-				} as AgentSessionEvent);
-				lastAssistantMessage = followingAssistantMessage;
-				listenerRef?.({
-					type: "message_end",
-					message: followingAssistantMessage,
-				} as unknown as AgentSessionEvent);
-				abortCountAfterFollowingTurn = abortCount;
-			},
-			getLastAssistantMessage: () => lastAssistantMessage as never,
-			abort: async () => {
-				abortCount += 1;
-			},
-			dispose: async () => {},
-		};
-		mockCreateAgentSession(session as AgentSession);
-
-		const result = await runSubprocess({
-			...baseOptions,
-			id: "subagent-soft-budget-incremental-yield",
-			settings,
+		expect(result.aborted).toBe(true);
+		expect(result.timeoutPartial).toEqual({
+			filesCreated: ["src/new.ts"],
+			filesModified: ["src/existing.ts"],
+			lastAssistantText: "Wrote src/new.ts and edited src/existing.ts.",
+			ircNote:
+				"Agent subagent-timeout-partial was aborted by timeout and torn down. Transcript: history://subagent-timeout-partial",
 		});
-
-		expect(abortCountBeforeYieldExecutionEnd).toBe(0);
-		expect(abortCountAfterFollowingTurn).toBe(1);
-		expect(result.requests).toBe(3);
-		expect(result.extractedToolData?.yield).toEqual([
-			{
-				data: { id: "saved" },
-				status: "success",
-				error: undefined,
-				type: ["findings"],
-				useLastTurn: undefined,
-				schemaOverridden: undefined,
-			},
-		]);
 	});
 
 	it("propagates per-turn context tokens onto the SingleResult", async () => {

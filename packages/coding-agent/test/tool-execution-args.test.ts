@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
+import { stripVTControlCharacters } from "node:util";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tool-execution";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { TUI } from "@oh-my-pi/pi-tui";
@@ -16,7 +17,7 @@ describe("ToolExecutionComponent.updateArgs (F8 — no clone, ref-eq fast path)"
 			await initTheme();
 			initialized = true;
 		}
-		const uiStub = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+		const uiStub = { requestRender() {} } as unknown as TUI;
 		return new ToolExecutionComponent("bash", args, {}, undefined, uiStub);
 	}
 
@@ -31,5 +32,32 @@ describe("ToolExecutionComponent.updateArgs (F8 — no clone, ref-eq fast path)"
 		}
 
 		expect(cloneSpy).not.toHaveBeenCalled();
+	});
+});
+
+describe("ToolExecutionComponent expanded args (mode-aware formatting)", () => {
+	let ready = false;
+	async function build(args: unknown) {
+		if (!ready) {
+			await initTheme();
+			ready = true;
+		}
+		const ui = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+		return new ToolExecutionComponent("bash", args, {}, undefined, ui);
+	}
+
+	it("renders complete nested string args verbatim once expanded (custom renderer path)", async () => {
+		const note = `${"n".repeat(280)}ENDMARKER`;
+		const byteCount = Buffer.byteLength(note, "utf8");
+		expect(byteCount).toBeGreaterThan(240);
+		const component = await build({ command: "echo hi", meta: { note } });
+
+		component.setExpanded(true);
+		const expanded = stripVTControlCharacters(component.render(600).join("\n"));
+		expect(expanded).toContain("meta:");
+		expect(expanded).toContain(note);
+		expect(expanded).toContain("ENDMARKER");
+		expect(expanded).not.toContain(`<${byteCount} bytes>`);
+		expect(expanded).not.toContain("…");
 	});
 });

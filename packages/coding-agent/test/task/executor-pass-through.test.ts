@@ -4,9 +4,6 @@
  * paid for. Regression guard for issue #2190.
  */
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -92,15 +89,6 @@ const baseOptions = {
 	enableLsp: false,
 };
 
-function createModelRegistry(model: Model): ModelRegistry {
-	return {
-		authStorage: {},
-		refresh: async () => {},
-		getAvailable: () => [model],
-		getApiKey: async () => "test-key",
-	} as unknown as ModelRegistry;
-}
-
 describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
@@ -118,6 +106,7 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 
 		const result = await runSubprocess({
 			...baseOptions,
+			parentAgentId: "Main",
 			rules,
 			preloadedExtensionPaths,
 			preloadedCustomToolPaths,
@@ -130,6 +119,7 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		expect(forwarded?.rules).toBe(rules);
 		expect(forwarded?.preloadedExtensionPaths).toBe(preloadedExtensionPaths);
 		expect(forwarded?.preloadedCustomToolPaths).toBe(preloadedCustomToolPaths);
+		expect(forwarded?.parentAgentId).toBe("Main");
 	});
 
 	it("forwards undefined when the parent has not pre-discovered state", async () => {
@@ -143,47 +133,5 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		expect(forwarded?.rules).toBeUndefined();
 		expect(forwarded?.preloadedExtensionPaths).toBeUndefined();
 		expect(forwarded?.preloadedCustomToolPaths).toBeUndefined();
-	});
-
-	it("records the spawning agent as parentAgentId, distinct from the child's own id and prefix", async () => {
-		const session = yieldEmittingSession();
-		const spy = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
-
-		const result = await runSubprocess({
-			...baseOptions,
-			id: "ChildAgent",
-			parentAgentId: "SpawnerAgent",
-		});
-
-		expect(result.exitCode).toBe(0);
-		const forwarded = spy.mock.calls[0]?.[0];
-		// The registry parent is the spawning agent — never the child itself (the
-		// self-parent bug). The child's own id still drives both its agent id and
-		// its artifact/output-id prefix; those must not double as the parent link.
-		expect(forwarded?.parentAgentId).toBe("SpawnerAgent");
-		expect(forwarded?.agentId).toBe("ChildAgent");
-		expect(forwarded?.parentTaskPrefix).toBe("ChildAgent");
-	});
-
-	it("lets agent frontmatter thinkingLevel override a task role suffix", async () => {
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
-		const settings = Settings.isolated();
-		settings.setModelRole("task", `${model.provider}/${model.id}:high`);
-		const session = yieldEmittingSession();
-		const spy = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
-
-		const result = await runSubprocess({
-			...baseOptions,
-			agent: { ...baseAgent, model: ["pi/task"] },
-			id: "subagent-thinking-precedence",
-			settings,
-			modelRegistry: createModelRegistry(model),
-			thinkingLevel: ThinkingLevel.Low,
-		});
-
-		expect(result.exitCode).toBe(0);
-		const forwarded = spy.mock.calls[0]?.[0];
-		expect(forwarded?.thinkingLevel).toBe(ThinkingLevel.Low);
 	});
 });

@@ -80,30 +80,29 @@ describe("issue #2325: connectors terminate at `└─` and chain columns stay s
 			return row;
 		};
 
-		// b3 is the last sibling: its connector is `└─` at column 2.
-		expect(findRow("user: second review head")).toMatch(/^\s{2}└─ \S/);
+		// Hierarchy reads from indentation — no tree/branch glyphs anywhere.
+		expect(rendered.every(line => !/[│├└]/.test(line))).toBe(true);
+		const indentOf = (line: string): number => line.match(/^ */)![0].length;
 
-		// Chain rows under the `└─` head: the corner column (col 2) must stay
-		// blank — no `│` running down from the `└─` — and every chain row is
-		// anchored by `│` on the same column, one level right (below the head's
-		// content). Exact prefix: 5 spaces, `│`, 2 spaces, then content.
-		for (const needle of ["assistant: fix-asst", "user: fix it all", "assistant: rev-asst"]) {
-			const row = findRow(needle);
-			expect(row).not.toMatch(/^\s{2}│/);
-			expect(row).toMatch(/^\s{5}│\s{2}\S/);
+		// The chain under the last-sibling branch stays aligned on one column,
+		// indented deeper than the branch head.
+		const b3Indent = indentOf(findRow("user: second review head"));
+		const chainIndents = ["assistant: fix-asst", "user: fix it all", "assistant: rev-asst"].map(needle =>
+			indentOf(findRow(needle)),
+		);
+		for (const indent of chainIndents) {
+			expect(indent).toBeGreaterThan(b3Indent);
+			expect(indent).toBe(chainIndents[0]);
 		}
 
-		// The deeper branch point keeps stable columns: connectors sit directly
-		// below the chain content column (col 8), with nothing dangling in the
-		// outer corner columns.
-		expect(findRow("user: review the fixes")).toMatch(/^\s{8}├─ \S/);
-		expect(findRow("user: other thread")).toMatch(/^\s{8}└─ \S/);
-
-		// Continuations of the non-last grandchild ride its sibling line at the
-		// same column (col 8) — no drift back into outer columns.
+		// The deeper branch point renders aligned siblings, and their linear
+		// continuations stay indented under that branch — no drift to outer columns.
+		const t1Indent = indentOf(findRow("user: review the fixes"));
+		const t2Indent = indentOf(findRow("user: other thread"));
+		expect(t1Indent).toBe(t2Indent);
+		expect(t1Indent).toBeGreaterThanOrEqual(chainIndents[0]!);
 		for (const needle of ["user: all findings done", "user: still have findings"]) {
-			const row = findRow(needle);
-			expect(row).toMatch(/^\s{8}│\s{5}\S/);
+			expect(indentOf(findRow(needle))).toBeGreaterThanOrEqual(t1Indent);
 		}
 	});
 });

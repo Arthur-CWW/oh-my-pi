@@ -1,13 +1,8 @@
 import { beforeAll, describe, expect, it } from "bun:test";
-import {
-	GALLERY_STATES,
-	parseGalleryStates,
-	renderGalleryState,
-	resolveFixture,
-} from "@oh-my-pi/pi-coding-agent/cli/gallery-cli";
+import { GALLERY_STATES, renderGalleryState, resolveFixture } from "@oh-my-pi/pi-coding-agent/cli/gallery-cli";
 import type { GalleryFixture } from "@oh-my-pi/pi-coding-agent/cli/gallery-fixtures";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { toolRenderers } from "@oh-my-pi/pi-coding-agent/tools/renderers";
 
 beforeAll(async () => {
@@ -17,22 +12,6 @@ beforeAll(async () => {
 });
 
 describe("gallery harness", () => {
-	it("accepts displayed gallery state labels and legacy tokens", () => {
-		expect(parseGalleryStates(["streaming args", "in progress", "done", "failed"])).toEqual([
-			"streaming",
-			"progress",
-			"success",
-			"error",
-		]);
-		expect(parseGalleryStates(["streaming", "progress", "success", "error", "failed"])).toEqual([...GALLERY_STATES]);
-	});
-
-	it("rejects unknown gallery state tokens before rendering", () => {
-		expect(() => parseGalleryStates(["bogus"])).toThrow(
-			/Invalid --state 'bogus'.*streaming args.*in progress.*done.*failed/,
-		);
-	});
-
 	it("renders every registered tool in every lifecycle state without throwing", async () => {
 		for (const name in toolRenderers) {
 			const fixture = resolveFixture(name);
@@ -77,30 +56,16 @@ describe("gallery harness", () => {
 	it("routes customRendered tools (task) through the custom-tool branch", async () => {
 		// `task` attaches its renderer on the real AgentTool, so the gallery must
 		// reproduce that path. With a result present and mergeCallAndResult, the
-		// custom branch must NOT emit a redundant tool-name line above the result box
-		// (regression guard for tool-execution's custom-branch fallback label).
+		// custom branch must NOT emit a redundant standalone tool-name line above
+		// the result (regression guard for tool-execution's fallback label).
 		const task = resolveFixture("task");
 		expect(task.customRendered).toBe(true);
 		const lines = await renderGalleryState("task", task, "error", 100);
 		const stripped = lines.map(line => Bun.stripANSI(line).trim());
-		// The framed result header carries the label inside the box border...
-		expect(stripped.some(line => line.startsWith(theme.boxRound.topLeft) && line.includes("Task"))).toBe(true);
+		// The borderless result heading still carries the task label and identity...
+		expect(stripped.some(line => line.includes("Task · AuthLoader · error"))).toBe(true);
 		// ...but no standalone "Task" label line precedes it.
 		expect(stripped).not.toContain("Task");
-	});
-
-	it("renders curated failed states as failures", async () => {
-		const cases = [
-			["irc_inbox", "IRC inbox failed: message store unavailable.", "IRC inbox empty"],
-			["irc_list", "IRC list failed: agent hub is unavailable.", "no other agents"],
-			["job", "Subagent exited 1: Redis connection string is missing.", "cancelled"],
-		] as const;
-
-		for (const [name, expected, forbidden] of cases) {
-			const output = Bun.stripANSI((await renderGalleryState(name, resolveFixture(name), "error", 100)).join("\n"));
-			expect(output).toContain(expected);
-			expect(output).not.toContain(forbidden);
-		}
 	});
 
 	it("renders gallery-only read group fixtures", async () => {

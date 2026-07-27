@@ -4,18 +4,16 @@ import * as path from "node:path";
 import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { settings } from "../config/settings";
 import { type SttStreamHandle, sttClient } from "./asr-client";
-import { downloadSttModel, isSttModelCached } from "./downloader";
+import { ensureSTTDependencies } from "./downloader";
 import { resolveSttModelSpec } from "./models";
 import {
 	detectRecorder,
-	ensureRecorder,
 	type RecordingHandle,
 	type StreamingRecordingHandle,
 	startRecording,
 	startStreamingRecording,
 	verifyRecordingFile,
 } from "./recorder";
-import { evaluateSubmitTrigger } from "./submit-trigger";
 import { transcribe } from "./transcriber";
 
 export type SttState = "idle" | "recording" | "transcribing";
@@ -34,13 +32,11 @@ interface Editor {
 	setVolatileText(text: string): void;
 	clearVolatileText(): void;
 	commitVolatileText(text: string): void;
-	submit(): void;
-	deleteBeforeCursor(count: number): void;
 }
 
 export class STTController {
 	#state: SttState = "idle";
-	#resolvedModelKey: string | null = null;
+	#depsResolved = false;
 	#toggling = false;
 	#stopAfterStart = false;
 	#disposed = false;
@@ -56,7 +52,6 @@ export class STTController {
 	#streamEditor: Editor | null = null;
 	#streamCommitted = false;
 	#streamAbort: AbortController | null = null;
-	#streamUtterance = "";
 
 	get state(): SttState {
 		return this.#state;
@@ -97,39 +92,15 @@ export class STTController {
 	}
 
 	async #ensureDeps(options: ToggleOptions): Promise<boolean> {
-		const modelKey = resolveSttModelSpec(settings.get("stt.modelName") as string | undefined).key;
-		// Keyed on the model rather than a one-shot flag: switching stt.modelName
-		// mid-session must re-run preflight so an uncached new tier downloads here
-		// (with progress) instead of blocking silently at stop.
-		if (this.#resolvedModelKey === modelKey) return true;
+		if (this.#depsResolved) return true;
 		try {
-			// Only clear the status line if we actually wrote to it: the cached
-			// fast path (recorder on PATH, model present) emits nothing, so an
-			// unconditional clear would be a stray write.
-			let wroteStatus = false;
-			const status = (msg: string): void => {
-				wroteStatus = true;
-				options.showStatus(msg);
-			};
-			// A recorder is required to capture audio; startRecording /
-			// startStreamingRecording only *detect* a recorder and throw when none
-			// exists, so provision one here. Instant when sox/ffmpeg/arecord is on
-			// PATH — only a first-run static-ffmpeg download actually blocks.
-			await ensureRecorder(p => status(p.stage + (p.percent != null ? ` (${p.percent}%)` : "")));
-			// Loading the multi-hundred-MB speech model into the worker is what made
-			// the old "Checking STT dependencies…" step slow. Don't pay it before
-			// recording: when the weights are already cached, start now and warm the
-			// model in the background — the stream/transcribe paths load it on demand
-			// (memoized in the worker) and it is hot by the time recording stops.
-			// Only a genuine first-use download blocks, with explicit progress, so we
-			// never record silently against missing weights.
-			if (await isSttModelCached(modelKey)) {
-				this.#warmModel(modelKey);
-			} else {
-				await downloadSttModel(modelKey, p => status(`Downloading speech model ${p.label} (${p.percent}%)`));
-			}
-			if (wroteStatus) options.showStatus("");
-			this.#resolvedModelKey = modelKey;
+			options.showStatus("Checking STT dependencies...");
+			await ensureSTTDependencies({
+				modelName: settings.get("stt.modelName") as string | undefined,
+				onProgress: p => options.showStatus(p.stage + (p.percent != null ? ` (${p.percent}%)` : "")),
+			});
+			options.showStatus("");
+			this.#depsResolved = true;
 			return true;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : "Failed to setup STT dependencies";
@@ -137,22 +108,6 @@ export class STTController {
 			logger.error("STT dependency setup failed", { error: msg });
 			return false;
 		}
-	}
-
-	/** Warm the speech model in the worker without blocking recording. The worker
-	 *  memoizes the load, so the stream/transcribe path reuses it and the model is
-	 *  hot by the time recording stops. Only called when the weights are already
-	 *  cached, so no network fetch happens. On load failure (corrupt cache, OOM,
-	 *  runtime install) invalidate the resolved key so the next toggle re-runs
-	 *  preflight and retries instead of skipping it forever. */
-	#warmModel(modelKey: string): void {
-		void downloadSttModel(modelKey).catch(err => {
-			// Guard against a concurrent model switch clobbering a newer resolution.
-			if (!this.#disposed && this.#resolvedModelKey === modelKey) this.#resolvedModelKey = null;
-			logger.debug("stt: background model warmup failed", {
-				error: err instanceof Error ? err.message : String(err),
-			});
-		});
 	}
 
 	async #start(editor: Editor, options: ToggleOptions): Promise<void> {
@@ -194,7 +149,6 @@ export class STTController {
 		const language = settings.get("stt.language") as string | undefined;
 		this.#streamEditor = editor;
 		this.#streamCommitted = false;
-		this.#streamUtterance = "";
 		this.#streamAbort = new AbortController();
 		const stream = sttClient.startStream(modelKey, {
 			language: language || undefined,
@@ -210,7 +164,6 @@ export class STTController {
 				if (prefixed) {
 					this.#streamEditor?.commitVolatileText(prefixed);
 					this.#streamCommitted = true;
-					this.#streamUtterance += prefixed;
 				} else {
 					this.#streamEditor?.clearVolatileText();
 				}
@@ -272,27 +225,13 @@ export class STTController {
 			return;
 		}
 		if (!this.#streamCommitted && finalText) {
-			const prefixed = this.#prefixed(finalText);
-			this.#streamEditor?.commitVolatileText(prefixed);
+			this.#streamEditor?.commitVolatileText(this.#prefixed(finalText));
 			this.#streamCommitted = true;
-			this.#streamUtterance = prefixed;
 		} else {
 			this.#streamEditor?.clearVolatileText();
 		}
 		options.requestRender?.();
 		if (!failed) options.showStatus(this.#streamCommitted ? "" : "No speech detected.");
-
-		if (this.#streamCommitted && !failed && this.#streamEditor) {
-			const trigger = settings.get("stt.submitTrigger");
-			const { submit, trimTrailing } = evaluateSubmitTrigger(this.#streamUtterance, trigger);
-			if (trimTrailing > 0) {
-				this.#streamEditor.deleteBeforeCursor(trimTrailing);
-			}
-			if (submit) {
-				this.#streamEditor.submit();
-			}
-		}
-
 		this.#cleanupStream();
 		this.#setState("idle", options);
 	}
@@ -303,7 +242,6 @@ export class STTController {
 		this.#streamEditor = null;
 		this.#streamCommitted = false;
 		this.#streamAbort = null;
-		this.#streamUtterance = "";
 	}
 
 	// ── Batch (single-shot) ─────────────────────────────────────────
@@ -348,16 +286,8 @@ export class STTController {
 			this.#transcriptionAbort = null;
 			if (this.#disposed) return;
 			if (text.length > 0) {
-				const trigger = settings.get("stt.submitTrigger");
-				const { submit, trimTrailing } = evaluateSubmitTrigger(text, trigger);
-				const textToInsert = trimTrailing > 0 ? text.slice(0, -trimTrailing) : text;
-				if (textToInsert.length > 0) {
-					editor.insertText(textToInsert);
-				}
+				editor.insertText(text);
 				options.showStatus("");
-				if (submit) {
-					editor.submit();
-				}
 			} else {
 				options.showStatus("No speech detected.");
 			}
@@ -404,6 +334,6 @@ export class STTController {
 			this.#tempFile = null;
 		}
 		this.#state = "idle";
-		this.#resolvedModelKey = null;
+		this.#depsResolved = false;
 	}
 }

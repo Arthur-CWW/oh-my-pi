@@ -33,10 +33,10 @@ function buildResult(answer: string): {
 	return { content: [{ type: "text", text: answer }], details: { response } };
 }
 
-/** Slice the sanitized lines belonging to the framed "Answer" section. */
+/** Slice the sanitized lines belonging to the plain-heading "Answer" section. */
 function answerSection(lines: string[]): string {
-	const start = lines.findIndex(l => / Answer /.test(l));
-	const end = lines.findIndex((l, i) => i > start && / Sources /.test(l));
+	const start = lines.findIndex(l => /^Answer\b/.test(l));
+	const end = lines.findIndex((l, i) => i > start && /^Sources\b/.test(l));
 	expect(start).toBeGreaterThanOrEqual(0);
 	expect(end).toBeGreaterThan(start);
 	return lines
@@ -96,5 +96,22 @@ describe("renderSearchResult", () => {
 
 		expect(answer).toMatch(/more line/);
 		expect(answer).not.toContain("FINAL_UNIQUE_MARKER");
+	});
+	it("renders the no-response fallback with plain indentation and no tree glyphs", async () => {
+		const uiTheme = (await getThemeByName("dark"))!;
+		const fallbackText = Array.from({ length: 8 }, (_, i) => `Fallback line ${i + 1}`).join("\n");
+		const component = renderSearchResult(
+			{ content: [{ type: "text", text: fallbackText }] },
+			{ expanded: false, isPartial: false },
+			uiTheme,
+		);
+		const rendered = component
+			.render(120)
+			.map(l => sanitizeText(l))
+			.join("\n");
+
+		expect(rendered).toContain("Fallback line 1");
+		expect(rendered).toMatch(/more line/);
+		expect(rendered).not.toMatch(/[├└│]/);
 	});
 });

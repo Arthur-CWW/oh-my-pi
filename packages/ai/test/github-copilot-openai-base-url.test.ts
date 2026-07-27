@@ -39,10 +39,6 @@ function createUnauthorizedResponse(): Response {
 
 const testToken = "ghu_test_copilot_token";
 const enterpriseApiKey = JSON.stringify({ token: testToken, enterpriseUrl: "ghe.example.com" });
-const businessApiKey = JSON.stringify({
-	token: testToken,
-	apiEndpoint: "https://api.business.githubcopilot.com",
-});
 
 describe("GitHub Copilot OpenAI transport base URL", () => {
 	it("uses model baseUrl for chat completions", async () => {
@@ -99,26 +95,6 @@ describe("GitHub Copilot OpenAI transport base URL", () => {
 		expect(requestedAuthHeaders[0]).toBe(`Bearer ${testToken}`);
 	});
 
-	it("routes structured business credentials to the business chat completions host", async () => {
-		const requestedUrls: string[] = [];
-		const requestedAuthHeaders: Array<string | null> = [];
-		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-			requestedUrls.push(getRequestUrl(input));
-			requestedAuthHeaders.push(getRequestHeader(input, init, "Authorization"));
-			return createUnauthorizedResponse();
-		});
-
-		const model = getBundledModel("github-copilot", "gpt-4o") as Model<"openai-completions">;
-		const result = await streamOpenAICompletions(model, testContext, {
-			apiKey: businessApiKey,
-			fetch: fetchMock as unknown as typeof fetch,
-		}).result();
-
-		expect(result.stopReason).toBe("error");
-		expect(requestedUrls[0]).toBe("https://api.business.githubcopilot.com/chat/completions");
-		expect(requestedAuthHeaders[0]).toBe(`Bearer ${testToken}`);
-	});
-
 	it("routes structured enterprise credentials to the enterprise responses host", async () => {
 		const requestedUrls: string[] = [];
 		const requestedAuthHeaders: Array<string | null> = [];
@@ -136,26 +112,6 @@ describe("GitHub Copilot OpenAI transport base URL", () => {
 
 		expect(result.stopReason).toBe("error");
 		expect(requestedUrls[0]).toBe("https://copilot-api.ghe.example.com/responses");
-		expect(requestedAuthHeaders[0]).toBe(`Bearer ${testToken}`);
-	});
-
-	it("routes structured business credentials to the business responses host", async () => {
-		const requestedUrls: string[] = [];
-		const requestedAuthHeaders: Array<string | null> = [];
-		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-			requestedUrls.push(getRequestUrl(input));
-			requestedAuthHeaders.push(getRequestHeader(input, init, "Authorization"));
-			return createUnauthorizedResponse();
-		});
-
-		const model = getBundledModel("github-copilot", "gpt-5-mini") as Model<"openai-responses">;
-		const result = await streamOpenAIResponses(model, testContext, {
-			apiKey: businessApiKey,
-			fetch: fetchMock as unknown as typeof fetch,
-		}).result();
-
-		expect(result.stopReason).toBe("error");
-		expect(requestedUrls[0]).toBe("https://api.business.githubcopilot.com/responses");
 		expect(requestedAuthHeaders[0]).toBe(`Bearer ${testToken}`);
 	});
 

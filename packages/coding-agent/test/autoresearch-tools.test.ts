@@ -1,11 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import { createSessionRuntime } from "@oh-my-pi/pi-coding-agent/autoresearch/state";
 import {
 	type AutoresearchStorage,
-	closeAllAutoresearchStorages,
 	openAutoresearchStorage,
 	type SessionRow,
 } from "@oh-my-pi/pi-coding-agent/autoresearch/storage";
@@ -16,7 +16,7 @@ import { createUpdateNotesTool } from "@oh-my-pi/pi-coding-agent/autoresearch/to
 import type { ASIData, LogDetails, NumericMetricMap, RunDetails } from "@oh-my-pi/pi-coding-agent/autoresearch/types";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Snowflake } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
 
 afterEach(() => {
@@ -29,8 +29,10 @@ function firstTextBlockText(content: Array<TextContent | ImageContent>): string 
 	return block.text;
 }
 
-function makeTempDir(prefix = "@pi-autoresearch-tools-"): TempDir {
-	return TempDir.createSync(prefix);
+function makeTempDir(prefix = "pi-autoresearch-tools"): string {
+	const dir = path.join(os.tmpdir(), `${prefix}-${Snowflake.next()}`);
+	fs.mkdirSync(dir, { recursive: true });
+	return dir;
 }
 
 function dashboardStub() {
@@ -76,47 +78,43 @@ function createPiHarness(initialTools: string[] = []): PiHarness {
 // inside a real repo, so the production tools resolve HEAD/branch from `.git` on
 // disk (sub-millisecond) instead of spawning fallback git subprocesses for every
 // `repo.root` / `branch.current` / `head.sha` lookup against a bare temp dir.
-let templateRepo: TempDir;
-let templateBranchRepo: TempDir;
+let templateRepo: string;
+let templateBranchRepo: string;
 let templateBaselineCommit: string;
 
 beforeAll(async () => {
-	templateRepo = makeTempDir("@pi-autoresearch-template-");
-	await Bun.write(path.join(templateRepo.path(), "README.md"), "# baseline\n");
-	await $`git init --initial-branch=main && git config core.autocrlf false && git config core.fsmonitor false && git config user.email tester@example.com && git config user.name Tester && git add -A && git commit -m baseline`
-		.cwd(templateRepo.path())
+	templateRepo = makeTempDir("pi-autoresearch-template");
+	await Bun.write(path.join(templateRepo, "README.md"), "# baseline\n");
+	await $`git init --initial-branch=main && git config user.email tester@example.com && git config user.name Tester && git add -A && git commit -m baseline`
+		.cwd(templateRepo)
 		.quiet();
-	templateBaselineCommit = (await $`git rev-parse HEAD`.cwd(templateRepo.path()).text()).trim();
+	templateBaselineCommit = (await $`git rev-parse HEAD`.cwd(templateRepo).text()).trim();
 	// Second fixture: harness committed and already on an `autoresearch/*` branch,
 	// the baseline for log_experiment's on-branch keep/discard scenarios.
-	templateBranchRepo = makeTempDir("@pi-autoresearch-template-branch-");
-	fs.cpSync(templateRepo.path(), templateBranchRepo.path(), { recursive: true });
-	await Bun.write(path.join(templateBranchRepo.path(), "autoresearch.sh"), "#!/usr/bin/env bash\necho METRIC m=1\n");
-	await $`git add -A && git commit -m harness && git checkout -b autoresearch/base`
-		.cwd(templateBranchRepo.path())
-		.quiet();
+	templateBranchRepo = makeTempDir("pi-autoresearch-template-branch");
+	fs.cpSync(templateRepo, templateBranchRepo, { recursive: true });
+	await Bun.write(path.join(templateBranchRepo, "autoresearch.sh"), "#!/usr/bin/env bash\necho METRIC m=1\n");
+	await $`git add -A && git commit -m harness && git checkout -b autoresearch/base`.cwd(templateBranchRepo).quiet();
 });
 
-afterAll(async () => {
-	closeAllAutoresearchStorages();
-	await Bun.sleep(0);
-	await templateRepo.remove();
-	await templateBranchRepo.remove();
+afterAll(() => {
+	fs.rmSync(templateRepo, { recursive: true, force: true });
+	fs.rmSync(templateBranchRepo, { recursive: true, force: true });
 });
 
 // Independent working copy of the template repo: baseline commit on `main`,
 // committer identity configured, ready for per-test branch/commit scenarios.
 function freshRepo(): { dir: string; baselineCommit: string } {
-	const dir = makeTempDir().path();
-	fs.cpSync(templateRepo.path(), dir, { recursive: true });
+	const dir = makeTempDir();
+	fs.cpSync(templateRepo, dir, { recursive: true });
 	return { dir, baselineCommit: templateBaselineCommit };
 }
 
 // Like freshRepo, but already on an `autoresearch/*` branch with the harness
 // committed — the baseline for log_experiment's on-branch keep/discard paths.
 function freshBranchRepo(): { dir: string } {
-	const dir = makeTempDir().path();
-	fs.cpSync(templateBranchRepo.path(), dir, { recursive: true });
+	const dir = makeTempDir();
+	fs.cpSync(templateBranchRepo, dir, { recursive: true });
 	return { dir };
 }
 
@@ -164,18 +162,16 @@ function seedCompletedRun(
 }
 
 describe("init_experiment", () => {
-	let dbOverride: TempDir;
+	let dbOverride: string;
 
 	beforeEach(() => {
-		dbOverride = makeTempDir("@pi-autoresearch-init-db-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		dbOverride = makeTempDir("pi-autoresearch-init-db");
+		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride;
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		delete process.env.OMP_AUTORESEARCH_DB_DIR;
-		closeAllAutoresearchStorages();
-		await Bun.sleep(0);
-		await dbOverride.remove();
+		fs.rmSync(dbOverride, { recursive: true, force: true });
 	});
 
 	it("opens a new session and persists scope and metric metadata", async () => {
@@ -344,18 +340,16 @@ describe("init_experiment", () => {
 });
 
 describe("run_experiment", () => {
-	let dbOverride: TempDir;
+	let dbOverride: string;
 
 	beforeEach(() => {
-		dbOverride = makeTempDir("@pi-autoresearch-run-db-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		dbOverride = makeTempDir("pi-autoresearch-run-db");
+		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride;
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		delete process.env.OMP_AUTORESEARCH_DB_DIR;
-		closeAllAutoresearchStorages();
-		await Bun.sleep(0);
-		await dbOverride.remove();
+		fs.rmSync(dbOverride, { recursive: true, force: true });
 	});
 
 	it("rejects when no session is active", async () => {
@@ -435,18 +429,16 @@ describe("run_experiment", () => {
 });
 
 describe("log_experiment", () => {
-	let dbOverride: TempDir;
+	let dbOverride: string;
 
 	beforeEach(() => {
-		dbOverride = makeTempDir("@pi-autoresearch-log-db-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		dbOverride = makeTempDir("pi-autoresearch-log-db");
+		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride;
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		delete process.env.OMP_AUTORESEARCH_DB_DIR;
-		closeAllAutoresearchStorages();
-		await Bun.sleep(0);
-		await dbOverride.remove();
+		fs.rmSync(dbOverride, { recursive: true, force: true });
 	});
 
 	async function setupRun(dir: string, runtime = createSessionRuntime()) {
@@ -571,7 +563,7 @@ describe("log_experiment", () => {
 	it("flags previously logged runs via flag_runs", async () => {
 		// Bare temp dir (no repo): the session is created with `branch: null`, so the
 		// tool's branch lookup must also resolve to null to match it.
-		const dir = makeTempDir().path();
+		const dir = makeTempDir();
 		const storage = await openAutoresearchStorage(dir);
 		const session = storage.openSession({
 			name: "speed",
@@ -839,18 +831,16 @@ describe("log_experiment", () => {
 });
 
 describe("update_notes", () => {
-	let dbOverride: TempDir;
+	let dbOverride: string;
 
 	beforeEach(() => {
-		dbOverride = makeTempDir("@pi-autoresearch-notes-db-");
-		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride.path();
+		dbOverride = makeTempDir("pi-autoresearch-notes-db");
+		process.env.OMP_AUTORESEARCH_DB_DIR = dbOverride;
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		delete process.env.OMP_AUTORESEARCH_DB_DIR;
-		closeAllAutoresearchStorages();
-		await Bun.sleep(0);
-		await dbOverride.remove().catch(() => {});
+		fs.rmSync(dbOverride, { recursive: true, force: true });
 	});
 
 	it("replaces session notes and refreshes runtime state", async () => {

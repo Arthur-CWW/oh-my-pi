@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type AuthCredentialStore, AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-storage";
 import { registerOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
-import { removeWithRetries } from "../../utils/src/temp";
 
 describe("AuthStorage OAuth refresh skew", () => {
 	let tempDir = "";
@@ -23,7 +22,7 @@ describe("AuthStorage OAuth refresh skew", () => {
 		store = undefined;
 		authStorage = undefined;
 		if (tempDir) {
-			await removeWithRetries(tempDir);
+			await fs.rm(tempDir, { recursive: true, force: true });
 			tempDir = "";
 		}
 	});

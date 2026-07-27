@@ -114,13 +114,7 @@ function formatProfileAsMarkdown(profileJson: string): string {
  */
 export async function startCpuProfile(): Promise<ProfilerSession> {
 	const v8 = await import("node:v8");
-	try {
-		// Enables `%GetOptimizationStatus` and friends when V8 natives are needed
-		// for ad-hoc profiling. Best-effort: Bun does not implement
-		// `setFlagsFromString` (oven-sh/bun#1702) but the CPU profiler itself
-		// works without it, so swallow the error and continue.
-		v8.setFlagsFromString("--allow-natives-syntax");
-	} catch {}
+	v8.setFlagsFromString("--allow-natives-syntax");
 
 	const { Session } = await import("node:inspector/promises");
 	const session = new Session();
@@ -148,21 +142,22 @@ export async function startCpuProfile(): Promise<ProfilerSession> {
 }
 
 export interface HeapSnapshot {
-	data: string;
+	data: ArrayBuffer;
 }
 
 /**
- * Generate a heap snapshot.
- * Uses Bun's built-in generateHeapSnapshot.
+ * Generate a V8 heap snapshot as an ArrayBuffer.
+ *
+ * Uses the `"arraybuffer"` return overload so the snapshot never
+ * materialises as a JS string in the coordinator heap.
  */
 export function generateHeapSnapshotData(): HeapSnapshot {
 	// Force GC before snapshot
 	Bun.gc(true);
 
-	// Use V8 format for Chrome DevTools compatibility
-	const snapshot = Bun.generateHeapSnapshot("v8");
+	// Use V8 format for Chrome DevTools compatibility; arraybuffer overload
+	// avoids creating a retained JS string (~100 MB+ for large heaps).
+	const data = Bun.generateHeapSnapshot("v8", "arraybuffer") as ArrayBuffer;
 
-	return {
-		data: snapshot,
-	};
+	return { data };
 }

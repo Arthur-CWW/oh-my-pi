@@ -1,12 +1,13 @@
-import { afterEach, describe, expect, test, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentDashboard } from "@oh-my-pi/pi-coding-agent/modes/components/agent-dashboard";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import * as discovery from "@oh-my-pi/pi-coding-agent/task/discovery";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { setKeybindings } from "@oh-my-pi/pi-tui";
 
 const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const tempDirs: string[] = [];
@@ -37,8 +38,8 @@ function stubStdoutGeometry(cols: number): { setRows(n: number): void; restore()
 	const rowsDesc = Object.getOwnPropertyDescriptor(process.stdout, "rows");
 	const colsDesc = Object.getOwnPropertyDescriptor(process.stdout, "columns");
 	let rows = 24;
-	Object.defineProperty(process.stdout, "rows", { configurable: true, get: () => rows, set: () => {} });
-	Object.defineProperty(process.stdout, "columns", { configurable: true, get: () => cols, set: () => {} });
+	Object.defineProperty(process.stdout, "rows", { configurable: true, get: () => rows });
+	Object.defineProperty(process.stdout, "columns", { configurable: true, get: () => cols });
 	const restoreOne = (key: "rows" | "columns", desc: PropertyDescriptor | undefined) => {
 		if (desc) Object.defineProperty(process.stdout, key, desc);
 		else Object.defineProperty(process.stdout, key, { configurable: true, value: undefined, writable: true });
@@ -54,9 +55,14 @@ function stubStdoutGeometry(cols: number): { setRows(n: number): void; restore()
 	};
 }
 
+beforeEach(() => {
+	setKeybindings(KeybindingsManager.inMemory());
+});
+
 afterEach(async () => {
 	vi.restoreAllMocks();
-	await Promise.all(tempDirs.splice(0).map(dir => removeWithRetries(dir)));
+	setKeybindings(KeybindingsManager.inMemory());
+	await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
 });
 
 describe("AgentDashboard create editor", () => {
@@ -72,7 +78,7 @@ describe("AgentDashboard create editor", () => {
 
 		expect(rendered).toContain("> first line");
 		expect(rendered).toContain("  second line");
-		expect(rendered).toContain("Ctrl+Q/Ctrl+Enter: generate");
+		expect(rendered).toContain("Ctrl+Enter: generate");
 		expect(rendered).toContain("Enter: newline");
 		expect(rendered).not.toContain("Description is required.");
 	});
@@ -106,51 +112,10 @@ describe("AgentDashboard create editor", () => {
 
 		expect(rendered).toContain("> first line");
 		expect(rendered).toContain("  second line");
-		expect(rendered).toContain("Ctrl+Q/Ctrl+Enter: generate");
+		expect(rendered).toContain("Ctrl+Enter: generate");
 		expect(rendered).toContain("Enter: newline");
 		expect(rendered).not.toContain("Model registry unavailable in current session.");
 		expect(rendered).not.toContain("Description is required.");
-	});
-
-	test("submits new-agent descriptions on Ctrl+Q (Windows Terminal fallback for #2118)", async () => {
-		await initTheme(false);
-		const dashboard = await AgentDashboard.create(await makeTempCwd(), settingsStub, 24, {});
-
-		dashboard.handleInput("n");
-		typeText(dashboard, "first line");
-		dashboard.handleInput("\r");
-		typeText(dashboard, "second line");
-		// Ctrl+Q raw byte (0x11). Windows Terminal can't deliver a distinct
-		// Ctrl+Enter event, so the app.message.followUp keybinding doubles as a
-		// portable submit chord and must apply to the create form too.
-		dashboard.handleInput("\x11");
-		await Bun.sleep(0);
-		const rendered = dashboard.render(80).join("\n").replace(ANSI_PATTERN, "");
-
-		expect(rendered).toContain("Model registry unavailable in current session.");
-		expect(rendered).not.toContain("Description is required.");
-	});
-
-	test("Ctrl+Q still works after pressing Enter for a newline (Windows Terminal)", async () => {
-		await initTheme(false);
-		const dashboard = await AgentDashboard.create(await makeTempCwd(), settingsStub, 24, {});
-
-		dashboard.handleInput("n");
-		typeText(dashboard, "line one");
-		// Windows Terminal sends bare `\r` for both Enter and Ctrl+Enter; the
-		// dashboard must treat `\r` as a newline so the user can keep typing.
-		dashboard.handleInput("\r");
-		typeText(dashboard, "line two");
-		const beforeSubmit = dashboard.render(80).join("\n").replace(ANSI_PATTERN, "");
-		expect(beforeSubmit).toContain("> line one");
-		expect(beforeSubmit).toContain("  line two");
-		expect(beforeSubmit).not.toContain("Model registry unavailable in current session.");
-
-		dashboard.handleInput("\x11");
-		await Bun.sleep(0);
-		const afterSubmit = dashboard.render(80).join("\n").replace(ANSI_PATTERN, "");
-
-		expect(afterSubmit).toContain("Model registry unavailable in current session.");
 	});
 });
 
@@ -168,7 +133,7 @@ describe("AgentDashboard layout", () => {
 			// past it (which is what pushed the controls into scrollback).
 			expect(lines.length).toBe(30);
 			expect(plain).toContain("Agent Control Center");
-			expect(plain).toContain("Esc: close");
+			expect(plain).toContain("escape close");
 		} finally {
 			geo.restore();
 		}
@@ -186,7 +151,7 @@ describe("AgentDashboard layout", () => {
 			const shrunk = dashboard.render(100);
 			expect(shrunk.length).toBe(18);
 			// Footer survives the shrink instead of being clipped off the bottom.
-			expect(shrunk.map(line => line.replace(ANSI_PATTERN, "")).join("\n")).toContain("Esc: close");
+			expect(shrunk.map(line => line.replace(ANSI_PATTERN, "")).join("\n")).toContain("escape close");
 		} finally {
 			geo.restore();
 		}

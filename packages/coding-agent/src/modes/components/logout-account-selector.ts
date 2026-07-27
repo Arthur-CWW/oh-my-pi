@@ -1,8 +1,9 @@
 import { Container, matchesKey, ScrollView, Spacer, TruncatedText } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
-import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import type { LogoutAccount } from "../../slash-commands/helpers/logout";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 
 const LOGOUT_SELECTOR_MAX_VISIBLE = 10;
 
@@ -79,7 +80,11 @@ export class LogoutAccountSelectorComponent extends Container {
 		}
 
 		this.#listContainer.addChild(
-			new TruncatedText(theme.fg("muted", "  ↑/↓ select · ↵ log out account · Esc cancel"), 0, 0),
+			new TruncatedText(
+				`${theme.fg("muted", "  ↑/↓ select · ↵ log out account · ")}${keyHint("ui.dismiss", "cancel")}`,
+				0,
+				0,
+			),
 		);
 
 		if (this.#statusMessage) {
@@ -89,7 +94,7 @@ export class LogoutAccountSelectorComponent extends Container {
 	}
 
 	handleInput(keyData: string): void {
-		if (matchesSelectCancel(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.#onCancelCallback();
 			return;
 		}

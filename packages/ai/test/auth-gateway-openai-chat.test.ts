@@ -201,6 +201,13 @@ describe("auth-gateway openai-chat: parseRequest", () => {
 		if (tool?.role !== "toolResult") throw new Error("expected toolResult");
 		expect(tool.toolName).toBe("");
 	});
+
+	it("accepts exact non-empty reasoning effort values for resolved-model validation", () => {
+		for (const effort of ["max", "ultra", "custom-advertised"]) {
+			const parsed = parseRequest({ model: "gpt-5.6-terra", messages: [], reasoning_effort: effort });
+			expect(parsed.options.reasoning).toBe(effort);
+		}
+	});
 });
 
 describe("auth-gateway openai-chat: encodeResponse", () => {

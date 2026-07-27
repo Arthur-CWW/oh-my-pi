@@ -126,7 +126,7 @@ function generateContextHeader(files: FileDiff[], currentFile: string): string {
 	}
 
 	if (toShow.length < sorted.length) {
-		lines.push(`[…${sorted.length - toShow.length} files elided…]`);
+		lines.push(`... and ${sorted.length - toShow.length} more files`);
 	}
 
 	return lines.join("\n");

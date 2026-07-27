@@ -1,13 +1,14 @@
-import { Container, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
+import { Container, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme } from "../../modes/theme/theme";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
-import { routeSelectListMouseWithTopBorder } from "./select-list-mouse-routing";
 
 /**
  * Component that renders a queue mode selector with borders
  */
 export class QueueModeSelectorComponent extends Container {
 	#selectList: SelectList;
+	readonly #onCancel: () => void;
 
 	constructor(
 		currentMode: "all" | "one-at-a-time",
@@ -15,6 +16,7 @@ export class QueueModeSelectorComponent extends Container {
 		onCancel: () => void,
 	) {
 		super();
+		this.#onCancel = onCancel;
 
 		const queueModes: SelectItem[] = [
 			{
@@ -41,21 +43,21 @@ export class QueueModeSelectorComponent extends Container {
 			onSelect(item.value as "all" | "one-at-a-time");
 		};
 
-		this.#selectList.onCancel = () => {
-			onCancel();
-		};
-
 		this.addChild(this.#selectList);
 
 		// Add bottom border
 		this.addChild(new DynamicBorder());
 	}
 
-	getSelectList(): SelectList {
-		return this.#selectList;
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onCancel();
+			return;
+		}
+		this.#selectList.handleInput(data);
 	}
 
-	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
-		routeSelectListMouseWithTopBorder(this.#selectList, event, line, col);
+	getSelectList(): SelectList {
+		return this.#selectList;
 	}
 }

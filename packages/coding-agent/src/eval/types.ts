@@ -1,16 +1,16 @@
 /** Runtime backend that an eval cell dispatches to. */
-export type EvalLanguage = "python" | "js" | "ruby" | "julia";
+export type EvalLanguage = "python" | "js";
 
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import type { OutputMeta } from "../tools/output-meta";
 
-/** Status event emitted by eval prelude helpers for TUI rendering. */
+/** Status event emitted by prelude helpers (python or js) for TUI rendering. */
 export interface EvalStatusEvent {
 	op: string;
 	[key: string]: unknown;
 }
 
-/** Display output captured during eval execution across supported backends. */
+/** Display output captured during eval execution. Union of python and js shapes. */
 export type EvalDisplayOutput =
 	| { type: "json"; data: unknown }
 	| { type: "image"; data: string; mimeType: string }

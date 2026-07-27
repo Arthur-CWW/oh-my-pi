@@ -1,7 +1,7 @@
-import { Container, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
+import { Container, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme } from "../../modes/theme/theme";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
-import { routeSelectListMouseWithTopBorder } from "./select-list-mouse-routing";
 
 /**
  * Component that renders a theme selector.
@@ -10,6 +10,7 @@ import { routeSelectListMouseWithTopBorder } from "./select-list-mouse-routing";
 export class ThemeSelectorComponent extends Container {
 	#selectList: SelectList;
 	#onPreview: (themeName: string) => void;
+	readonly #onCancel: () => void;
 
 	constructor(
 		currentTheme: string,
@@ -19,6 +20,7 @@ export class ThemeSelectorComponent extends Container {
 		onPreview: (themeName: string) => void,
 	) {
 		super();
+		this.#onCancel = onCancel;
 		this.#onPreview = onPreview;
 
 		// Create select items from provided themes
@@ -44,10 +46,6 @@ export class ThemeSelectorComponent extends Container {
 			onSelect(item.value);
 		};
 
-		this.#selectList.onCancel = () => {
-			onCancel();
-		};
-
 		this.#selectList.onSelectionChange = item => {
 			this.#onPreview(item.value);
 		};
@@ -58,11 +56,15 @@ export class ThemeSelectorComponent extends Container {
 		this.addChild(new DynamicBorder());
 	}
 
-	getSelectList(): SelectList {
-		return this.#selectList;
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onCancel();
+			return;
+		}
+		this.#selectList.handleInput(data);
 	}
 
-	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
-		routeSelectListMouseWithTopBorder(this.#selectList, event, line, col);
+	getSelectList(): SelectList {
+		return this.#selectList;
 	}
 }

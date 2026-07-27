@@ -2,12 +2,12 @@
  * Interactive marketplace plugin selector.
  *
  * Shows available plugins from all configured marketplaces in a SelectList.
- * Selecting a plugin triggers installation. Esc cancels.
+ * Selecting a plugin triggers installation. The configured UI dismiss action cancels.
  */
-import { Container, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
+import { Container, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme } from "../theme/theme";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
-import { routeSelectListMouseWithTopBorder } from "./select-list-mouse-routing";
 
 export interface PluginSelectorCallbacks {
 	onSelect: (pluginName: string, marketplace: string, scope?: "user" | "project") => void;
@@ -23,6 +23,7 @@ export interface PluginItem {
 
 export class PluginSelectorComponent extends Container {
 	#selectList: SelectList;
+	readonly #onCancel: () => void;
 
 	constructor(
 		marketplaceCount: number,
@@ -31,6 +32,7 @@ export class PluginSelectorComponent extends Container {
 		callbacks: PluginSelectorCallbacks,
 	) {
 		super();
+		this.#onCancel = callbacks.onCancel;
 
 		const items: SelectItem[] = plugins.map(({ plugin, marketplace, scope }) => {
 			// Encode scope into the value so onSelect can recover it without a parallel Map.
@@ -72,20 +74,20 @@ export class PluginSelectorComponent extends Container {
 			}
 		};
 
-		this.#selectList.onCancel = () => {
-			callbacks.onCancel();
-		};
-
 		this.addChild(this.#selectList);
 		this.addChild(new DynamicBorder());
 	}
 
-	getSelectList(): SelectList {
-		return this.#selectList;
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onCancel();
+			return;
+		}
+		this.#selectList.handleInput(data);
 	}
 
-	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
-		routeSelectListMouseWithTopBorder(this.#selectList, event, line, col);
+	getSelectList(): SelectList {
+		return this.#selectList;
 	}
 }
 

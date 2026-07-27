@@ -7,7 +7,6 @@ import { ToolExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/componen
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { toolRenderers } from "@oh-my-pi/pi-coding-agent/tools/renderers";
 import type { TUI } from "@oh-my-pi/pi-tui";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 async function getUiTheme() {
 	await themeModule.initTheme(false, undefined, undefined, "dark", "light");
@@ -48,7 +47,7 @@ describe("apply_patch rendering", () => {
 
 	it("renders apply_patch results through edit UI instead of generic fallback", async () => {
 		await getUiTheme();
-		const uiStub = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+		const uiStub = { requestRender() {} } as unknown as TUI;
 
 		const component = new ToolExecutionComponent(
 			"apply_patch",
@@ -127,7 +126,7 @@ describe("apply_patch rendering", () => {
 
 	it("shows apply_patch preview diffs after args complete", async () => {
 		await getUiTheme();
-		const uiStub = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+		const uiStub = { requestRender() {} } as unknown as TUI;
 		const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "apply-patch-preview-"));
 		try {
 			await Bun.write(path.join(tmpDir, "preview.ts"), "const value = 1;\n");
@@ -149,13 +148,13 @@ describe("apply_patch rendering", () => {
 			expect(after).toContain("(preview)");
 			expect(after).toContain("const value = 2;");
 		} finally {
-			await removeWithRetries(tmpDir);
+			await fs.rm(tmpDir, { recursive: true, force: true });
 		}
 	});
 
 	it("refreshes streaming preview immediately on arg updates without scheduling a debounce", async () => {
 		await getUiTheme();
-		const uiStub = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+		const uiStub = { requestRender() {} } as unknown as TUI;
 		const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "apply-patch-instant-preview-"));
 		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
 		try {
@@ -177,13 +176,13 @@ describe("apply_patch rendering", () => {
 			expect(setTimeoutSpy).not.toHaveBeenCalled();
 		} finally {
 			setTimeoutSpy.mockRestore();
-			await removeWithRetries(tmpDir);
+			await fs.rm(tmpDir, { recursive: true, force: true });
 		}
 	});
 
 	it("aligns rendered edit diff separators", async () => {
 		await getUiTheme();
-		const uiStub = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+		const uiStub = { requestRender() {} } as unknown as TUI;
 		const component = new ToolExecutionComponent(
 			"edit",
 			{ path: "packages/coding-agent/src/tools/image-gen.ts" },

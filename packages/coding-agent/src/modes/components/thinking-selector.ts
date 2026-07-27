@@ -1,23 +1,25 @@
-import type { Effort } from "@oh-my-pi/pi-ai";
-import { Container, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
+import type { ReasoningEffort } from "@oh-my-pi/pi-ai";
+import { Container, type SelectItem, SelectList } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme } from "../../modes/theme/theme";
 import { getThinkingLevelMetadata } from "../../thinking";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { DynamicBorder } from "./dynamic-border";
-import { routeSelectListMouseWithTopBorder } from "./select-list-mouse-routing";
 
 /**
  * Component that renders a thinking level selector with borders
  */
 export class ThinkingSelectorComponent extends Container {
 	#selectList: SelectList;
+	readonly #onCancel: () => void;
 
 	constructor(
-		currentLevel: Effort,
-		availableLevels: Effort[],
-		onSelect: (level: Effort) => void,
+		currentLevel: ReasoningEffort,
+		availableLevels: ReasoningEffort[],
+		onSelect: (level: ReasoningEffort) => void,
 		onCancel: () => void,
 	) {
 		super();
+		this.#onCancel = onCancel;
 
 		const thinkingLevels: SelectItem[] = availableLevels.map(getThinkingLevelMetadata);
 
@@ -34,11 +36,7 @@ export class ThinkingSelectorComponent extends Container {
 		}
 
 		this.#selectList.onSelect = item => {
-			onSelect(item.value as Effort);
-		};
-
-		this.#selectList.onCancel = () => {
-			onCancel();
+			onSelect(item.value as ReasoningEffort);
 		};
 
 		this.addChild(this.#selectList);
@@ -47,11 +45,15 @@ export class ThinkingSelectorComponent extends Container {
 		this.addChild(new DynamicBorder());
 	}
 
-	getSelectList(): SelectList {
-		return this.#selectList;
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#onCancel();
+			return;
+		}
+		this.#selectList.handleInput(data);
 	}
 
-	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
-		routeSelectListMouseWithTopBorder(this.#selectList, event, line, col);
+	getSelectList(): SelectList {
+		return this.#selectList;
 	}
 }

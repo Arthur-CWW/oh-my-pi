@@ -1,6 +1,4 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import * as path from "node:path";
-import * as url from "node:url";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tool-execution";
 import { theme as activeTheme, getThemeByName, initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -37,12 +35,11 @@ describe("readToolRenderer hyperlinks", () => {
 		const theme = await getThemeByName("dark");
 		expect(theme).toBeDefined();
 
-		const handoffPath = path.resolve("/tmp/omp-local/handoff.md");
 		const component = readToolRenderer.renderResult(
 			{
 				content: [{ type: "text", text: "second line" }],
 				details: {
-					resolvedPath: handoffPath,
+					resolvedPath: "/tmp/omp-local/handoff.md",
 					displayContent: { text: "second line", startLine: 2 },
 					contentType: "text/plain",
 				},
@@ -55,9 +52,7 @@ describe("readToolRenderer hyperlinks", () => {
 		const rendered = component.render(200).join("\n");
 		expect(rendered).toContain("local://handoff.md");
 		expect(rendered).toContain(":2");
-		const handoffUri = new URL(url.pathToFileURL(path.resolve(handoffPath)).href);
-		handoffUri.searchParams.set("line", "2");
-		expect(extractLinkUris(rendered)).toContain(handoffUri.href);
+		expect(extractLinkUris(rendered)).toContain("file:///tmp/omp-local/handoff.md?line=2");
 		expect(extractLinkTexts(rendered)).toContain("local://handoff.md");
 		expect(extractLinkTexts(rendered)).not.toContain("local://handoff.md:2");
 	});
@@ -67,60 +62,17 @@ describe("readToolRenderer hyperlinks", () => {
 		const theme = await getThemeByName("dark");
 		expect(theme).toBeDefined();
 
-		const examplePath = path.resolve("/tmp/omp-read/example.ts");
 		const component = readToolRenderer.renderCall(
-			{ path: `${examplePath}:10-12` },
+			{ path: "/tmp/omp-read/example.ts:10-12" },
 			{ expanded: false, isPartial: false },
 			theme!,
 		);
 
 		const rendered = component.render(200).join("\n");
-		expect(Bun.stripANSI(rendered)).toContain(`${examplePath}:10-12`);
-		const exampleUri = new URL(url.pathToFileURL(path.resolve(examplePath)).href);
-		exampleUri.searchParams.set("line", "10");
-		expect(extractLinkUris(rendered)).toContain(exampleUri.href);
-		expect(extractLinkTexts(rendered)).toContain(examplePath);
-		expect(extractLinkTexts(rendered)).not.toContain(`${examplePath}:10-12`);
-	});
-
-	it("renders separate selector read call paths while linking only the base path", async () => {
-		settings.override("tui.hyperlinks", "always");
-		const theme = await getThemeByName("dark");
-		expect(theme).toBeDefined();
-
-		const examplePath = path.resolve("/tmp/omp-read/separate-selector.ts");
-		const component = readToolRenderer.renderCall(
-			{ path: examplePath, selector: "10-12" },
-			{ expanded: false, isPartial: false },
-			theme!,
-		);
-
-		const rendered = component.render(200).join("\n");
-		expect(Bun.stripANSI(rendered)).toContain(`${examplePath}:10-12`);
-		const exampleUri = new URL(url.pathToFileURL(path.resolve(examplePath)).href);
-		exampleUri.searchParams.set("line", "10");
-		expect(extractLinkUris(rendered)).toContain(exampleUri.href);
-		expect(extractLinkTexts(rendered)).toContain(examplePath);
-		expect(extractLinkTexts(rendered)).not.toContain(`${examplePath}:10-12`);
-	});
-
-	it("renders separate raw read selectors while linking only the base path", async () => {
-		settings.override("tui.hyperlinks", "always");
-		const theme = await getThemeByName("dark");
-		expect(theme).toBeDefined();
-
-		const examplePath = path.resolve("/tmp/omp-read/raw-selector.ts");
-		const component = readToolRenderer.renderCall(
-			{ path: examplePath, selector: "raw" },
-			{ expanded: false, isPartial: false },
-			theme!,
-		);
-
-		const rendered = component.render(200).join("\n");
-		expect(Bun.stripANSI(rendered)).toContain(`${examplePath}:raw`);
-		expect(extractLinkUris(rendered)).toContain(url.pathToFileURL(path.resolve(examplePath)).href);
-		expect(extractLinkTexts(rendered)).toContain(examplePath);
-		expect(extractLinkTexts(rendered)).not.toContain(`${examplePath}:raw`);
+		expect(Bun.stripANSI(rendered)).toContain("/tmp/omp-read/example.ts:10-12");
+		expect(extractLinkUris(rendered)).toContain("file:///tmp/omp-read/example.ts?line=10");
+		expect(extractLinkTexts(rendered)).toContain("/tmp/omp-read/example.ts");
+		expect(extractLinkTexts(rendered)).not.toContain("/tmp/omp-read/example.ts:10-12");
 	});
 
 	it("links HTTP read result headers to the final URL", async () => {
@@ -153,8 +105,8 @@ describe("readToolRenderer hyperlinks", () => {
 });
 
 describe("read ToolExecutionComponent framing", () => {
-	it("renders framed read results inside the standard tool container padding", () => {
-		const uiStub = { requestRender() {}, requestComponentRender() {} } as unknown as TUI;
+	it("renders read results inside the standard tool container padding", () => {
+		const uiStub = { requestRender() {} } as unknown as TUI;
 		const component = new ToolExecutionComponent("read", { path: "src/example.ts" }, {}, undefined, uiStub);
 		component.updateResult(
 			{
@@ -169,16 +121,14 @@ describe("read ToolExecutionComponent framing", () => {
 
 		try {
 			const lines = component.render(80).map(line => Bun.stripANSI(line));
-			const topBorderIndex = lines.findIndex(
-				line => line.includes(activeTheme.boxRound.topLeft) && line.includes("Read"),
-			);
-			const bottomBorderIndex = lines.findIndex(
-				(line, index) => index > topBorderIndex && line.includes(activeTheme.boxRound.bottomLeft),
-			);
-
-			expect(topBorderIndex).toBeGreaterThanOrEqual(0);
-			expect(lines[topBorderIndex + 1]).toContain("export const x = 1;");
-			expect(bottomBorderIndex).toBeGreaterThan(topBorderIndex);
+			// Unframed heading: no box corners, tees, or side verticals anywhere.
+			expect(lines.join("\n")).not.toMatch(/[┌┐└┘╭╮╰╯┬┴├┤┼]/);
+			const headingIndex = lines.findIndex(line => line.includes("Read"));
+			expect(headingIndex).toBeGreaterThanOrEqual(0);
+			// The heading no longer carries a ─ cap.
+			expect(lines[headingIndex]!.startsWith(activeTheme.boxSharp.horizontal)).toBe(false);
+			const body = lines.slice(headingIndex + 1).join("\n");
+			expect(body).toContain("export const x = 1;");
 		} finally {
 			component.stopAnimation();
 		}

@@ -1,13 +1,15 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storage";
-import { TempDir } from "@oh-my-pi/pi-utils";
 
-let tempDir: TempDir | null = null;
+let tempDir = "";
 
 async function freshStorage(prefix = "omp-history-session-"): Promise<{ storage: HistoryStorage; dbPath: string }> {
-	tempDir = TempDir.createSync(`@${prefix}`);
-	const dbPath = tempDir.join("history.db");
+	tempDir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+	const dbPath = path.join(tempDir, "history.db");
 	HistoryStorage.resetInstance();
 	return { storage: HistoryStorage.open(dbPath), dbPath };
 }
@@ -27,9 +29,8 @@ afterEach(async () => {
 	HistoryStorage.resetInstance();
 	vi.useRealTimers();
 	if (tempDir) {
-		await Bun.sleep(0);
-		await tempDir.remove().catch(() => {});
-		tempDir = null;
+		await fs.rm(tempDir, { recursive: true, force: true });
+		tempDir = "";
 	}
 });
 
@@ -83,8 +84,8 @@ describe("HistoryStorage session linkage", () => {
 	});
 
 	it("adds session_id to a pre-existing schema and leaves legacy rows unstamped", async () => {
-		tempDir = TempDir.createSync("@omp-history-session-migrate-");
-		const dbPath = tempDir.join("history.db");
+		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-history-session-migrate-"));
+		const dbPath = path.join(tempDir, "history.db");
 		const legacyDb = new Database(dbPath);
 		legacyDb.exec(`
 			CREATE TABLE history (
@@ -112,6 +113,40 @@ describe("HistoryStorage session linkage", () => {
 		} finally {
 			verify.close();
 		}
+	});
+});
+
+describe("HistoryStorage channels", () => {
+	it("persists command history without surfacing it as prompt history", async () => {
+		const { storage, dbPath } = await freshStorage();
+		await flush(
+			storage.add("normal prompt", "/repo", "session-prompt"),
+			storage.addToChannel("command", ":id", "/repo", "session-command"),
+		);
+
+		expect(storage.getRecent(10).map(entry => entry.prompt)).toEqual(["normal prompt"]);
+		expect(storage.getRecent(10, "command").map(entry => entry.prompt)).toEqual([":id"]);
+		expect(storage.search("id", 10)).toEqual([]);
+
+		HistoryStorage.resetInstance();
+		const reopened = HistoryStorage.open(dbPath);
+		expect(reopened.getRecent(10).map(entry => entry.prompt)).toEqual(["normal prompt"]);
+		expect(reopened.getRecent(10, "command").map(entry => [entry.prompt, entry.sessionId])).toEqual([
+			[":id", "session-command"],
+		]);
+	});
+
+	it("deduplicates adjacent values independently within each channel", async () => {
+		const { storage } = await freshStorage();
+		await flush(
+			storage.add("same"),
+			storage.addToChannel("command", "same"),
+			storage.add("same"),
+			storage.addToChannel("command", "same"),
+		);
+
+		expect(storage.getRecent(10).map(entry => entry.prompt)).toEqual(["same"]);
+		expect(storage.getRecent(10, "command").map(entry => entry.prompt)).toEqual(["same"]);
 	});
 });
 

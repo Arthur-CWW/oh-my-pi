@@ -1,9 +1,9 @@
 // UI Components barrel export
-
-export * from "./advisor-config";
 export * from "./assistant-message";
+export * from "./bookmarks-selector";
 export * from "./bash-execution";
 export * from "./bordered-loader";
+export * from "./branch-summary-message";
 export * from "./compaction-summary-message";
 export * from "./countdown-timer";
 export * from "./custom-editor";
@@ -18,9 +18,11 @@ export * from "./hook-selector";
 export * from "./keybinding-hints";
 export * from "./login-dialog";
 export * from "./logout-account-selector";
+export * from "./model-selector-availability";
 export * from "./model-selector";
 export * from "./oauth-selector";
 export * from "./queue-mode-selector";
+export * from "./raw-semantic-transcript";
 export * from "./read-tool-group";
 export * from "./segment-track";
 export * from "./session-selector";

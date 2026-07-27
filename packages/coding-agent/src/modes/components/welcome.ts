@@ -29,100 +29,28 @@ export const WELCOME_SESSION_SLOTS = 4;
  */
 export const WELCOME_LSP_SLOTS = 4;
 
-/** Trailing marker that flags a tip as a "what's new" callout. Stripped before
- *  wrapping (with any preceding whitespace) and replaced by {@link NEW_TAG_TEXT}
- *  painted as a shimmering rainbow. Non-global so `.test` stays stateless. */
-const NEW_TIP_MARKER = /\s*\[NEW\]\s*$/;
-
-/** Visible text rendered in place of {@link NEW_TIP_MARKER}. */
-const NEW_TAG_TEXT = "NEW!";
-
-/** Milliseconds for one full hue rotation of the rainbow "NEW!" tag. */
-const NEW_GLOW_PERIOD_MS = 1500;
-
-/** Selection weight for "[NEW]" tips; ordinary tips weigh 1, so a freshly added
- *  affordance surfaces this many times as often. */
-const NEW_TIP_WEIGHT = 4;
-
-/** Per-tip selection weights, parallel to {@link TIPS}. */
-const TIP_WEIGHTS: readonly number[] = TIPS.map(tip => (NEW_TIP_MARKER.test(tip) ? NEW_TIP_WEIGHT : 1));
-const TIP_WEIGHT_TOTAL = TIP_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
-
-/** Pick a tip at random, biased toward "[NEW]" tips by {@link NEW_TIP_WEIGHT}.
- *  Returns "" when no tips are embedded. */
-function pickWeightedTip(): string {
-	if (TIPS.length === 0) return "";
-	let r = Math.random() * TIP_WEIGHT_TOTAL;
-	for (let i = 0; i < TIPS.length; i++) {
-		r -= TIP_WEIGHTS[i] ?? 1;
-		if (r < 0) return TIPS[i] ?? "";
-	}
-	return TIPS[TIPS.length - 1] ?? "";
-}
-
-type ColorEncoding = "ansi-16m" | "ansi-256";
-
-/** Paint each glyph of {@link NEW_TAG_TEXT} on a moving HSL rainbow. `phase`
- *  rotates the hue offset cyclically; successive renders with increasing phase
- *  shimmer, while a fixed phase yields a still rainbow. */
-function renderNewTag(phase: number, encoding: ColorEncoding): string {
-	const bold = "\x1b[1m";
-	const reset = "\x1b[0m";
-	const wrapped = ((phase % 1) + 1) % 1;
-	const chars = [...NEW_TAG_TEXT];
-	let out = bold;
-	let prev = "";
-	for (let i = 0; i < chars.length; i++) {
-		const hue = Math.round(((i / chars.length + wrapped) % 1) * 360);
-		const color = Bun.color(`hsl(${hue}, 95%, 60%)`, encoding) ?? "";
-		if (color !== prev) {
-			out += color;
-			prev = color;
-		}
-		out += chars[i];
-	}
-	return out + reset;
-}
-export function renderWelcomeTip(tip: string, boxWidth: number, phase = 0): string[] {
+export function renderWelcomeTip(tip: string, boxWidth: number): string[] {
 	const label = "Tip: ";
 	const labelWidth = visibleWidth(label);
 	const bodyBudget = boxWidth - 1 - labelWidth; // 1 = leading indent
 	if (bodyBudget < 8) return [];
 
-	const isNew = NEW_TIP_MARKER.test(tip);
-	const body = isNew ? tip.replace(NEW_TIP_MARKER, "") : tip;
-
-	const wrappedBody = wrapTextWithAnsi(replaceTabs(body), bodyBudget);
+	const wrappedBody = wrapTextWithAnsi(replaceTabs(tip), bodyBudget);
 	if (wrappedBody.length === 0) return [];
 
-	// Pull both colors from the active theme so the line stays readable on light
-	// themes; the previous hardcoded `#b48cff` / `#9ccfff` pastels (plus a manual
-	// `\x1b[2m` dim on the body) dropped to ~1.5:1 contrast on a white background.
+	const encoding = TERMINAL.trueColor ? "ansi-16m" : "ansi-256";
+	const purple = Bun.color("#b48cff", encoding) ?? "";
+	const lightBlue = Bun.color("#9ccfff", encoding) ?? "";
+	const italic = "\x1b[3m";
+	const dim = "\x1b[2m";
+	const reset = "\x1b[0m";
 	const continuationIndent = padding(labelWidth);
-	const styledLabel = theme.fg("customMessageLabel", label);
 
-	const lines = wrappedBody.map((line, index) => {
-		const styledBody = theme.fg("muted", line);
-		const content = index === 0 ? `${styledLabel}${styledBody}` : `${continuationIndent}${styledBody}`;
-		return ` ${theme.italic(content)}`;
-	});
-
-	if (isNew) {
-		// Append the rainbow tag to the final body line when it fits within the
-		// box; otherwise drop it onto its own indented continuation line so the
-		// styled glyphs never overflow or reflow the wrapped body.
-		const encoding: ColorEncoding = TERMINAL.trueColor ? "ansi-16m" : "ansi-256";
-		const tag = renderNewTag(phase, encoding);
-		const tagWidth = 1 + visibleWidth(NEW_TAG_TEXT); // 1 = space separator
-		const lastLine = lines[lines.length - 1];
-		if (lastLine !== undefined && visibleWidth(lastLine) + tagWidth <= boxWidth) {
-			lines[lines.length - 1] = `${lastLine} ${tag}`;
-		} else {
-			lines.push(` ${continuationIndent}${tag}`);
-		}
-	}
-
-	return lines;
+	return wrappedBody.map((body, index) =>
+		index === 0
+			? ` ${italic}${purple}${label}${dim}${lightBlue}${body}${reset}`
+			: ` ${italic}${continuationIndent}${dim}${lightBlue}${body}${reset}`,
+	);
 }
 
 export interface RecentSession {
@@ -141,7 +69,7 @@ export interface LspServerInfo {
  */
 export class WelcomeComponent implements Component {
 	#animStart: number | null = null;
-	#animTimer: Timer | null = null;
+	#animTimer: ReturnType<typeof setInterval> | null = null;
 	#selectedTip: string | undefined;
 	// Render cache: the welcome box is the first transcript-area component, so
 	// returning a stable array reference keeps the whole frame prefix stable.
@@ -161,7 +89,7 @@ export class WelcomeComponent implements Component {
 			if (theme.getSymbolPreset() === "unicode" && Math.random() < 0.1) {
 				this.#selectedTip = "Please use nerdfont 😭.";
 			} else {
-				this.#selectedTip = pickWeightedTip();
+				this.#selectedTip = TIPS.length > 0 ? TIPS[Math.floor(Math.random() * TIPS.length)] : "";
 			}
 		}
 		return this.#selectedTip || undefined;
@@ -239,7 +167,7 @@ export class WelcomeComponent implements Component {
 		if (boxWidth < 4) {
 			return [];
 		}
-		const dualContentWidth = boxWidth - 3; // 3 = │ + │ + │
+		const dualContentWidth = boxWidth - 1; // 1 = middle │ divider
 		const preferredLeftCol = 26;
 		const minLeftCol = 12; // logo width
 		const minRightCol = 20;
@@ -256,7 +184,7 @@ export class WelcomeComponent implements Component {
 				: Math.max(1, dualContentWidth - 1);
 		const dualRightCol = Math.max(1, dualContentWidth - dualLeftCol);
 		const showRightColumn = dualLeftCol >= leftMinContentWidth && dualRightCol >= minRightCol;
-		const leftCol = showRightColumn ? dualLeftCol : boxWidth - 2;
+		const leftCol = showRightColumn ? dualLeftCol : boxWidth;
 		const rightCol = showRightColumn ? dualRightCol : 0;
 
 		// Logo: pick a frame from the intro animation if active, else the resting frame.
@@ -273,9 +201,8 @@ export class WelcomeComponent implements Component {
 			this.#centerText(theme.fg("borderMuted", this.providerName), leftCol),
 		];
 
-		// Right column separator
-		const separatorWidth = Math.max(0, rightCol - 2); // padding on each side
-		const separator = ` ${theme.fg("dim", theme.boxRound.horizontal.repeat(separatorWidth))}`;
+		// Right column section separator: a blank line (no rule chrome).
+		const separator = "";
 
 		// Recent sessions content
 		const sessionLines: string[] = [];
@@ -329,6 +256,7 @@ export class WelcomeComponent implements Component {
 		// Right column
 		const rightLines = [
 			` ${theme.bold(theme.fg("accent", "Tips"))}`,
+			` ${theme.fg("dim", "?")}${theme.fg("muted", " for keyboard shortcuts")}`,
 			` ${theme.fg("dim", "#")}${theme.fg("muted", " for prompt actions")}`,
 			` ${theme.fg("dim", "/")}${theme.fg("muted", " for commands")}`,
 			` ${theme.fg("dim", "!")}${theme.fg("muted", " to run bash")}`,
@@ -342,46 +270,25 @@ export class WelcomeComponent implements Component {
 			"",
 		];
 
-		// Border characters (dim)
-		const hChar = theme.boxRound.horizontal;
-		const h = theme.fg("dim", hChar);
+		// Middle divider between the two columns (the only retained chrome).
 		const v = theme.fg("dim", theme.boxRound.vertical);
-		const tl = theme.fg("dim", theme.boxRound.topLeft);
-		const tr = theme.fg("dim", theme.boxRound.topRight);
-		const bl = theme.fg("dim", theme.boxRound.bottomLeft);
-		const br = theme.fg("dim", theme.boxRound.bottomRight);
 
 		const lines: string[] = [];
 
-		// Top border with embedded title
-		const title = ` ${APP_NAME} v${this.version} `;
-		const titlePrefixRaw = hChar.repeat(3);
-		const titleStyled = theme.fg("dim", titlePrefixRaw) + theme.fg("muted", title);
-		const titleVisLen = visibleWidth(titlePrefixRaw) + visibleWidth(title);
-		const titleSpace = boxWidth - 2;
-		if (titleVisLen >= titleSpace) {
-			lines.push(tl + truncateToWidth(titleStyled, titleSpace) + tr);
-		} else {
-			const afterTitle = titleSpace - titleVisLen;
-			lines.push(tl + titleStyled + theme.fg("dim", hChar.repeat(afterTitle)) + tr);
-		}
+		// Heading carrying the app name/version (no frame chrome).
+		lines.push(theme.bold(theme.fg("accent", ` ${APP_NAME} v${this.version}`)));
 
-		// Content rows
+		// Content rows: two columns joined by the middle divider, or a single
+		// column with no chrome.
 		const maxRows = showRightColumn ? Math.max(leftLines.length, rightLines.length) : leftLines.length;
 		for (let i = 0; i < maxRows; i++) {
 			const left = this.#fitToWidth(leftLines[i] ?? "", leftCol);
 			if (showRightColumn) {
 				const right = this.#fitToWidth(rightLines[i] ?? "", rightCol);
-				lines.push(v + left + v + right + v);
+				lines.push(left + v + right);
 			} else {
-				lines.push(v + left + v);
+				lines.push(left);
 			}
-		}
-		// Bottom border
-		if (showRightColumn) {
-			lines.push(bl + h.repeat(leftCol) + theme.fg("dim", theme.boxRound.teeUp) + h.repeat(rightCol) + br);
-		} else {
-			lines.push(bl + h.repeat(leftCol) + br);
 		}
 
 		// Randomly picked tip, rendered directly beneath the box.
@@ -391,19 +298,14 @@ export class WelcomeComponent implements Component {
 	}
 
 	/**
-	 * Render the per-instance tip line: the `customMessageLabel`-themed `Tip:`
-	 * label followed by a `muted` body, the whole line italicized. Returns `[]`
+	 * Render the per-instance tip line: a purple "Tip:" label followed by the
+	 * tip body in dimmed light blue, the whole line italicized. Returns `[]`
 	 * when no tip is available or the box is too narrow to be useful.
 	 */
 	#renderTip(boxWidth: number): string[] {
 		const tip = this.tip;
 		if (!tip) return [];
-		// A trailing "[NEW]" marker paints an animated rainbow "NEW!" tag. Derive
-		// its hue phase from wall-clock time so it shimmers across the welcome
-		// intro's re-render frames, then settles into a still rainbow once the box
-		// caches its resting frame. Non-"[NEW]" tips ignore the phase entirely.
-		const phase = NEW_TIP_MARKER.test(tip) ? performance.now() / NEW_GLOW_PERIOD_MS : 0;
-		return renderWelcomeTip(tip, boxWidth, phase);
+		return renderWelcomeTip(tip, boxWidth);
 	}
 
 	/** Center text within a given width */

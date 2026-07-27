@@ -1,4 +1,3 @@
-import * as AIError from "../error";
 import type { OAuthController } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
 
@@ -11,7 +10,7 @@ const OLLAMA_DOCS_URL = "https://github.com/ollama/ollama/blob/main/docs/api.md"
  */
 export async function loginOllama(options: OAuthController): Promise<string> {
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 	if (!options.onPrompt) {
 		return "";
@@ -30,7 +29,7 @@ export async function loginOllama(options: OAuthController): Promise<string> {
 	});
 
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 
 	return apiKey.trim();

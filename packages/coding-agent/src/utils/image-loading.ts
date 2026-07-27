@@ -1,5 +1,5 @@
 import * as fs from "node:fs/promises";
-import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
+import type { ImageContent, MediaContent, Model } from "@oh-my-pi/pi-ai";
 import { formatBytes, readImageMetadata, SUPPORTED_IMAGE_MIME_TYPES } from "@oh-my-pi/pi-utils";
 import { resolveReadPath } from "../tools/path-utils";
 import { formatDimensionNote, type ImageResizeOptions, resizeImage } from "./image-resize";
@@ -13,19 +13,9 @@ export const SUPPORTED_INPUT_IMAGE_MIME_TYPES = SUPPORTED_IMAGE_MIME_TYPES;
  * with an opaque HTTP 400. Detect those models so the resize pipeline encodes
  * to PNG/JPEG instead — the automatic equivalent of `OMP_NO_WEBP=1`.
  */
-export function modelLacksWebpSupport(
-	model: Pick<Model, "provider" | "api" | "imageInputDecoder"> | undefined,
-): boolean {
+export function modelLacksWebpSupport(model: Pick<Model, "provider" | "api"> | undefined): boolean {
 	if (!model) return false;
-	return (
-		model.imageInputDecoder === "stb" ||
-		model.provider === "ollama" ||
-		model.provider === "ollama-cloud" ||
-		model.provider === "llama.cpp" ||
-		model.provider === "lm-studio" ||
-		model.provider === "local-server" ||
-		model.api === "ollama-chat"
-	);
+	return model.provider === "ollama" || model.provider === "ollama-cloud" || model.api === "ollama-chat";
 }
 
 /**
@@ -44,17 +34,6 @@ export interface LoadImageInputOptions {
 	maxBytes?: number;
 	resolvedPath?: string;
 	detectedMimeType?: string;
-	/** Force non-WebP output (e.g. for Ollama). Leave unset to honor `OMP_NO_WEBP`. */
-	excludeWebP?: boolean;
-}
-
-/** Options for loading an in-memory chat image attachment as a vision-model input. */
-export interface LoadImageAttachmentInputOptions {
-	image: ImageContent;
-	label: string;
-	uri: string;
-	autoResize: boolean;
-	maxBytes?: number;
 	/** Force non-WebP output (e.g. for Ollama). Leave unset to honor `OMP_NO_WEBP`. */
 	excludeWebP?: boolean;
 }
@@ -128,6 +107,23 @@ export async function normalizeModelContextImages(
 	return normalized;
 }
 
+/**
+ * Normalize only image attachments before model dispatch. Video blocks are
+ * preserved by reference and are never decoded, resized, or copied.
+ */
+export async function normalizeModelContextAttachments(
+	attachments: MediaContent[] | undefined,
+	options?: NormalizeModelContextImagesOptions,
+): Promise<MediaContent[] | undefined> {
+	if (!attachments || attachments.length === 0) return undefined;
+	const images = attachments.filter((attachment): attachment is ImageContent => attachment.type === "image");
+	if (images.length === 0) return attachments;
+	const normalizedImages = await normalizeModelContextImages(images, options);
+	if (!normalizedImages || normalizedImages.every((image, index) => image === images[index])) return attachments;
+	let imageIndex = 0;
+	return attachments.map(attachment => (attachment.type === "image" ? normalizedImages[imageIndex++]! : attachment));
+}
+
 export async function loadImageInput(options: LoadImageInputOptions): Promise<LoadedImageInput | null> {
 	const maxBytes = options.maxBytes ?? MAX_IMAGE_INPUT_BYTES;
 	const resolvedPath = options.resolvedPath ?? resolveReadPath(options.path, options.cwd);
@@ -175,53 +171,6 @@ export async function loadImageInput(options: LoadImageInputOptions): Promise<Lo
 
 	return {
 		resolvedPath,
-		mimeType: outputMimeType,
-		data: outputData,
-		textNote,
-		dimensionNote,
-		bytes: outputBytes,
-	};
-}
-
-/** Loads a chat attachment image through the same size and encoder policy as file-backed image inputs. */
-export async function loadImageAttachmentInput(
-	options: LoadImageAttachmentInputOptions,
-): Promise<LoadedImageInput | null> {
-	const maxBytes = options.maxBytes ?? MAX_IMAGE_INPUT_BYTES;
-	if (!SUPPORTED_INPUT_IMAGE_MIME_TYPES.has(options.image.mimeType)) {
-		return null;
-	}
-
-	const inputBytes = Buffer.byteLength(options.image.data, "base64");
-	if (inputBytes > maxBytes) {
-		throw new ImageInputTooLargeError(inputBytes, maxBytes);
-	}
-
-	let outputData = options.image.data;
-	let outputMimeType = options.image.mimeType;
-	let outputBytes = inputBytes;
-	let dimensionNote: string | undefined;
-
-	const shouldReencodeWebP = options.excludeWebP === true && options.image.mimeType === "image/webp";
-	if (options.autoResize || shouldReencodeWebP) {
-		try {
-			const resized = await resizeImage(options.image, { excludeWebP: options.excludeWebP });
-			outputData = resized.data;
-			outputMimeType = resized.mimeType;
-			outputBytes = resized.buffer.byteLength;
-			dimensionNote = formatDimensionNote(resized);
-		} catch {
-			// keep original image when resize fails
-		}
-	}
-
-	let textNote = `Read image attachment ${options.label} [${outputMimeType}]`;
-	if (dimensionNote) {
-		textNote += `\n${dimensionNote}`;
-	}
-
-	return {
-		resolvedPath: options.uri,
 		mimeType: outputMimeType,
 		data: outputData,
 		textNote,

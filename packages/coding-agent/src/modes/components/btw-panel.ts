@@ -2,6 +2,7 @@ import { type Component, Container, Markdown, Spacer, Text, type TUI } from "@oh
 import { replaceTabs } from "../../tools/render-utils";
 import { getMarkdownTheme, theme } from "../theme/theme";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 
 type BtwPanelState = "running" | "complete" | "aborted" | "error";
 
@@ -16,7 +17,6 @@ export class BtwPanelComponent extends Container {
 	#state: BtwPanelState = "running";
 	#answer = "";
 	#errorMessage: string | undefined;
-	#visibleAnswer = "";
 	#closed = false;
 
 	constructor(options: BtwPanelComponentOptions) {
@@ -29,14 +29,12 @@ export class BtwPanelComponent extends Container {
 	appendText(delta: string): void {
 		if (!delta || this.#closed) return;
 		this.#answer += delta;
-		this.#visibleAnswer = replaceTabs(this.#answer).trim();
 		this.#rebuild();
 	}
 
 	setAnswer(text: string): void {
 		if (this.#closed) return;
 		this.#answer = text;
-		this.#visibleAnswer = replaceTabs(text).trim();
 		this.#rebuild();
 	}
 
@@ -59,19 +57,6 @@ export class BtwPanelComponent extends Container {
 		this.#state = "error";
 		this.#errorMessage = message;
 		this.#rebuild();
-	}
-
-	isBranchable(): boolean {
-		return this.isCopyable();
-	}
-
-	isCopyable(): boolean {
-		return this.#state === "complete" && this.#visibleAnswer.length > 0;
-	}
-
-	getCopyText(): string | undefined {
-		if (!this.isCopyable()) return undefined;
-		return this.#visibleAnswer;
 	}
 
 	close(): void {
@@ -99,13 +84,13 @@ export class BtwPanelComponent extends Container {
 	#footerLine(): string {
 		switch (this.#state) {
 			case "running":
-				return theme.fg("muted", "Esc cancel /btw");
+				return keyHint("app.interrupt", "cancel /btw");
 			case "complete":
-				return theme.fg("muted", this.isCopyable() ? "c copy · b branch to chat · Esc dismiss" : "Esc dismiss");
+				return keyHint("ui.dismiss", "dismiss");
 			case "aborted":
-				return theme.fg("warning", `${theme.status.warning} Cancelled · Esc dismiss`);
+				return `${theme.fg("warning", `${theme.status.warning} Cancelled · `)}${keyHint("ui.dismiss", "dismiss")}`;
 			case "error":
-				return theme.fg("error", `${theme.status.error} Error · Esc dismiss`);
+				return `${theme.fg("error", `${theme.status.error} Error · `)}${keyHint("ui.dismiss", "dismiss")}`;
 		}
 	}
 
@@ -113,7 +98,7 @@ export class BtwPanelComponent extends Container {
 		if (this.#state === "error") {
 			return new Text(theme.fg("error", replaceTabs(this.#errorMessage ?? "Unknown error")), 1, 0);
 		}
-		const text = this.#visibleAnswer;
+		const text = replaceTabs(this.#answer).trim();
 		if (!text) {
 			const waiting =
 				this.#state === "running" ? `${theme.status.pending} Waiting for response…` : "No text returned.";

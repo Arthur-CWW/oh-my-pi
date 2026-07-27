@@ -7,9 +7,9 @@
  *     containing a `.git` *file* that points back at
  *     `<parent-repo>/.git/worktrees/<name>/`.
  *   - **Task-isolation dirs** (`task/worktree.ts`): a wrapper dir with a
- *     compact `m` subdir mounted/cloned by `natives.isoStart`. Legacy `merged`
- *     subdirs are still recognized. These are ephemeral; `ensureIsolation`
- *     removes the base before re-creating it, so leftovers are crashed runs.
+ *     `merged` subdir mounted/cloned by `natives.isoStart`. These are ephemeral
+ *     — `ensureIsolation` always `rm -rf`s the base before re-creating it, so
+ *     any leftover on disk is a leak from a crashed run.
  *
  * Legacy entries from before the encoding change keep working because git still
  * tracks them by branch name. This command exists to GC them on demand.
@@ -21,8 +21,6 @@ import chalk from "chalk";
 import * as git from "../utils/git";
 
 type WorktreeKind = "pr-checkout" | "task-isolation" | "empty" | "stray";
-
-const TASK_ISOLATION_MOUNT_DIRS = ["m", "merged"] as const;
 
 export interface WorktreeEntry {
 	/** Absolute path to the worktree dir (or stray container) under `~/.omp/wt/`. */
@@ -211,9 +209,8 @@ async function classifyDir(dir: string): Promise<WorktreeEntry | null> {
 	if (gitStat?.isFile()) {
 		return classifyPrCheckout(dir, gitEntry);
 	}
-	for (const mountDir of TASK_ISOLATION_MOUNT_DIRS) {
-		const mountStat = await fs.stat(path.join(dir, mountDir)).catch(() => null);
-		if (!mountStat?.isDirectory()) continue;
+	const mergedStat = await fs.stat(path.join(dir, "merged")).catch(() => null);
+	if (mergedStat?.isDirectory()) {
 		return {
 			path: dir,
 			kind: "task-isolation",

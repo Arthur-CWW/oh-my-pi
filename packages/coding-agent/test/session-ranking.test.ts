@@ -1,15 +1,9 @@
-import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
-import * as path from "node:path";
-import { gzipSync } from "node:zlib";
-import { runGcCommand } from "@oh-my-pi/pi-coding-agent/cli/gc-cli";
 import {
 	mergeSessionRanking,
 	rankSessionSearchMatches,
 } from "@oh-my-pi/pi-coding-agent/modes/components/session-selector";
-import { listSessions, type SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
-import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
-import { getHistoryDbPath, getSessionsDir, TempDir } from "@oh-my-pi/pi-utils";
+import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 
 function makeSession(id: string, overrides: Partial<SessionInfo> = {}): SessionInfo {
 	return {
@@ -27,91 +21,6 @@ function makeSession(id: string, overrides: Partial<SessionInfo> = {}): SessionI
 }
 
 const ids = (sessions: SessionInfo[]): string[] => sessions.map(s => s.id);
-
-describe("slotted session headers", () => {
-	it("lists and ranks sessions whose mutable title slot is the first JSONL entry", async () => {
-		const storage = new MemorySessionStorage();
-		const sessionDir = "/sessions/project";
-		const file = `${sessionDir}/slotted.jsonl`;
-		storage.writeTextSync(
-			file,
-			[
-				JSON.stringify({ type: "title", v: 1, title: "Slot Title", updatedAt: "2026-06-27T00:00:00.000Z" }),
-				JSON.stringify({
-					type: "session",
-					id: "header-id",
-					cwd: "/repo",
-					title: "Stale Header Title",
-					timestamp: "2026-06-27T00:00:00.000Z",
-				}),
-				JSON.stringify({ type: "message", message: { role: "user", content: "first prompt" } }),
-				"",
-			].join("\n"),
-		);
-
-		const sessions = await listSessions(sessionDir, storage);
-
-		expect(sessions.map(session => ({ id: session.id, cwd: session.cwd, title: session.title }))).toEqual([
-			{ id: "header-id", cwd: "/repo", title: "Slot Title" },
-		]);
-		expect(ids(rankSessionSearchMatches(sessions, "slot"))).toEqual(["header-id"]);
-	});
-
-	it("cleans history rows for archived slotted sessions by reading the header after the title slot", async () => {
-		const tempDir = TempDir.createSync("@test-slotted-archive-");
-		try {
-			const root = tempDir.path();
-			const archiveDir = path.join(root, "archive", "sessions", "project");
-			const archived = path.join(archiveDir, "legacy-name.jsonl.gz");
-			await Bun.write(
-				archived,
-				gzipSync(
-					[
-						JSON.stringify({
-							type: "title",
-							v: 1,
-							title: "Archived Slot Title",
-							updatedAt: "2026-06-27T00:00:00.000Z",
-						}),
-						JSON.stringify({
-							type: "session",
-							version: 3,
-							id: "archive-header-id",
-							timestamp: "2026-06-27T00:00:00.000Z",
-							cwd: "/repo",
-						}),
-						"",
-					].join("\n"),
-				),
-			);
-			const dbPath = getHistoryDbPath(root);
-			const db = new Database(dbPath);
-			db.run("CREATE TABLE history (id INTEGER PRIMARY KEY AUTOINCREMENT, prompt TEXT NOT NULL, session_id TEXT)");
-			db.run("INSERT INTO history (prompt, session_id) VALUES ('old prompt', 'archive-header-id')");
-			db.close();
-
-			const result = await runGcCommand({
-				flags: {
-					agentDir: root,
-					archive: true,
-					coldArchiveAfterDays: 30,
-					retainNewestGlobal: 0,
-					retainNewestPerCwd: 0,
-					apply: true,
-				},
-			});
-
-			const check = new Database(dbPath);
-			const rows = check.prepare("SELECT session_id FROM history").all() as Array<{ session_id: string }>;
-			check.close();
-			expect(result.archive?.historyRowsDeleted).toBe(1);
-			expect(rows).toEqual([]);
-			expect(await Bun.file(path.join(getSessionsDir(root), "project", "legacy-name.jsonl")).exists()).toBe(false);
-		} finally {
-			await tempDir.remove().catch(() => {});
-		}
-	});
-});
 
 describe("rankSessionSearchMatches", () => {
 	it("keeps literal query matches recency-first instead of overvaluing earlier word position", () => {
@@ -160,6 +69,25 @@ describe("rankSessionSearchMatches", () => {
 		});
 
 		expect(ids(rankSessionSearchMatches([exact, lowQuality], "mn"))).toEqual(["exact"]);
+	});
+
+	it("matches workstream ids and kinds while leaving legacy sessions unclassified", () => {
+		const harness = makeSession("harness-session", {
+			workstream: { kind: "workstream", id: "harness" },
+		});
+		const primer = makeSession("primer-session", {
+			workstream: { kind: "workstream", id: "primer" },
+		});
+		const adhoc = makeSession("adhoc-session", {
+			workstream: { kind: "adhoc" },
+		});
+		const legacy = makeSession("legacy-session");
+		const sessions = [harness, primer, adhoc, legacy];
+
+		expect(ids(rankSessionSearchMatches(sessions, "harness"))).toEqual(["harness-session"]);
+		expect(ids(rankSessionSearchMatches(sessions, "primer"))).toEqual(["primer-session"]);
+		expect(ids(rankSessionSearchMatches(sessions, "workstream"))).toEqual(["harness-session", "primer-session"]);
+		expect(ids(rankSessionSearchMatches(sessions, "adhoc"))).toEqual(["adhoc-session"]);
 	});
 
 	it("returns all sessions unchanged for an empty query", () => {

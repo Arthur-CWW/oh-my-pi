@@ -4,7 +4,7 @@
  */
 import * as path from "node:path";
 import { fuzzyMatch } from "@oh-my-pi/pi-tui";
-import { getMCPConfigPath, logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@oh-my-pi/pi-utils";
 import type { ContextFile } from "../../../capability/context-file";
 import type { ExtensionModule } from "../../../capability/extension-module";
 import type { Hook } from "../../../capability/hook";
@@ -22,7 +22,6 @@ import {
 	isProviderEnabled,
 	loadCapability,
 } from "../../../discovery";
-import { readDisabledServers, readEnabledServers } from "../../../mcp/config-writer";
 import type {
 	DashboardState,
 	Extension,
@@ -142,32 +141,12 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 		logger.warn("Failed to load extension-modules capability", { error: String(error) });
 	}
 
-	// Load MCP servers. The dashboard mirrors `/mcp list` (issue #3827) by
-	// honoring the same disable signals: the dashboard-private settings list,
-	// the per-server `enabled: false` flag, and the user-level `disabledServers`
-	// denylist that `/mcp disable` writes through `setServerDisabled`. The
-	// user-level `enabledServers` allowlist overrides a non-writable source's
-	// `enabled: false` (e.g. opencode.json) but never the denylist.
+	// Load MCP servers
 	try {
-		const userMcpPath = cwd ? getMCPConfigPath("user", cwd) : undefined;
-		const [mcpDisabledNames, mcpForcedEnabled] = await Promise.all([
-			userMcpPath
-				? readDisabledServers(userMcpPath)
-						.then(list => new Set(list))
-						.catch(() => new Set<string>())
-				: Promise.resolve(new Set<string>()),
-			userMcpPath
-				? readEnabledServers(userMcpPath)
-						.then(list => new Set(list))
-						.catch(() => new Set<string>())
-				: Promise.resolve(new Set<string>()),
-		]);
 		const mcps = await loadCapability<MCPServer>("mcps", loadOpts);
 		for (const server of mcps.all) {
 			const id = makeExtensionId("mcp", server.name);
-			const forced = mcpForcedEnabled.has(server.name);
-			const sourceSaysDisabled = server.enabled === false && !forced;
-			const isDisabled = mcpDisabledNames.has(server.name) || disabledExtensions.has(id) || sourceSaysDisabled;
+			const isDisabled = disabledExtensions.has(id);
 			const isShadowed = (server as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(server._source.provider);
 

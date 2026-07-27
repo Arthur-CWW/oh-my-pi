@@ -2,29 +2,25 @@ import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, ApiKey, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import { completeSimple, validateToolCall } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import changelogSystemPrompt from "../../commit/prompts/changelog-system.md" with { type: "text" };
 import changelogUserPrompt from "../../commit/prompts/changelog-user.md" with { type: "text" };
-import type { ChangelogGenerationResult } from "../../commit/types";
+import { CHANGELOG_CATEGORIES, type ChangelogCategory, type ChangelogGenerationResult } from "../../commit/types";
 import { toReasoningEffort } from "../../thinking";
 import { extractTextContent, extractToolCall, parseJsonPayload } from "../utils";
 
-// Build the changelog entry schema with arktype
-// Each category maps to an optional array of strings
-const changelogEntriesSchema = type({
-	"Breaking Changes?": "string[]",
-	"Added?": "string[]",
-	"Changed?": "string[]",
-	"Deprecated?": "string[]",
-	"Removed?": "string[]",
-	"Fixed?": "string[]",
-	"Security?": "string[]",
-});
+const changelogEntryShape = Object.fromEntries(
+	CHANGELOG_CATEGORIES.map(c => [c, z.array(z.string()).optional()] as const),
+) as Record<ChangelogCategory, z.ZodOptional<z.ZodArray<z.ZodString>>>;
+
+const changelogEntriesSchema = z.object(changelogEntryShape);
 
 export const changelogTool = {
 	name: "create_changelog_entries",
 	description: "Generate changelog entries grouped by Keep a Changelog categories.",
-	parameters: type({ entries: changelogEntriesSchema }),
+	parameters: z.object({
+		entries: changelogEntriesSchema,
+	}),
 };
 
 export interface ChangelogPromptInput {
@@ -72,7 +68,7 @@ export async function generateChangelogEntries({
 function parseChangelogResponse(message: AssistantMessage): ChangelogGenerationResult {
 	const toolCall = extractToolCall(message, "create_changelog_entries");
 	if (toolCall) {
-		const parsed = validateToolCall([changelogTool], toolCall) as typeof changelogTool.parameters.infer;
+		const parsed = validateToolCall([changelogTool], toolCall) as z.infer<(typeof changelogTool)["parameters"]>;
 		return { entries: parsed.entries ?? {} };
 	}
 

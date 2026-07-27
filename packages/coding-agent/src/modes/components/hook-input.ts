@@ -3,9 +3,10 @@
  */
 import { Container, Input, Markdown, matchesKey, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
 import { getMarkdownTheme, theme } from "../../modes/theme/theme";
-import { matchesAppInterrupt } from "../../modes/utils/keybinding-matchers";
+import { matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import { CountdownTimer } from "./countdown-timer";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint, rawKeyHint } from "./keybinding-hints";
 
 export interface HookInputOptions {
 	tui?: TUI;
@@ -50,13 +51,15 @@ export class HookInputComponent extends Container {
 					opts.onTimeout?.();
 					this.#onCancelCallback();
 				},
+				this,
 			);
 		}
 
 		this.#input = new Input();
 		this.addChild(this.#input);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "enter submit  esc cancel"), 1, 0));
+		const hint = [rawKeyHint("enter", "submit"), keyHint("ui.dismiss", "cancel")].join("  ");
+		this.addChild(new Text(hint, 1, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder());
 	}
@@ -66,7 +69,7 @@ export class HookInputComponent extends Container {
 		this.#countdown?.reset();
 		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
 			this.#onSubmitCallback(this.#input.getValue());
-		} else if (matchesAppInterrupt(keyData)) {
+		} else if (matchesUiDismiss(keyData)) {
 			this.#onCancelCallback();
 		} else {
 			this.#input.handleInput(keyData);

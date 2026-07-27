@@ -1,8 +1,9 @@
 import { Container, matchesKey, ScrollView, Spacer, TruncatedText } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
-import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import type { ResetUsageAccount } from "../../slash-commands/helpers/reset-usage";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 
 const RESET_SELECTOR_MAX_VISIBLE = 10;
 
@@ -93,8 +94,8 @@ export class ResetUsageSelectorComponent extends Container {
 
 		const pending = this.#pendingIndex !== null ? this.#accounts[this.#pendingIndex] : undefined;
 		const hint = pending
-			? theme.fg("warning", `  Press Enter again to spend 1 reset for ${pending.label}, Esc to cancel`)
-			: theme.fg("muted", "  ↑/↓ select · ↵ spend a reset · Esc cancel");
+			? `${theme.fg("warning", `  Press Enter again to spend 1 reset for ${pending.label} · `)}${keyHint("ui.dismiss", "back")}`
+			: `${theme.fg("muted", "  ↑/↓ select · ↵ spend a reset · ")}${keyHint("ui.dismiss", "cancel")}`;
 		this.#listContainer.addChild(new TruncatedText(hint, 0, 0));
 
 		if (this.#statusMessage) {
@@ -104,7 +105,7 @@ export class ResetUsageSelectorComponent extends Container {
 	}
 
 	handleInput(keyData: string): void {
-		if (matchesSelectCancel(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			if (this.#pendingIndex !== null) {
 				this.#pendingIndex = null;
 				this.#statusMessage = undefined;

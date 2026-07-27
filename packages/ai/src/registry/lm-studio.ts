@@ -1,4 +1,3 @@
-import * as AIError from "../error";
 import type { OAuthController, OAuthLoginCallbacks } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
 
@@ -7,7 +6,7 @@ export const DEFAULT_LOCAL_TOKEN = "lm-studio-local";
 
 export async function loginLmStudio(options: OAuthController): Promise<string> {
 	if (!options.onPrompt) {
-		throw new AIError.OnPromptRequiredError(PROVIDER_ID);
+		throw new Error(`${PROVIDER_ID} login requires onPrompt callback`);
 	}
 
 	const apiKey = await options.onPrompt({
@@ -17,7 +16,7 @@ export async function loginLmStudio(options: OAuthController): Promise<string> {
 	});
 
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 
 	const trimmed = apiKey.trim();

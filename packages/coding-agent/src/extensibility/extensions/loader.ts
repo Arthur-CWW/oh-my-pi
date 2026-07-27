@@ -5,26 +5,25 @@ import type * as fs1 from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, Model, TextContent, TSchema } from "@oh-my-pi/pi-ai";
+import type { Model, TSchema, UserContent } from "@oh-my-pi/pi-ai";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { hasFsCode, isEacces, isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { Type } from "arktype";
-import * as zodModule from "zod/v4";
+import * as Schema from "effect/Schema";
+import { z } from "zod/v4";
 import { type ExtensionModule, extensionModuleCapability } from "../../capability/extension-module";
-import { type Hook, hookCapability } from "../../capability/hook";
 import { loadCapability } from "../../discovery";
 import { getExtensionNameFromPath } from "../../discovery/helpers";
 import type { ExecOptions } from "../../exec/exec";
 import { execCommand } from "../../exec/exec";
 // Runtime self-reference: dereference this namespace only inside loader functions to keep the index.ts cycle safe.
 import * as PiCodingAgent from "../../index";
-import type { CustomMessagePayload } from "../../session/messages";
+import type { CustomMessage } from "../../session/messages";
 import { EventBus } from "../../utils/event-bus";
 import { installLegacyPiSpecifierShim, loadLegacyPiModule } from "../plugins/legacy-pi-compat";
 import { getAllPluginExtensionPaths } from "../plugins/loader";
 import * as TypeBox from "../typebox";
 
-import { resolvePath, withExitGuard } from "../utils";
+import { resolvePath } from "../utils";
 import type {
 	AssistantThinkingRenderer,
 	Extension,
@@ -36,6 +35,8 @@ import type {
 	MessageRenderer,
 	ProviderConfig,
 	RegisteredCommand,
+	RefreshToolsHandler,
+	RegisteredTool,
 	ToolDefinition,
 } from "./types";
 
@@ -47,6 +48,43 @@ type LoadedExtensionModule = ExtensionFactory | { default?: ExtensionFactory };
 function getExtensionFactory(module: LoadedExtensionModule): ExtensionFactory | null {
 	const candidate = typeof module === "function" ? module : module.default;
 	return typeof candidate === "function" ? candidate : null;
+}
+
+const NonEmptyTrimmedStringSchema = Schema.String.pipe(
+	Schema.check(Schema.isMinLength(1), Schema.isTrimmed()),
+);
+const DynamicToolNameSchema = Schema.String.pipe(
+	Schema.check(Schema.isPattern(/^[a-z0-9_-]{1,64}$/)),
+);
+const DynamicToolRegistrationSchema = Schema.Struct({
+	source: NonEmptyTrimmedStringSchema,
+	definition: Schema.Struct({
+		name: DynamicToolNameSchema,
+		label: NonEmptyTrimmedStringSchema,
+		description: NonEmptyTrimmedStringSchema,
+		origin: Schema.optional(Schema.Unknown),
+		parameters: Schema.Unknown,
+		hidden: Schema.optional(Schema.Boolean),
+		defaultInactive: Schema.optional(Schema.Boolean),
+		deferrable: Schema.optional(Schema.Boolean),
+		approval: Schema.optional(Schema.Unknown),
+		mcpServerName: Schema.optional(NonEmptyTrimmedStringSchema),
+		mcpToolName: Schema.optional(NonEmptyTrimmedStringSchema),
+		execute: Schema.Unknown,
+		onSession: Schema.optional(Schema.Unknown),
+		renderCall: Schema.optional(Schema.Unknown),
+		renderResult: Schema.optional(Schema.Unknown),
+	}),
+});
+
+function validateDynamicToolRegistration<TParams extends TSchema, TDetails>(
+	tool: ToolDefinition<TParams, TDetails>,
+	source: string,
+): void {
+	Schema.decodeUnknownSync(DynamicToolRegistrationSchema)(
+		{ source, definition: tool },
+		{ onExcessProperty: "error" },
+	);
 }
 
 export class ExtensionRuntimeNotInitializedError extends Error {
@@ -62,7 +100,35 @@ export class ExtensionRuntimeNotInitializedError extends Error {
 export class ExtensionRuntime implements IExtensionRuntime {
 	flagValues = new Map<string, boolean | string>();
 	pendingProviderRegistrations: Array<{ name: string; config: ProviderConfig; sourceId: string }> = [];
+	extensionPhase: IExtensionRuntime["extensionPhase"] = "loading";
+	dynamicTools = new Map<Extension, Extension["tools"]>();
+	dynamicToolRefreshTail: Promise<void> = Promise.resolve();
+	#dynamicToolRefreshHandler: RefreshToolsHandler | undefined;
 
+	activateDynamicTools(refreshTools?: RefreshToolsHandler): void {
+		if (this.extensionPhase !== "loading") {
+			throw new Error(`Extension runtime cannot initialize from phase "${this.extensionPhase}"`);
+		}
+		this.#dynamicToolRefreshHandler = refreshTools;
+		this.extensionPhase = "active";
+	}
+
+	requestDynamicToolRefresh(): void {
+		const refreshTools = this.#dynamicToolRefreshHandler;
+		if (!refreshTools) return;
+		const previous = this.dynamicToolRefreshTail.catch(() => {});
+		this.dynamicToolRefreshTail = previous.then(() => {
+			const tools: RegisteredTool[] = [];
+			for (const ownedTools of this.dynamicTools.values()) {
+				tools.push(...ownedTools.values());
+			}
+			return refreshTools(tools);
+		});
+	}
+
+	flushDynamicToolRefresh(): Promise<void> {
+		return this.dynamicToolRefreshTail;
+	}
 	sendMessage(): void {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
@@ -121,11 +187,10 @@ export class ExtensionRuntime implements IExtensionRuntime {
  * Registration methods write to the extension object.
  * Action methods delegate to the shared runtime.
  */
-class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
+class ConcreteExtensionAPI implements ExtensionAPI {
 	readonly logger = logger;
 	readonly typebox = TypeBox;
-	readonly arktype = Type;
-	readonly zod = zodModule;
+	readonly zod = z;
 	readonly flagValues = new Map<string, boolean | string>();
 	readonly pendingProviderRegistrations: Array<{
 		name: string;
@@ -148,10 +213,33 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 	}
 
 	registerTool<TParams extends TSchema = TSchema, TDetails = unknown>(tool: ToolDefinition<TParams, TDetails>): void {
-		this.extension.tools.set(tool.name, {
-			definition: tool,
+		if (this.runtime.extensionPhase === "loading") {
+			this.extension.tools.set(tool.name, {
+				definition: tool,
+				extensionPath: this.extension.path,
+			});
+			return;
+		}
+		if (this.runtime.extensionPhase !== "active") {
+			throw new Error("Cannot register a dynamic extension tool after its session runtime has been disposed.");
+		}
+
+		validateDynamicToolRegistration(tool, this.extension.path);
+		const registeredTool: RegisteredTool<TParams, TDetails> = {
+			definition: {
+				...tool,
+				origin: { kind: "dynamic", source: this.extension.path },
+			},
 			extensionPath: this.extension.path,
-		});
+		};
+		this.extension.tools.set(tool.name, registeredTool);
+		let ownedTools = this.runtime.dynamicTools.get(this.extension);
+		if (!ownedTools) {
+			ownedTools = new Map();
+			this.runtime.dynamicTools.set(this.extension, ownedTools);
+		}
+		ownedTools.set(tool.name, registeredTool);
+		this.runtime.requestDynamicToolRefresh();
 	}
 
 	registerCommand(
@@ -203,16 +291,13 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 	}
 
 	sendMessage<T = unknown>(
-		message: CustomMessagePayload<T>,
+		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 	): void {
 		this.runtime.sendMessage(message, options);
 	}
 
-	sendUserMessage(
-		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
-	): void {
+	sendUserMessage(content: string | UserContent[], options?: { deliverAs?: "steer" | "followUp" }): void {
 		this.runtime.sendUserMessage(content, options);
 	}
 
@@ -290,7 +375,7 @@ async function loadExtension(
 ): Promise<{ extension: Extension | null; error: string | null }> {
 	const resolvedPath = resolvePath(extensionPath, cwd);
 	try {
-		const module = (await withExitGuard(() => loadLegacyPiModule(resolvedPath))) as LoadedExtensionModule;
+		const module = (await loadLegacyPiModule(resolvedPath)) as LoadedExtensionModule;
 		const factory = getExtensionFactory(module);
 
 		if (typeof factory !== "function") {
@@ -302,9 +387,7 @@ async function loadExtension(
 
 		const extension = createExtension(extensionPath, resolvedPath);
 		const api = new ConcreteExtensionAPI(PiCodingAgent, extension, runtime, cwd, eventBus);
-		await withExitGuard(async () => {
-			await factory(api);
-		});
+		await factory(api);
 
 		return { extension, error: null };
 	} catch (err) {
@@ -484,8 +567,8 @@ async function discoverExtensionsInDir(dir: string): Promise<string[]> {
 /**
  * Discover absolute paths of extensions to load, without importing or
  * binding factories. Hot path on session startup — the scan walks native
- * `.omp`/`.pi` extension capabilities, JS/TS hook factories, the
- * installed-plugin tree, and any configured paths.
+ * `.omp`/`.pi` extension capabilities, the installed-plugin tree, and any
+ * configured paths.
  *
  * Subagents reuse the parent's collected paths via the SDK's
  * `preloadedExtensionPaths` option, then call {@link loadExtensions} themselves
@@ -497,12 +580,11 @@ async function discoverExtensionsInDir(dir: string): Promise<string[]> {
 export async function discoverExtensionPaths(
 	configuredPaths: string[],
 	cwd: string,
-	disabledExtensionIds?: string[],
+	disabledExtensionIds: string[] = [],
 ): Promise<string[]> {
 	const allPaths: string[] = [];
 	const seen = new Set<string>();
-	const disabled = new Set(disabledExtensionIds ?? []);
-	const loadOptions = disabledExtensionIds ? { cwd, disabledExtensions: disabledExtensionIds } : { cwd };
+	const disabled = new Set(disabledExtensionIds);
 
 	const isDisabledName = (name: string): boolean => disabled.has(`extension-module:${name}`);
 
@@ -521,35 +603,18 @@ export async function discoverExtensionPaths(
 		}
 	};
 
-	// 1. Discover extension modules via capability API (native .omp/.pi only).
-	// Scope the load to the native provider — the extension-module capability
-	// also has claude/codex/gemini/opencode providers, and their items were
-	// discarded here anyway (see #4198). The provider filter skips the walk
-	// entirely instead of running four foreign directory scans and dropping
-	// the results.
-	const discovered = await loadCapability<ExtensionModule>(extensionModuleCapability.id, {
-		...loadOptions,
-		providers: ["native"],
-	});
+	// 1. Discover extension modules via capability API (native .omp/.pi only)
+	const discovered = await loadCapability<ExtensionModule>(extensionModuleCapability.id, { cwd });
 	for (const ext of discovered.items) {
+		if (ext._source.provider !== "native") continue;
+		if (isDisabledName(ext.name)) continue;
 		addPath(ext.path);
 	}
 
-	// 2. Discover JS/TS hook factories from hookCapability and bind them through
-	// the extension runner, which owns the current runtime event bus. Hook
-	// capability loading already applies hook-specific disabled ids; do not also
-	// filter them through extension-module names.
-	const hooks = await loadCapability<Hook>(hookCapability.id, loadOptions);
-	for (const hookPath of hooks.items
-		.map(hook => hook.path)
-		.filter(hookPath => isExtensionFile(path.basename(hookPath)))) {
-		addPath(hookPath);
-	}
-
-	// 3. Discover extension entry points from installed plugins
+	// 2. Discover extension entry points from installed plugins
 	addPaths(await getAllPluginExtensionPaths(cwd));
 
-	// 4. Explicitly configured paths
+	// 3. Explicitly configured paths
 	for (const configuredPath of configuredPaths) {
 		const resolved = resolvePath(configuredPath, cwd);
 
@@ -589,7 +654,7 @@ export async function discoverAndLoadExtensions(
 	configuredPaths: string[],
 	cwd: string,
 	eventBus?: EventBus,
-	disabledExtensionIds?: string[],
+	disabledExtensionIds: string[] = [],
 ): Promise<LoadExtensionsResult> {
 	const paths = await discoverExtensionPaths(configuredPaths, cwd, disabledExtensionIds);
 	return loadExtensions(paths, cwd, eventBus);

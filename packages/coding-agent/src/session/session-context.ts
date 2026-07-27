@@ -1,65 +1,21 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { coerceServiceTierByFamily, type ProviderPayload, type ServiceTierByFamily } from "@oh-my-pi/pi-ai";
+import type { ProviderPayload, ServiceTier } from "@oh-my-pi/pi-ai";
 import * as snapcompact from "@oh-my-pi/snapcompact";
+import { AUTO_THINKING, type ConfiguredThinkingLevel, parseThinkingLevel } from "../thinking";
+import { decodeGoalModeState, type GoalModeState } from "../goals/state";
+import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage } from "./messages";
 import {
-	createBranchSummaryMessage,
-	createCompactionSummaryMessage,
-	createCustomMessage,
-	isCustomMessageContent,
-	normalizeCustomMessagePayload,
-} from "./messages";
-import { type CompactionEntry, EPHEMERAL_MODEL_CHANGE_ROLE, type SessionEntry } from "./session-entries";
-
-// #4470 crash artifacts had legacy frames (no shape metadata) with 17 frames,
-// ~306k archive chars, and ~1.5M truncated chars. Current snapcompact frames
-// carry shape metadata; only legacy archives with frame payload risk get this
-// conservative LLM-payload guard, and transcript rendering remains intact.
-const LEGACY_SNAPCOMPACT_FRAME_COUNT_GUARD = 16;
-const LEGACY_SNAPCOMPACT_ARCHIVE_TEXT_GUARD = 250_000;
-const LEGACY_SNAPCOMPACT_TRUNCATED_CHARS_GUARD = 1_000_000;
-
-function hasLegacySnapcompactFrames(archive: snapcompact.Archive): boolean {
-	return archive.frames.some(frame => frame.font === undefined && frame.variant === undefined);
-}
-
-function hasCrashRiskSnapcompactFramePayload(archive: snapcompact.Archive): boolean {
-	return (
-		archive.frames.length >= LEGACY_SNAPCOMPACT_FRAME_COUNT_GUARD ||
-		snapcompact.frameDataBytes(archive.frames) >= snapcompact.FRAME_DATA_BYTES_BUDGET
-	);
-}
-
-function hasCrashRiskSnapcompactArchiveSize(archive: snapcompact.Archive): boolean {
-	return (
-		archive.frames.length >= LEGACY_SNAPCOMPACT_FRAME_COUNT_GUARD ||
-		archive.truncatedChars >= LEGACY_SNAPCOMPACT_TRUNCATED_CHARS_GUARD ||
-		(snapcompact.archiveSourceText(archive)?.length ?? 0) >= LEGACY_SNAPCOMPACT_ARCHIVE_TEXT_GUARD
-	);
-}
-
-function isCrashRiskLegacySnapcompactArchive(archive: snapcompact.Archive): boolean {
-	return (
-		hasLegacySnapcompactFrames(archive) &&
-		hasCrashRiskSnapcompactFramePayload(archive) &&
-		hasCrashRiskSnapcompactArchiveSize(archive)
-	);
-}
-
-function snapcompactHistoryBlockOptions(
-	archive: snapcompact.Archive,
-	options: BuildSessionContextOptions | undefined,
-): snapcompact.HistoryBlockOptions | undefined {
-	if (options?.transcript) return undefined;
-	if (isCrashRiskLegacySnapcompactArchive(archive)) return { maxFrameDataBytes: 0 };
-	return { maxFrameDataBytes: snapcompact.FRAME_DATA_BYTES_BUDGET };
-}
+	type CompactionEntry,
+	decodeSessionCommandEntry,
+	EPHEMERAL_MODEL_CHANGE_ROLE,
+	type SessionEntry,
+	type WorkflowModeSnapshot,
+} from "./session-entries";
 
 export interface SessionContext {
 	messages: AgentMessage[];
 	thinkingLevel?: string;
-	/** Configured thinking selector (`"auto"` or a concrete level) from the latest change. */
-	configuredThinkingLevel?: string;
-	serviceTier?: ServiceTierByFamily;
+	serviceTier?: ServiceTier;
 	/** Model roles: { default: "provider/modelId", small: "provider/modelId", ... } */
 	models: Record<string, string>;
 	/** Names of TTSR rules that have been injected this session */
@@ -72,13 +28,10 @@ export interface SessionContext {
 	mode: string;
 	/** Mode-specific data from the last mode_change entry */
 	modeData?: Record<string, unknown>;
-	/**
-	 * Array parallel to messages, indicating which assistant turns should
-	 * have their prompt-cache misses suppressed/explained (because a model,
-	 * compaction, or plan-mode transition directly preceded them).
-	 * Only populated in transcript mode.
-	 */
-	cacheMissExplainedAt?: boolean[];
+	/** Closed workflow state restored from workflow_change entries (or legacy mode_change entries). */
+	workflow?: WorkflowModeSnapshot;
+	/** Canonical persisted goal lifecycle state, independent of workflow intent. */
+	goalState?: GoalModeState;
 }
 
 /** Lists session model strings to try when restoring, in fallback order. */
@@ -101,6 +54,23 @@ export function getRestorableSessionModels(
 	return [roleModel, defaultModel];
 }
 
+/** Restore command-aware selectors while retaining legacy concrete context semantics. */
+export function getRestorableSessionThinkingLevel(
+	entries: readonly SessionEntry[],
+	contextThinkingLevel: string | undefined,
+): ConfiguredThinkingLevel | undefined {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const entry = entries[index];
+		if (entry?.type !== "thinking_level_change") continue;
+		const decoded = decodeSessionCommandEntry(entry);
+		if (decoded?.type === "thinking_level_change" && decoded.command?.request.thinkingLevel === AUTO_THINKING) {
+			return AUTO_THINKING;
+		}
+		break;
+	}
+	return parseThinkingLevel(contextThinkingLevel);
+}
+
 export function getLatestCompactionEntry(entries: SessionEntry[]): CompactionEntry | null {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		if (entries[i].type === "compaction") {
@@ -112,14 +82,42 @@ export function getLatestCompactionEntry(entries: SessionEntry[]): CompactionEnt
 
 export interface BuildSessionContextOptions {
 	/**
-	 * Build the display transcript instead of the LLM context. By default this
-	 * preserves every path entry with compactions inline; set
-	 * `collapseCompactedHistory` for the live TUI surface to render only the
-	 * latest compacted tail.
+	 * Build the full-history display transcript instead of the LLM context:
+	 * every path entry in chronological order, with each compaction emitted
+	 * inline as a `compactionSummary` message at the position it fired rather
+	 * than replacing the history before it. Display-only — never send the
+	 * result to a provider.
 	 */
 	transcript?: boolean;
-	/** In transcript mode, elide entries replaced by the latest compaction. */
-	collapseCompactedHistory?: boolean;
+}
+
+export function resolveLeafIdAfterSessionEntry(
+	currentLeafId: string | null,
+	entriesById: ReadonlyMap<string, SessionEntry>,
+	entry: SessionEntry,
+): string | null {
+	if (entry.type === "leaf_change") {
+		return entry.target === null || entriesById.has(entry.target) ? entry.target : currentLeafId;
+	}
+	return entry.id;
+}
+
+export interface ResolvedSessionLeaf {
+	leafId: string | null;
+	entriesById: Map<string, SessionEntry>;
+}
+
+export function resolveSessionLeaf(entries: readonly SessionEntry[]): ResolvedSessionLeaf {
+	const entriesById = new Map<string, SessionEntry>();
+	let leafId: string | null = null;
+
+	for (const entry of entries) {
+		const nextLeafId = resolveLeafIdAfterSessionEntry(leafId, entriesById, entry);
+		if (entry.type !== "leaf_change") entriesById.set(entry.id, entry);
+		leafId = nextLeafId;
+	}
+
+	return { leafId, entriesById };
 }
 
 /**
@@ -127,15 +125,6 @@ export interface BuildSessionContextOptions {
  * If leafId is provided, walks from that entry to root.
  * Handles compaction and branch summaries along the path.
  */
-function snapcompactHistoryBlocksForContext(
-	archive: snapcompact.Archive | undefined,
-	options: BuildSessionContextOptions | undefined,
-) {
-	if (!archive) return undefined;
-	if (options?.transcript && options.collapseCompactedHistory) return undefined;
-	return snapcompact.historyBlocks(archive, snapcompactHistoryBlockOptions(archive, options));
-}
-
 export function buildSessionContext(
 	entries: SessionEntry[],
 	leafId?: string | null,
@@ -163,6 +152,7 @@ export function buildSessionContext(
 			selectedMCPToolNames: [],
 			hasPersistedMCPToolSelection: false,
 			mode: "none",
+			workflow: { kind: "none" },
 		};
 	}
 	if (leafId) {
@@ -183,6 +173,7 @@ export function buildSessionContext(
 			selectedMCPToolNames: [],
 			hasPersistedMCPToolSelection: false,
 			mode: "none",
+			workflow: { kind: "none" },
 		};
 	}
 
@@ -190,15 +181,13 @@ export function buildSessionContext(
 	const path: SessionEntry[] = [];
 	let current: SessionEntry | undefined = leaf;
 	while (current) {
-		path.push(current);
+		path.unshift(current);
 		current = current.parentId ? byId.get(current.parentId) : undefined;
 	}
-	path.reverse();
 
 	// Extract settings and find compaction
 	let thinkingLevel: string | undefined = "off";
-	let configuredThinkingLevel: string | undefined;
-	let serviceTier: ServiceTierByFamily | undefined;
+	let serviceTier: ServiceTier | undefined;
 	const models: Record<string, string> = {};
 	let compaction: CompactionEntry | null = null;
 	const injectedTtsrRulesSet = new Set<string>();
@@ -206,6 +195,11 @@ export function buildSessionContext(
 	let hasPersistedMCPToolSelection = false;
 	let mode = "none";
 	let modeData: Record<string, unknown> | undefined;
+	let workflow: WorkflowModeSnapshot = { kind: "none" };
+	let goalState: GoalModeState | undefined;
+	let precedingWorkflowChange:
+		| { from: WorkflowModeSnapshot; next: WorkflowModeSnapshot }
+		| undefined;
 	// Track whether an explicit `model_change` with role="default" has been
 	// seen on this path. Once a user (or the agent itself) records an
 	// explicit default, later assistant-message inference must NOT overwrite
@@ -216,9 +210,10 @@ export function buildSessionContext(
 	let hasExplicitDefaultModel = false;
 
 	for (const entry of path) {
+		const workflowChangeImmediatelyBefore = precedingWorkflowChange;
+		precedingWorkflowChange = undefined;
 		if (entry.type === "thinking_level_change") {
 			thinkingLevel = entry.thinkingLevel ?? "off";
-			configuredThinkingLevel = entry.configured ?? entry.thinkingLevel ?? undefined;
 		} else if (entry.type === "model_change") {
 			// New format: { model: "provider/id", role?: string }
 			if (entry.model) {
@@ -229,7 +224,7 @@ export function buildSessionContext(
 				}
 			}
 		} else if (entry.type === "service_tier_change") {
-			serviceTier = coerceServiceTierByFamily(entry.serviceTier);
+			serviceTier = entry.serviceTier ?? undefined;
 		} else if (entry.type === "message" && entry.message.role === "assistant") {
 			// Legacy fallback: infer default model from assistant messages only
 			// when no explicit `model_change` (role=default) entry has been
@@ -250,8 +245,49 @@ export function buildSessionContext(
 			selectedMCPToolNames = [...entry.selectedToolNames];
 			hasPersistedMCPToolSelection = true;
 		} else if (entry.type === "mode_change") {
+			const decodedGoalState =
+				entry.mode === "goal" || entry.mode === "goal_paused"
+					? decodeGoalModeState(entry.data?.goal)
+					: undefined;
+			const isCanonicalGoalSideEntry =
+				(entry.mode === "goal" || entry.mode === "goal_paused") &&
+				workflowChangeImmediatelyBefore?.next.kind === "goal" &&
+				workflowChangeImmediatelyBefore.next.phase === (entry.mode === "goal" ? "active" : "paused") &&
+				decodedGoalState?.goal.id === workflowChangeImmediatelyBefore.next.goalId;
+			const isCanonicalGoalExitSideEntry =
+				entry.mode === "none" &&
+				workflowChangeImmediatelyBefore?.from.kind === "goal" &&
+				workflowChangeImmediatelyBefore.next.kind === "none";
+
 			mode = entry.mode;
 			modeData = entry.data;
+			if (!isCanonicalGoalSideEntry && !isCanonicalGoalExitSideEntry) {
+				workflow = workflowFromLegacyMode(entry.mode, entry.data);
+			}
+			if (entry.mode === "goal" || entry.mode === "goal_paused") {
+				goalState = decodedGoalState;
+			} else if (entry.mode === "none") {
+				goalState = undefined;
+			}
+		} else if (entry.type === "workflow_change") {
+			const decoded = decodeSessionCommandEntry(entry);
+			if (decoded?.type !== "workflow_change") continue;
+			workflow = decoded.next;
+			precedingWorkflowChange = { from: decoded.from, next: decoded.next };
+			if (workflow.kind === "none") {
+				mode = "none";
+				modeData = undefined;
+			} else if (workflow.kind === "plan") {
+				mode = workflow.phase === "active" ? "plan" : "plan_paused";
+				modeData = {
+					planFilePath: workflow.planFilePath,
+					workflow: workflow.workflow,
+					reentry: workflow.reentry,
+				};
+			} else {
+				mode = workflow.phase === "active" ? "goal" : "goal_paused";
+				modeData = { goalId: workflow.goalId };
+			}
 		}
 	}
 
@@ -263,87 +299,42 @@ export function buildSessionContext(
 	// 2. Emit kept messages (from firstKeptEntryId up to compaction)
 	// 3. Emit messages after compaction
 	const messages: AgentMessage[] = [];
-	const cacheMissExplainedAt: boolean[] = [];
-	let pendingReset = false;
-	let currentMode = "none";
-	let lastAssistantModel: string | undefined;
-
-	const handleEntryResetTracking = (entry: SessionEntry) => {
-		if (entry.type === "compaction") {
-			pendingReset = true;
-		} else if (entry.type === "model_change") {
-			pendingReset = true;
-		} else if (entry.type === "mode_change") {
-			const isPlanTransition = (entry.mode === "plan") !== (currentMode === "plan");
-			if (isPlanTransition) {
-				pendingReset = true;
-			}
-			currentMode = entry.mode;
-		}
-	};
-
-	const pushMessage = (msg: AgentMessage) => {
-		messages.push(msg);
-		if (!options?.transcript) return;
-		if (msg.role === "assistant") {
-			const currentModel = `${msg.provider}/${msg.model}`;
-			const modelChanged = lastAssistantModel !== undefined && lastAssistantModel !== currentModel;
-			lastAssistantModel = currentModel;
-			cacheMissExplainedAt.push(pendingReset || modelChanged);
-			pendingReset = false;
-		} else {
-			cacheMissExplainedAt.push(false);
-		}
-	};
 
 	const appendMessage = (entry: SessionEntry) => {
-		handleEntryResetTracking(entry);
 		if (entry.type === "message") {
-			if (
-				!options?.transcript &&
-				entry.message.role === "assistant" &&
-				entry.message.retryRecovery?.status === "recovered"
-			) {
-				return;
-			}
-			pushMessage(entry.message);
+			messages.push(entry.message);
 		} else if (entry.type === "custom_message") {
-			if (!isCustomMessageContent(entry.content)) return;
-			const normalized = normalizeCustomMessagePayload(entry);
-			const attribution = entry.attribution === undefined ? undefined : normalized.attribution;
-			pushMessage(
+			messages.push(
 				createCustomMessage(
-					normalized.customType,
-					normalized.content,
-					normalized.display,
-					normalized.details,
+					entry.customType,
+					entry.content,
+					entry.display,
+					entry.details,
 					entry.timestamp,
-					attribution,
+					entry.attribution,
 				),
 			);
 		} else if (entry.type === "branch_summary" && entry.summary) {
-			pushMessage(createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp));
+			messages.push(createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp));
 		}
 	};
 
-	if (options?.transcript && !options.collapseCompactedHistory) {
+	if (options?.transcript) {
 		// Display transcript: every entry in chronological order. Compactions do
 		// not erase prior history here — each renders inline (as a divider in the
 		// TUI) at the point it fired, with any snapcompact frames re-attached so
 		// the component can report them.
 		for (const entry of path) {
-			handleEntryResetTracking(entry);
 			if (entry.type === "compaction") {
 				const snapcompactArchive = snapcompact.getPreservedArchive(entry.preserveData);
-				pushMessage(
+				messages.push(
 					createCompactionSummaryMessage(
 						entry.summary,
 						entry.tokensBefore,
 						entry.timestamp,
 						entry.shortSummary,
 						undefined,
-						undefined,
-						snapcompactHistoryBlocksForContext(snapcompactArchive, options),
+						snapcompactArchive ? snapcompact.images(snapcompactArchive) : undefined,
 					),
 				);
 			} else {
@@ -365,33 +356,24 @@ export function buildSessionContext(
 		})();
 		const remoteReplacementHistory = providerPayload?.items;
 
-		// Re-attach any archived snapcompact frames so the model can keep
-		// reading the archived history after every context rebuild.
+		// Emit summary first; re-attach any archived snapcompact frames so the
+		// model can keep reading the archived history after every context rebuild.
 		const snapcompactArchive = snapcompact.getPreservedArchive(compaction.preserveData);
-		const compactionSummaryMsg = createCompactionSummaryMessage(
-			compaction.summary,
-			compaction.tokensBefore,
-			compaction.timestamp,
-			compaction.shortSummary,
-			providerPayload,
-			undefined,
-			snapcompactHistoryBlocksForContext(snapcompactArchive, options),
+		messages.push(
+			createCompactionSummaryMessage(
+				compaction.summary,
+				compaction.tokensBefore,
+				compaction.timestamp,
+				compaction.shortSummary,
+				providerPayload,
+				snapcompactArchive ? snapcompact.images(snapcompactArchive) : undefined,
+			),
 		);
-		// Agent context (non-transcript): summary first so the LLM sees the
-		// compacted context before recent messages.
-		if (!options?.transcript) {
-			pushMessage(compactionSummaryMsg);
-		}
 
 		// Find compaction index in path
 		const compactionIdx = path.findIndex(e => e.type === "compaction" && e.id === compaction.id);
 
-		// The remote replacement payload (OpenAI remote compaction) carries the
-		// kept turns for the LLM context only; it is not rendered as visible
-		// messages. The collapsed display transcript must still emit the kept
-		// SessionEntry rows so a remotely-compacted session keeps its recent
-		// turns visible instead of showing only the summary and post-compaction.
-		if (!remoteReplacementHistory || options?.transcript) {
+		if (!remoteReplacementHistory) {
 			// Emit kept messages (before compaction, starting from firstKeptEntryId)
 			let foundFirstKept = false;
 			for (let i = 0; i < compactionIdx; i++) {
@@ -403,16 +385,6 @@ export function buildSessionContext(
 					appendMessage(entry);
 				}
 			}
-		}
-
-		// Display transcript: emit the summary at the chronological compaction
-		// point (after kept messages, before post-compaction) so it stays in
-		// the live region where Ctrl+O can expand it. Reset tracking fires
-		// here so the first post-compaction assistant turn — not a kept
-		// pre-compaction one — is marked as a cache miss.
-		if (options?.transcript) handleEntryResetTracking(compaction);
-		if (options?.transcript) {
-			pushMessage(compactionSummaryMsg);
 		}
 
 		// Emit messages after compaction
@@ -469,9 +441,6 @@ export function buildSessionContext(
 			);
 		if (normalized.length === 0) {
 			messages.splice(i, 1);
-			if (options?.transcript) {
-				cacheMissExplainedAt.splice(i, 1);
-			}
 		} else {
 			messages[i] = { ...message, content: normalized };
 		}
@@ -479,9 +448,7 @@ export function buildSessionContext(
 
 	return {
 		messages,
-		cacheMissExplainedAt: options?.transcript ? cacheMissExplainedAt : undefined,
 		thinkingLevel,
-		configuredThinkingLevel,
 		serviceTier,
 		models,
 		injectedTtsrRules,
@@ -489,5 +456,30 @@ export function buildSessionContext(
 		hasPersistedMCPToolSelection,
 		mode,
 		modeData,
+		workflow,
+		goalState,
+	};
+}
+
+function workflowFromLegacyMode(mode: string, data: Record<string, unknown> | undefined): WorkflowModeSnapshot {
+	if (mode === "goal" || mode === "goal_paused") {
+		const goalState = decodeGoalModeState(data?.goal);
+		const goalId = goalState?.goal.id ?? (typeof data?.goalId === "string" ? data.goalId : undefined);
+		if (!goalId) return { kind: "none" };
+		return {
+			kind: "goal",
+			phase: mode === "goal" ? "active" : "paused",
+			goalId,
+		};
+	}
+	if (mode !== "plan" && mode !== "plan_paused") return { kind: "none" };
+	const planFilePath = data?.planFilePath;
+	if (typeof planFilePath !== "string") return { kind: "none" };
+	return {
+		kind: "plan",
+		phase: mode === "plan" ? "active" : "paused",
+		planFilePath,
+		workflow: data?.workflow === "iterative" ? "iterative" : "parallel",
+		reentry: data?.reentry === true,
 	};
 }

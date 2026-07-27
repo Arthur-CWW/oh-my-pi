@@ -23,12 +23,13 @@ import {
 import { getMarkdownTheme, type ThemeColor, theme } from "../../modes/theme/theme";
 import {
 	matchesAppExternalEditor,
-	matchesSelectCancel,
+	matchesUiDismiss,
 	matchesSelectDown,
 	matchesSelectUp,
 } from "../../modes/utils/keybinding-matchers";
 import { CountdownTimer } from "./countdown-timer";
 import { DynamicBorder } from "./dynamic-border";
+import { editorKey } from "./keybinding-hints";
 import { renderSegmentTrack } from "./segment-track";
 
 /** One segment of a {@link HookSelectorSlider} — a label and an optional
@@ -61,8 +62,6 @@ export interface HookSelectorOptions {
 	tui?: TUI;
 	timeout?: number;
 	onTimeout?: () => void;
-	onTimeoutStart?: () => void;
-	onTimeoutReset?: () => void;
 	initialIndex?: number;
 	outline?: boolean;
 	maxVisible?: number;
@@ -115,44 +114,32 @@ function splitLeadingSpacesForWrap(line: string, width: number): { indent: strin
 	};
 }
 
-/** One row fed to {@link OutlinedList} or the plain list container. `highlight`
- *  causes the row (and its wrapped continuations, plus trailing padding) to be
- *  painted with the theme's `selectedBg` band — the focus cue that survives
- *  themes where `accent` fg is close to the terminal foreground. */
-type SelectorRow = { text: string; highlight: boolean };
-
-/** Paint `content` with the `selectedBg` background, applied AFTER any inner
- *  ANSI styling so the band spans padding as well as content. */
-function paintSelectedRow(content: string): string {
-	return theme.bg("selectedBg", content);
-}
-
 class OutlinedList extends Container {
-	#rows: SelectorRow[] = [];
+	#lines: string[] = [];
 
-	setLines(rows: readonly SelectorRow[]): void {
-		this.#rows = rows.slice();
+	setLines(lines: string[]): void {
+		this.#lines = lines;
 		this.invalidate();
 	}
 
 	render(width: number): readonly string[] {
-		const borderColor = (text: string) => theme.fg("border", text);
-		const horizontal = borderColor(theme.boxRound.horizontal.repeat(Math.max(1, width)));
-		const innerWidth = Math.max(1, width - 2);
+		// Blank lines group the list top and bottom; the enclosing frame (sides
+		// and horizontal rules) was dropped so the list copies cleanly. Content
+		// keeps a single-column left pad and fills the width as one block.
+		const blank = padding(width);
+		const innerWidth = Math.max(1, width - 1);
 		const content: string[] = [];
-		for (const row of this.#rows) {
-			const normalized = replaceTabs(row.text);
+		for (const line of this.#lines) {
+			const normalized = replaceTabs(line);
 			const { indent, body } = splitLeadingSpacesForWrap(normalized, innerWidth);
 			const wrapped = wrapTextWithAnsi(body, Math.max(1, innerWidth - visibleWidth(indent)));
 			for (const wrappedBody of wrapped.length > 0 ? wrapped : [""]) {
 				const wrappedLine = `${indent}${wrappedBody}`;
 				const pad = Math.max(0, innerWidth - visibleWidth(wrappedLine));
-				const filled = `${wrappedLine}${padding(pad)}`;
-				const painted = row.highlight ? paintSelectedRow(filled) : filled;
-				content.push(`${borderColor(theme.boxRound.vertical)}${painted}${borderColor(theme.boxRound.vertical)}`);
+				content.push(` ${wrappedLine}${padding(pad)}`);
 			}
 		}
-		return [horizontal, ...content, horizontal];
+		return [blank, ...content, blank];
 	}
 }
 
@@ -180,11 +167,12 @@ export class HookSelectorComponent extends Container {
 	#onLeftCallback: (() => void) | undefined;
 	#onRightCallback: (() => void) | undefined;
 	#onExternalEditorCallback: (() => void) | undefined;
-	#onTimeoutResetCallback: (() => void) | undefined;
 	#slider: HookSelectorSlider | undefined;
 	#sliderIndex: number = 0;
 	#sliderComponent: Text | undefined;
 	#lastRenderWidth: number | undefined;
+	#controlsHint: Text;
+	#customHelpText: string | undefined;
 	constructor(
 		title: string,
 		options: HookSelectorOptionInput[],
@@ -216,7 +204,7 @@ export class HookSelectorComponent extends Container {
 		this.#onLeftCallback = opts?.onLeft;
 		this.#onRightCallback = opts?.onRight;
 		this.#onExternalEditorCallback = opts?.onExternalEditor;
-		this.#onTimeoutResetCallback = opts?.onTimeoutReset;
+		this.#customHelpText = opts?.helpText;
 		if (opts?.slider && opts.slider.segments.length > 0) {
 			this.#slider = opts.slider;
 			this.#sliderIndex = Math.max(0, Math.min(opts.slider.index, opts.slider.segments.length - 1));
@@ -236,7 +224,6 @@ export class HookSelectorComponent extends Container {
 		}
 
 		if (opts?.timeout && opts.timeout > 0 && opts.tui) {
-			opts.onTimeoutStart?.();
 			this.#countdown = new CountdownTimer(
 				opts.timeout,
 				opts.tui,
@@ -251,6 +238,7 @@ export class HookSelectorComponent extends Container {
 						this.#onCancelCallback();
 					}
 				},
+				this,
 			);
 		}
 
@@ -262,8 +250,8 @@ export class HookSelectorComponent extends Container {
 			this.addChild(this.#listContainer);
 		}
 		this.addChild(new Spacer(1));
-		const controlsHint = opts?.helpText ?? "up/down navigate  enter select  esc cancel";
-		this.addChild(new Text(theme.fg("dim", controlsHint), 1, 0));
+		this.#controlsHint = new Text("", 1, 0);
+		this.addChild(this.#controlsHint);
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder());
 
@@ -489,7 +477,7 @@ export class HookSelectorComponent extends Container {
 	}
 
 	#updateList(renderWidth = this.#lastRenderWidth): void {
-		const rows: SelectorRow[] = [];
+		const lines: string[] = [];
 		const total = this.#filteredOptions.length;
 		const mdTheme = getMarkdownTheme();
 		// Compact mode kicks in exactly when the fully-expanded list (all
@@ -517,41 +505,34 @@ export class HookSelectorComponent extends Container {
 			const filtered = this.#filteredOptions[i];
 			if (filtered === undefined) continue;
 			const isSelected = i === this.#selectedIndex;
-			const isDisabled = this.#isDisabled(filtered.index);
 			const descMode: number | "full" = compact ? (isSelected ? selectedDescRows : 0) : "full";
-			// Highlight the whole option block (label + wrapped description rows)
-			// so the focus band reads as one continuous bar rather than a stripe
-			// under the label alone. Disabled rows never claim focus even if the
-			// index momentarily lands on one during initial coercion.
-			const highlight = isSelected && !isDisabled;
-			for (const text of this.#renderOptionLines(
-				filtered.option,
-				isSelected,
-				isDisabled,
-				mdTheme,
-				descMode,
-				renderWidth,
-				filtered.index,
-			)) {
-				rows.push({ text, highlight });
-			}
+			lines.push(
+				...this.#renderOptionLines(
+					filtered.option,
+					isSelected,
+					this.#isDisabled(filtered.index),
+					mdTheme,
+					descMode,
+					renderWidth,
+					filtered.index,
+				),
+			);
 		}
 
 		if (total === 0) {
-			rows.push({ text: theme.fg("dim", "  No matching options"), highlight: false });
+			lines.push(theme.fg("dim", "  No matching options"));
 		}
 
 		if (startIndex > 0 || endIndex < total || this.#shouldRenderSearchStatus(renderWidth, mdTheme)) {
-			rows.push({ text: this.#renderStatusLine(total), highlight: false });
+			lines.push(this.#renderStatusLine(total));
 		}
 		if (this.#outlinedList) {
-			this.#outlinedList.setLines(rows);
+			this.#outlinedList.setLines(lines);
 			return;
 		}
 		this.#listContainer?.clear();
-		for (const row of rows) {
-			const bgFn = row.highlight ? paintSelectedRow : undefined;
-			this.#listContainer?.addChild(new Text(row.text, 1, 0, bgFn));
+		for (const line of lines) {
+			this.#listContainer?.addChild(new Text(line, 1, 0));
 		}
 	}
 
@@ -638,12 +619,10 @@ export class HookSelectorComponent extends Container {
 	}
 
 	handleInput(keyData: string): void {
-		if (this.#countdown) {
-			this.#countdown.reset();
-			this.#onTimeoutResetCallback?.();
-		}
+		// Reset countdown on any interaction
+		this.#countdown?.reset();
 
-		if (matchesSelectCancel(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.#onCancelCallback();
 			return;
 		}
@@ -670,7 +649,13 @@ export class HookSelectorComponent extends Container {
 		}
 	}
 
+	#updateControlsHint(): void {
+		const controlsHint = this.#customHelpText ?? `up/down navigate  enter select  ${editorKey("ui.dismiss")} cancel`;
+		this.#controlsHint.setText(theme.fg("dim", controlsHint));
+	}
+
 	override render(width: number): readonly string[] {
+		this.#updateControlsHint();
 		const renderWidth = Math.max(1, width);
 		if (this.#lastRenderWidth !== renderWidth) {
 			this.#lastRenderWidth = renderWidth;

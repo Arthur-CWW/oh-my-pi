@@ -10,7 +10,6 @@ import {
 	Container,
 	isNotificationSuppressed,
 	Loader,
-	type OverlayHandle,
 	type SelectItem,
 	SelectList,
 	Spacer,
@@ -30,7 +29,6 @@ import { generateHeapSnapshotData, type ProfilerSession, startCpuProfile } from 
 import { buildSampleImage, ProtocolProbeComponent } from "./protocol-probe";
 import { RawSseViewerComponent } from "./raw-sse";
 import { resolveRawSseDebugBuffer } from "./raw-sse-buffer";
-import { getRemoteDebugger, type RemoteDebuggerInfo, startRemoteDebuggerServer } from "./remote-debugger";
 import { clearArtifactCache, createDebugLogSource, createReportBundle, getArtifactCacheStats } from "./report-bundle";
 import { collectSystemInfo, formatSystemInfo } from "./system-info";
 import { collectTerminalState, formatTerminalState } from "./terminal-info";
@@ -51,11 +49,6 @@ const DEBUG_MENU_ITEMS: SelectItem[] = [
 		description: "Styling, links, text sizing, graphics, notify",
 	},
 	{ value: "raw-sse", label: "View: raw SSE stream", description: "Show live provider SSE frames" },
-	{
-		value: "remote-debugger",
-		label: "Start: JS remote debugger",
-		description: "Expose JavaScriptCore inspector socket (experimental)",
-	},
 	{
 		value: "transcript",
 		label: "Export: TUI transcript",
@@ -128,9 +121,6 @@ export class DebugSelectorComponent extends Container {
 				break;
 			case "raw-sse":
 				await this.#handleViewRawSse();
-				break;
-			case "remote-debugger":
-				await this.#handleStartRemoteDebugger();
 				break;
 			case "system":
 				await this.#handleViewSystemInfo();
@@ -264,6 +254,7 @@ export class DebugSelectorComponent extends Container {
 			const result = await createReportBundle({
 				sessionFile: this.ctx.sessionManager.getSessionFile(),
 				settings: this.#getResolvedSettings(),
+				renderMetrics: this.ctx.ui.renderMetrics,
 				rawSseText: this.#getRawSseText(),
 			});
 
@@ -328,29 +319,18 @@ export class DebugSelectorComponent extends Container {
 				return;
 			}
 
-			let overlay: OverlayHandle | undefined;
-			const close = (): void => {
-				overlay?.hide();
-				overlay = undefined;
-				void this.ctx.showDebugSelector();
-			};
 			const viewer = new DebugLogViewerComponent({
 				logs,
 				terminalRows: this.ctx.ui.terminal.rows,
-				onExit: close,
+				onExit: () => this.ctx.showDebugSelector(),
 				onStatus: message => this.ctx.showStatus(message, { dim: true }),
 				onError: message => this.ctx.showError(message),
 				onUpdate: () => this.ctx.ui.requestRender(),
 				logSource,
 			});
 
-			overlay = this.ctx.ui.showOverlay(viewer, {
-				anchor: "top-left",
-				width: "100%",
-				maxHeight: "100%",
-				margin: 0,
-				fullscreen: true,
-			});
+			this.ctx.editorContainer.clear();
+			this.ctx.editorContainer.addChild(viewer);
 			this.ctx.ui.setFocus(viewer);
 		} catch (err) {
 			this.ctx.showError(`Failed to read logs: ${err instanceof Error ? err.message : String(err)}`);
@@ -360,66 +340,18 @@ export class DebugSelectorComponent extends Container {
 	}
 
 	async #handleViewRawSse(): Promise<void> {
-		let overlay: OverlayHandle | undefined;
-		let viewer: RawSseViewerComponent | undefined;
-		const close = (): void => {
-			viewer?.dispose();
-			overlay?.hide();
-			overlay = undefined;
-			void this.ctx.showDebugSelector();
-		};
-		viewer = new RawSseViewerComponent({
+		const viewer = new RawSseViewerComponent({
 			buffer: resolveRawSseDebugBuffer(this.ctx.session),
 			terminalRows: this.ctx.ui.terminal.rows,
-			onExit: close,
+			onExit: () => this.ctx.showDebugSelector(),
 			onStatus: message => this.ctx.showStatus(message, { dim: true }),
 			onUpdate: () => this.ctx.ui.requestRender(),
 		});
 
-		overlay = this.ctx.ui.showOverlay(viewer, {
-			anchor: "top-left",
-			width: "100%",
-			maxHeight: "100%",
-			margin: 0,
-			fullscreen: true,
-		});
+		this.ctx.editorContainer.clear();
+		this.ctx.editorContainer.addChild(viewer);
 		this.ctx.ui.setFocus(viewer);
 		this.ctx.ui.requestRender();
-	}
-
-	async #handleStartRemoteDebugger(): Promise<void> {
-		const existing = getRemoteDebugger();
-		let info: RemoteDebuggerInfo;
-		try {
-			info = existing ?? (await startRemoteDebuggerServer());
-		} catch (err) {
-			this.ctx.showError(`Failed to start remote debugger: ${err instanceof Error ? err.message : String(err)}`);
-			return;
-		}
-
-		const block = new TranscriptBlock();
-		block.addChild(
-			new Text(
-				theme.fg(
-					"success",
-					`${theme.status.success} JavaScriptCore remote inspector ${existing ? "already running" : "started"}`,
-				),
-				1,
-				0,
-			),
-		);
-		block.addChild(new Text(theme.fg("dim", `Listening on ${info.host}:${info.port}`), 1, 0));
-		block.addChild(
-			new Text(
-				theme.fg(
-					"muted",
-					"Experimental WebKit RemoteInspectorServer socket (Bun marks it untested on macOS). One-way for this process — there is no stop. Attach a compatible WebKit/Safari Web Inspector client.",
-				),
-				1,
-				0,
-			),
-		);
-		this.ctx.present(block);
 	}
 
 	async #handleViewSystemInfo(): Promise<void> {

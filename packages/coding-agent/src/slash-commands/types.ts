@@ -16,14 +16,12 @@ export interface BuiltinSlashCommand {
 	name: string;
 	aliases?: string[];
 	description: string;
-	/** Whether the command consumes text after the command name. */
-	allowArgs?: boolean;
 	/** Subcommands for dropdown completion (e.g. /mcp add, /mcp list). */
 	subcommands?: SubcommandDef[];
 	/** Static inline hint when command takes a simple argument (no subcommands). */
 	inlineHint?: string;
-	/** TUI-only dynamic status text for command-name autocomplete. Static `description` remains canonical for ACP/help. */
-	getTuiAutocompleteDescription?: (runtime: TuiSlashCommandRuntime) => string | undefined;
+	/** Namespace exposed to TUI slash completion; ACP always receives the full spec registry. */
+	tuiNamespace?: "slash" | "colon";
 }
 
 /** Parsed slash-command text after stripping the leading "/". */
@@ -89,6 +87,8 @@ export interface TuiSlashCommandRuntime {
 export interface SlashCommandSpec extends BuiltinSlashCommand {
 	/** When false, the dispatcher refuses to handle invocations that include arguments. */
 	allowArgs?: boolean;
+	/** Allow a read-only invocation while the TUI is focused on a child session. */
+	focusedViewSafe?: boolean | ((args: string) => boolean);
 	/**
 	 * ACP-specific override for `description`. Used by `ACP_BUILTIN_SLASH_COMMANDS`
 	 * when building `available_commands_update` payloads so the client receives

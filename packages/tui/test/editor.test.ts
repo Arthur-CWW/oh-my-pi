@@ -1,7 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { afterEach, describe, expect, it } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import { CURSOR_MARKER } from "@oh-my-pi/pi-tui";
 import { CombinedAutocompleteProvider } from "@oh-my-pi/pi-tui/autocomplete";
@@ -9,6 +6,7 @@ import { Editor } from "@oh-my-pi/pi-tui/components/editor";
 import { KeybindingsManager, setKeybindings, TUI_KEYBINDINGS } from "@oh-my-pi/pi-tui/keybindings";
 import { setKittyProtocolActive } from "@oh-my-pi/pi-tui/keys";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
+import { setDefaultTabWidth } from "@oh-my-pi/pi-utils";
 import { defaultEditorTheme } from "./test-themes";
 
 describe("Editor component", () => {
@@ -312,34 +310,6 @@ describe("Editor component", () => {
 			await expect(promise).resolves.toBe("/");
 		});
 
-		it("renders slash-command suggestions as compact item rows", async () => {
-			const editor = new Editor(defaultEditorTheme);
-			editor.setAutocompleteMaxVisible(10);
-			const longDescription =
-				"Plan and execute non-trivial architectural improvements to the codebase without turning each slash command into a multi-line block.";
-			editor.setAutocompleteProvider(
-				new CombinedAutocompleteProvider(
-					Array.from({ length: 12 }, (_, i) => ({
-						name: `cmd${i}`,
-						description: longDescription,
-					})),
-					"/tmp",
-				),
-			);
-
-			const { promise: autocompleteUpdated, resolve: resolveAutocompleteUpdated } = Promise.withResolvers<void>();
-			editor.onAutocompleteUpdate = resolveAutocompleteUpdated;
-
-			editor.handleInput("/");
-			await autocompleteUpdated;
-
-			const rendered = editor.render(80).map(line => stripVTControlCharacters(line));
-			for (let i = 0; i < 10; i += 1) {
-				expect(rendered.some(line => line.includes(`cmd${i}`))).toBe(true);
-			}
-			expect(rendered.some(line => line.includes("cmd10"))).toBe(false);
-		});
-
 		it("triggers file-reference autocomplete when typing at-sign", async () => {
 			const editor = new Editor(defaultEditorTheme);
 			const { promise, resolve } = Promise.withResolvers<string>();
@@ -427,46 +397,6 @@ describe("Editor component", () => {
 			expect(editor.getText()).toBe("/help ");
 			expect(editor.isShowingAutocomplete()).toBe(false);
 		});
-
-		it("does not open file autocomplete after tab-completing no-arg slash commands", async () => {
-			vi.useFakeTimers();
-			const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "slash-tab-no-arg-"));
-			try {
-				await Bun.write(path.join(baseDir, "visible-file.ts"), "export {};\n");
-				const editor = new Editor(defaultEditorTheme);
-				editor.setAutocompleteProvider(
-					new CombinedAutocompleteProvider([{ name: "quit", description: "Quit", allowArgs: false }], baseDir),
-				);
-
-				let nextUpdate = Promise.withResolvers<void>();
-				editor.onAutocompleteUpdate = () => nextUpdate.resolve();
-				editor.handleInput("/");
-				await nextUpdate.promise;
-
-				nextUpdate = Promise.withResolvers<void>();
-				editor.onAutocompleteUpdate = () => nextUpdate.resolve();
-				editor.handleInput("q");
-				vi.advanceTimersByTime(100);
-				await nextUpdate.promise;
-
-				const chainedUpdates = Promise.withResolvers<void>();
-				let updateCount = 0;
-				editor.onAutocompleteUpdate = () => {
-					updateCount += 1;
-					if (updateCount === 2) {
-						chainedUpdates.resolve();
-					}
-				};
-				editor.handleInput("	");
-				await chainedUpdates.promise;
-
-				expect(editor.getText()).toBe("/quit ");
-				expect(editor.isShowingAutocomplete()).toBe(false);
-			} finally {
-				vi.useRealTimers();
-				await fs.rm(baseDir, { recursive: true, force: true });
-			}
-		});
 	});
 
 	describe("Unicode text editing behavior", () => {
@@ -489,14 +419,13 @@ describe("Editor component", () => {
 			expect(text).toBe("Hello äöü 😀");
 		});
 
-		it("inserts keypad digits instead of treating them as navigation", () => {
+		it("inserts NumLock keypad digits instead of treating them as navigation", () => {
 			const editor = new Editor(defaultEditorTheme);
 
 			editor.handleInput("a");
-			editor.handleInput("\x1b[57400u");
 			editor.handleInput("\x1b[57400;129u");
 
-			expect(editor.getText()).toBe("a11");
+			expect(editor.getText()).toBe("a1");
 		});
 
 		it("inserts a newline for Ctrl+Enter variants with NumLock or keypad Enter metadata", () => {
@@ -615,10 +544,16 @@ describe("Editor component", () => {
 			expect(text).toBe("Hällö Wörld! 😀 äöüÄÖÜß");
 		});
 
-		it("expands tabs to the fixed display width when loading text programmatically", () => {
+		it("uses the configured tab width when loading text programmatically", () => {
 			const editor = new Editor(defaultEditorTheme);
-			editor.setText("foo\tbar");
-			expect(editor.getText()).toBe("foo   bar");
+
+			try {
+				setDefaultTabWidth(5);
+				editor.setText("foo\tbar");
+				expect(editor.getText()).toBe("foo     bar");
+			} finally {
+				setDefaultTabWidth(3);
+			}
 		});
 
 		it("strips control characters from programmatically loaded text before render", () => {
@@ -823,28 +758,6 @@ describe("Editor component", () => {
 			expect(contentLine).not.toContain("\x1b[5m");
 			// Line should still be correct width
 			expect(visibleWidth(contentLine)).toBeLessThanOrEqual(width);
-		});
-
-		it("keeps the bordered editor inside `width` when the cursor lands past a wide trailing grapheme (#3431)", () => {
-			// Regression: typing a fullwidth char (e.g. CJK comma `，`, U+FF0C) at the end
-			// of the input used to push the bottom-right `─╯` 1–2 cells past the terminal
-			// edge, wrapping `╯` to its own row. The end-of-line cursor glyph + wide grapheme
-			// extends into the right padding zone; the right chrome must shrink by the exact
-			// overflow cell count.
-			for (const paddingX of [1, 2]) {
-				const theme = { ...defaultEditorTheme, editorPaddingX: paddingX };
-				const minContentWidth = 2 * (paddingX + 1) + 3; // chrome + "，" (2) + cursor (1)
-				for (let width = minContentWidth; width <= minContentWidth + 6; width++) {
-					const editor = new Editor(theme);
-					editor.focused = true;
-					for (const c of "asd，") editor.handleInput(c);
-					const lines = editor.render(width);
-					for (const line of lines) {
-						const stripped = line.replaceAll(CURSOR_MARKER, "");
-						expect(visibleWidth(stripped)).toBeLessThanOrEqual(width);
-					}
-				}
-			}
 		});
 
 		it("shows cursor at end before wrap and wraps on next char", () => {
@@ -1915,22 +1828,6 @@ describe("Editor component", () => {
 			expect(editor.getText()).toBe("abc\ndef");
 		});
 
-		it("decodes tmux xterm-format re-encoded control bytes in bracketed paste (kitty+tmux)", () => {
-			const editor = new Editor(defaultEditorTheme);
-			// tmux extended-keys-format=xterm (the default under kitty) re-encodes the
-			// newline (Ctrl+J) inside the paste as ESC[27;5;106~. It must land as a real
-			// newline, not leak the literal escape tail "[27;5;106~" into the buffer.
-			editor.handleInput("\x1b[200~line1\x1b[27;5;106~line2\x1b[201~");
-			expect(editor.getText()).toBe("line1\nline2");
-		});
-
-		it("decodes tmux csi-u-format re-encoded control bytes in bracketed paste", () => {
-			const editor = new Editor(defaultEditorTheme);
-			// tmux extended-keys-format=csi-u re-encodes the newline (Ctrl+J) as ESC[106;5u.
-			editor.handleInput("\x1b[200~line1\x1b[106;5uline2\x1b[201~");
-			expect(editor.getText()).toBe("line1\nline2");
-		});
-
 		it("undoes the last paste when a transient #undo trigger is executed", () => {
 			const editor = new Editor(defaultEditorTheme);
 
@@ -2160,6 +2057,42 @@ describe("Editor component", () => {
 			expect(editor.getExpandedText()).toBe(pastedText);
 		});
 
+		it("expands a paste pill in place for editing and submits the edited raw text", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+			let submitted = "";
+			editor.onSubmit = text => {
+				submitted = text;
+			};
+
+			editor.pasteText(pastedText);
+			editor.moveToLineStart();
+			for (let i = 0; i < 5; i++) editor.handleInput("\x1b[C");
+			editor.handleInput("\r");
+
+			expect(editor.getText()).toBe(pastedText);
+			editor.handleInput("!");
+			expect(editor.getText()).toBe(`${pastedText}!`);
+			expect(editor.getText()).not.toContain("[Paste #");
+
+			editor.handleInput("\r");
+			expect(submitted).toBe(`${pastedText}!`);
+		});
+
+		it("restores the paste pill when expansion is undone", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+
+			editor.pasteText(pastedText);
+			const marker = editor.getText();
+			editor.handleInput("\r");
+			expect(editor.getText()).toBe(pastedText);
+
+			editor.handleInput("\x1b[45;5u");
+			expect(editor.getText()).toBe(marker);
+			expect(editor.getExpandedText()).toBe(pastedText);
+		});
+
 		it("submits large pasted content literally", () => {
 			const editor = new Editor(defaultEditorTheme);
 			const pastedText = [
@@ -2181,7 +2114,8 @@ describe("Editor component", () => {
 			};
 
 			editor.handleInput(`\x1b[200~${pastedText}\x1b[201~`);
-			editor.handleInput("\r");
+			editor.handleInput("\r"); // expand the paste pill
+			editor.handleInput("\r"); // submit the expanded text
 
 			expect(submitted).toBe(pastedText);
 		});
@@ -2297,7 +2231,8 @@ describe("Editor component", () => {
 			expect(editor.getText()).toMatch(/^\[Paste #\d+, \+\d+ lines\]$/);
 			expect(editor.getExpandedText()).toBe(wrapped);
 
-			editor.handleInput("\r");
+			editor.handleInput("\r"); // expand the paste pill
+			editor.handleInput("\r"); // submit the expanded text
 			expect(submitted).toBe(wrapped);
 		});
 	});
@@ -2499,6 +2434,22 @@ describe("Editor component", () => {
 		});
 	});
 
+	describe("chrome modes", () => {
+		it("renders horizontal status rules without side rails", () => {
+			const editor = new Editor(defaultEditorTheme);
+			editor.setChromeMode("horizontal");
+			editor.setTopBorder({ content: "status", width: 6 });
+			editor.setText("draft");
+
+			const lines = editor.render(20).map(line => stripVTControlCharacters(line));
+			expect(lines).toHaveLength(3);
+			expect(lines[0]?.startsWith("status")).toBe(true);
+			expect(lines[0]).not.toMatch(/[╭╮╰╯│]/);
+			expect(lines[1]).toContain("draft");
+			expect(lines[2]).toBe(defaultEditorTheme.symbols.boxRound.horizontal.repeat(20));
+		});
+	});
+
 	describe("volatile speech-to-text preview", () => {
 		it("replaces the volatile preview in place rather than appending", () => {
 			const editor = new Editor(defaultEditorTheme);
@@ -2548,6 +2499,105 @@ describe("Editor component", () => {
 			expect(editor.getText()).toBe("line one\nline two");
 			editor.setVolatileText("single line");
 			expect(editor.getText()).toBe("single line");
+		});
+	});
+	describe("Transactional undo and paste", () => {
+		it("round-trips text and cursor through undo and redo", () => {
+			const editor = new Editor(defaultEditorTheme);
+
+			editor.insertText("abc");
+			const afterEdit = editor.getCursor();
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.getCursor()).toEqual({ line: 0, col: 0 });
+
+			expect(editor.redo()).toBe(true);
+			expect(editor.getText()).toBe("abc");
+			expect(editor.getCursor()).toEqual(afterEdit);
+
+			expect(editor.undo()).toBe(true);
+			editor.insertText("x");
+			expect(editor.redo()).toBe(false);
+			expect(editor.getText()).toBe("x");
+		});
+
+		it("collapses reentrant undo groups into one step", () => {
+			const editor = new Editor(defaultEditorTheme);
+
+			editor.beginUndoGroup();
+			editor.insertText("a");
+			editor.beginUndoGroup();
+			editor.insertText("b");
+			editor.endUndoGroup();
+			editor.insertText("c");
+			editor.endUndoGroup();
+
+			expect(editor.getText()).toBe("abc");
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.undo()).toBe(false);
+			expect(editor.redo()).toBe(true);
+			expect(editor.getText()).toBe("abc");
+		});
+
+		it("preserves a group's base when setText is called inside it", () => {
+			const editor = new Editor(defaultEditorTheme);
+
+			editor.insertText("before");
+			editor.beginUndoGroup();
+			editor.setText("replacement");
+			editor.insertText("!");
+			editor.endUndoGroup();
+
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("before");
+			expect(editor.redo()).toBe(true);
+			expect(editor.getText()).toBe("replacement!");
+		});
+
+		it("makes applyPaste one undo unit and restores marker metadata", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
+
+			editor.applyPaste(pastedText);
+			expect(editor.getExpandedText()).toBe(pastedText);
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.getExpandedText()).toBe("");
+			expect(editor.undo()).toBe(false);
+			expect(editor.redo()).toBe(true);
+			expect(editor.getExpandedText()).toBe(pastedText);
+		});
+
+		it("routes pasteText and insertPaste through one undo unit", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = Array.from({ length: 12 }, (_, i) => `row ${i}`).join("\n");
+
+			editor.pasteText("short paste");
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.undo()).toBe(false);
+
+			editor.insertPaste(pastedText);
+			expect(editor.getExpandedText()).toBe(pastedText);
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.getExpandedText()).toBe("");
+			expect(editor.redo()).toBe(true);
+			expect(editor.getExpandedText()).toBe(pastedText);
+		});
+
+		it("routes bracketed paste through one undo unit", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const pastedText = "bracketed\npaste";
+
+			editor.handleInput(`\x1b[200~${pastedText}\x1b[201~`);
+			expect(editor.getText()).toBe(pastedText);
+			expect(editor.undo()).toBe(true);
+			expect(editor.getText()).toBe("");
+			expect(editor.undo()).toBe(false);
+			expect(editor.redo()).toBe(true);
+			expect(editor.getText()).toBe(pastedText);
 		});
 	});
 });

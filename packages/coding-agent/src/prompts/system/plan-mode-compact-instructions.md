@@ -12,6 +12,5 @@ You MUST drop:
 - Restated context already present in the plan file.
 
 {{#if planFilePath}}
-The approved plan file is at `{{planFilePath}}`; it is the authoritative source of truth.
-You MUST preserve this durable path and the fact that the executor must read it directly after compaction.
+The approved plan file is at `{{planFilePath}}`; it is the authoritative source of truth and need not be re-summarized in detail.
 {{/if}}

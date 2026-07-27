@@ -1,14 +1,24 @@
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type { ToolExample } from "@oh-my-pi/pi-ai";
 import { prompt, untilAborted } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import browserDescription from "../prompts/tools/browser.md" with { type: "text" };
 import type { ToolSession } from "../sdk";
 import { enforceInlineByteCap } from "../session/streaming-output";
 import { truncateForPrompt } from "./approval";
 import { resolveCmuxKind } from "./browser/cmux/rpc";
 import { acquireBrowser, type BrowserHandle, type BrowserKind, type BrowserKindTag } from "./browser/registry";
+import {
+	DEFAULT_MAX_OWNED_GLOBAL,
+	DEFAULT_MAX_OWNED_PER_SESSION,
+	normalizeBrowserOwnershipCap,
+} from "./browser/process-ownership";
 import type { Observation, ScreenshotResult } from "./browser/tab-protocol";
+import {
+	DEFAULT_MAX_GLOBAL_TABS,
+	DEFAULT_MAX_TABS_PER_SESSION,
+	normalizeTabBudgetCap,
+} from "./browser/tab-budget";
 import { acquireTab, dropHeadlessTabs, getTab, releaseAllTabs, releaseTab, runInTab } from "./browser/tab-supervisor";
 import type { OutputMeta } from "./output-meta";
 import { resolveToCwd } from "./path-utils";
@@ -16,11 +26,6 @@ import { ToolAbortError, ToolError, throwIfAborted } from "./tool-errors";
 import { toolResult } from "./tool-result";
 import { clampTimeout } from "./tool-timeouts";
 
-export {
-	type AriaSnapshotOptions,
-	buildAriaSnapshotScript,
-	parseAriaRefSelector,
-} from "./browser/aria/aria-snapshot";
 export { cmuxSnapshotToObservation, mapWaitUntil, resolveCmuxKind, serializeEval } from "./browser/cmux/rpc";
 export { CmuxSocketClient } from "./browser/cmux/socket-client";
 export { extractReadableFromHtml, type ReadableFormat, type ReadableResult } from "./browser/readable";
@@ -28,35 +33,43 @@ export type { Observation, ObservationEntry } from "./browser/tab-protocol";
 
 const DEFAULT_TAB_NAME = "main";
 
-const appSchema = type({
-	"path?": type("string").describe("binary path to spawn"),
-	"cdp_url?": type("string").describe("existing cdp endpoint"),
-	"args?": type("string[]").describe("extra cli args"),
-	"target?": type("string").describe("substring to pick a window"),
+const appSchema = z.object({
+	path: z.string().describe("binary path to spawn").optional(),
+	cdp_url: z.string().describe("existing cdp endpoint").optional(),
+	args: z.array(z.string()).describe("extra cli args").optional(),
+	target: z.string().describe("substring to pick a window").optional(),
 });
 
-const browserSchema = type({
-	action: type("'open' | 'close' | 'run'").describe("operation"),
-	"name?": type("string").describe("tab id (default 'main')"),
-	"url?": type("string").describe("url to open"),
-	"app?": appSchema,
-	"viewport?": {
-		width: "number",
-		height: "number",
-		"scale?": "number",
-	},
-	"wait_until?": type("'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2'").describe(
-		"navigation wait condition",
-	),
-	"dialogs?": type("'accept' | 'dismiss'").describe("auto-handle dialogs"),
-	"code?": type("string").describe("js body to run in tab"),
-	"timeout?": type("number").describe("timeout in seconds"),
-	"all?": type("boolean").describe("close every tab"),
-	"kill?": type("boolean").describe("also kill spawned-app browsers"),
+const browserSchema = z.object({
+	action: z.enum(["open", "close", "run"] as const).describe("operation"),
+	name: z.string().describe("tab id (default 'main')").optional(),
+	url: z.string().describe("url to open").optional(),
+	reuse: z.boolean().describe("reuse an idle tab with the same URL (default true)").optional(),
+	purpose: z.string().describe("ownership purpose label for diagnostics").optional(),
+	app: appSchema.optional(),
+	viewport: z
+		.object({
+			width: z.number(),
+			height: z.number(),
+			scale: z.number().optional(),
+		})
+		.optional(),
+	wait_until: z
+		.enum(["load", "domcontentloaded", "networkidle0", "networkidle2"] as const)
+		.describe("navigation wait condition")
+		.optional(),
+	dialogs: z
+		.enum(["accept", "dismiss"] as const)
+		.describe("auto-handle dialogs")
+		.optional(),
+	code: z.string().describe("js body to run in tab").optional(),
+	timeout: z.number().default(30).describe("timeout in seconds (default 30, max 300)").optional(),
+	all: z.boolean().describe("close every tab").optional(),
+	kill: z.boolean().describe("also kill spawned-app browsers").optional(),
 });
 
 /** Input schema for the browser tool. */
-export type BrowserParams = typeof browserSchema.infer;
+export type BrowserParams = z.infer<typeof browserSchema>;
 
 /** Details describing a browser tool execution result (for renderers + transcript). */
 export interface BrowserToolDetails {
@@ -118,7 +131,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 	readonly parameters = browserSchema;
 	readonly strict = true;
 
-	readonly examples: readonly ToolExample<typeof browserSchema.infer>[] = [
+	readonly examples: readonly ToolExample<z.input<typeof browserSchema>>[] = [
 		{
 			caption: "Open a tab",
 			call: { action: "open", name: "docs", url: "https://example.com" },
@@ -222,6 +235,8 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 		signal?: AbortSignal,
 	): Promise<AgentToolResult<BrowserToolDetails>> {
 		const kind = resolveBrowserKind(params, this.session);
+		const sessionId = this.session.getSessionId?.();
+		if (!sessionId) throw new ToolError("Browser launch requires an active session ID");
 		details.browser = kind.kind;
 
 		// If a tab with this name already exists on a different browser kind, fail fast — caller must close first.
@@ -232,9 +247,24 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 			);
 		}
 
+		const maxOwnedPerSession = normalizeBrowserOwnershipCap(
+			this.session.settings.get("browser.maxOwnedPerSession"),
+			DEFAULT_MAX_OWNED_PER_SESSION,
+		);
+		const maxTabsPerSession = normalizeTabBudgetCap(
+			this.session.settings.get("browser.maxTabsPerSession"),
+			DEFAULT_MAX_TABS_PER_SESSION,
+		);
+		const maxGlobalTabs = normalizeTabBudgetCap(
+			this.session.settings.get("browser.maxGlobalTabs"),
+			DEFAULT_MAX_GLOBAL_TABS,
+		);
+		const tabIdleTtlMs = this.session.settings.get("browser.tabIdleTtlMs") as number | undefined;
+		const urlQuerySensitive = this.session.settings.get("browser.tabUrlQuerySensitive") as boolean | undefined;
 		const browser = await untilAborted(signal, () =>
 			acquireBrowser(kind, {
 				cwd: this.session.cwd,
+				sessionId,
 				viewport: params.viewport
 					? {
 							width: params.viewport.width,
@@ -244,11 +274,25 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 					: undefined,
 				appArgs: params.app?.args,
 				signal,
+				maxOwnedPerSession,
+				maxOwnedGlobal: normalizeBrowserOwnershipCap(
+					this.session.settings.get("browser.maxOwnedGlobal"),
+					DEFAULT_MAX_OWNED_GLOBAL,
+				),
 			}),
 		);
 
 		const result = await untilAborted(signal, () =>
 			acquireTab(name, browser, {
+				sessionId,
+				ownerSessionId: sessionId,
+				ownerAgentId: this.session.getAgentId?.() ?? "unknown",
+				purpose: params.purpose ?? "browser",
+				maxTabsPerSession,
+				maxGlobalTabs,
+				reuse: params.reuse,
+				tabIdleTtlMs,
+				urlQuerySensitive,
 				url: params.url,
 				waitUntil: params.wait_until,
 				viewport: params.viewport
@@ -262,7 +306,6 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 				timeoutMs,
 				dialogs: params.dialogs,
 				signal,
-				ownerSessionId: this.session.getSessionId?.() ?? undefined,
 			}),
 		);
 		const tab = result.tab;
@@ -338,6 +381,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 		// text inline; the full text stays recoverable via the artifact footer
 		// when allocation succeeds.
 		const cappedText = await enforceInlineByteCap(textOnly, {
+			label: "browser output",
 			saveArtifact: full => saveBrowserOutputArtifact(this.session, full),
 		});
 		details.result = cappedText;

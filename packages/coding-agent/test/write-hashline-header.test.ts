@@ -9,7 +9,6 @@ import { HashlineFilesystem } from "@oh-my-pi/pi-coding-agent/edit/hashline/file
 import { writethroughNoop } from "@oh-my-pi/pi-coding-agent/lsp";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { WriteTool } from "@oh-my-pi/pi-coding-agent/tools/write";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 function createSession(cwd: string): ToolSession {
 	return {
@@ -45,7 +44,7 @@ describe("write tool hashline header", () => {
 	});
 
 	afterEach(async () => {
-		await removeWithRetries(tmpDir);
+		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
 	it("inserts a fresh [path#TAG] header that maps to the written content", async () => {
@@ -103,10 +102,10 @@ describe("write tool hashline header", () => {
 		expect(final).toBe("export const enabled = true;\n");
 	});
 
-	it("omits the hashline header when the edit mode is not hashline", async () => {
+	it("omits the hashline header when hashLines display mode is disabled", async () => {
 		const filePath = path.join(tmpDir, "plain.txt");
 		const session = createSession(tmpDir);
-		session.settings.set("edit.mode", "replace");
+		session.settings.set("readHashLines", false);
 		const tool = new WriteTool(session);
 		const content = "no anchors here\n";
 

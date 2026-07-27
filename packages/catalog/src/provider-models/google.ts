@@ -2,7 +2,6 @@ import { fetchAntigravityDiscoveryModels } from "../discovery/antigravity";
 import { fetchGeminiModels } from "../discovery/gemini";
 import type { ModelManagerOptions } from "../model-manager";
 import type { FetchImpl } from "../types";
-import { GEMINI_CLI_VARIANT_COLLAPSE_TABLE } from "../variant-collapse";
 
 export interface GoogleModelManagerConfig {
 	apiKey?: string;
@@ -90,7 +89,6 @@ export function googleGeminiCliModelManagerOptions(
 							token,
 							endpoint,
 							fetcher: toDiscoveryFetch(config?.fetch),
-							collapseTable: GEMINI_CLI_VARIANT_COLLAPSE_TABLE,
 						});
 						if (models === null) {
 							return null;
@@ -99,6 +97,7 @@ export function googleGeminiCliModelManagerOptions(
 							...m,
 							provider: "google-gemini-cli" as const,
 							baseUrl: endpoint,
+							input: m.input.filter(input => input !== "video"),
 						}));
 					},
 				}

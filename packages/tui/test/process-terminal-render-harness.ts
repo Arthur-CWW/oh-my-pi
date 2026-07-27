@@ -1,7 +1,6 @@
 import { vi } from "bun:test";
 import { type Component, TUI } from "@oh-my-pi/pi-tui";
 import { ProcessTerminal } from "@oh-my-pi/pi-tui/terminal";
-import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
 
 // Pristine descriptors, captured once at module load. Every dispose() restores
 // to these so the harness is full-suite safe across repeated create/dispose
@@ -71,10 +70,6 @@ export function createProcessTerminalRenderHarness(
 	initialColumns = 100,
 	initialRows = 30,
 ): ProcessTerminalRenderHarness {
-	// This harness exercises the real ProcessTerminal I/O pipeline, so it opts
-	// out of the test-default headless suppression and restores the prior value
-	// on dispose.
-	const previousHeadless = setTerminalHeadless(false);
 	Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
 	Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
 	Object.defineProperty(process.stdin, "setRawMode", { value: vi.fn(), configurable: true });
@@ -97,13 +92,7 @@ export function createProcessTerminalRenderHarness(
 	const tui = new TUI(terminal);
 	const probe = new WidthProbe();
 	tui.addChild(probe);
-	try {
-		tui.start();
-	} catch (err) {
-		// A start() regression must not poison the worker with headless=false.
-		setTerminalHeadless(previousHeadless);
-		throw err;
-	}
+	tui.start();
 
 	const settle = () => Bun.sleep(SETTLE_MS);
 
@@ -129,15 +118,9 @@ export function createProcessTerminalRenderHarness(
 		},
 		dispose() {
 			tui.stop();
-			setTerminalHeadless(previousHeadless);
 			for (const spy of spies) spy.mockRestore();
 			for (const [target, key, descriptor] of PRISTINE) {
-				// A piped test run has no own `isTTY`/`columns`/`rows` descriptor, so
-				// the captured pristine value is `undefined`. Deleting the forced
-				// property restores that absent state — skipping it would leak
-				// `isTTY = true` and poison TTY-gated code (e.g. mermaid color auto-detect).
 				if (descriptor) Object.defineProperty(target, key, descriptor);
-				else Reflect.deleteProperty(target, key);
 			}
 		},
 	};

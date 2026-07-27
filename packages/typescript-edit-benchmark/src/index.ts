@@ -10,7 +10,9 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { parseArgs } from "node:util";
+import { Effect, Option } from "effect";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { Command, Flag } from "effect/unstable/cli";
 import { type ResolvedThinkingLevel, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Effort, THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
 import { padding, visibleWidth } from "@oh-my-pi/pi-tui";
@@ -103,69 +105,6 @@ async function conversationDumpStatus(dumpDir: string): Promise<string> {
 	}
 }
 
-function printUsage(tasks?: EditTask[]): void {
-	const taskList = tasks
-		? tasks.map(t => `  ${t.id.padEnd(30)} ${t.name}`).join("\n")
-		: "  (use --list to see available tasks)";
-	console.log(`
-Edit Benchmark - Evaluate patch application success rates
-
-Usage:
-  bun run bench:edit [options]
-
-Options:
-  --model <id>              Provider/model ID, e.g. anthropic/claude-sonnet-4-20250514 (default)
-  --provider <id>           Override provider (auto-detected from model prefix if omitted)
-  --thinking <level>        Thinking level: off, minimal, low, medium, high, xhigh, max
-  --runs <n>                Runs per task (default: 1)
-  --timeout <ms>            Timeout per run in ms (default: 120000)
-  --connection-timeout <ms>  Timeout for first event before fast-retry (default: 30000)
-  --task-concurrency <n>    Max tasks to run in parallel (default: 16)
-  --tasks <ids>             Comma-separated task IDs to run (default: all)
-  --max-tasks <n>            Max tasks to sample (default: 80, 0 = all)
-  --fixtures <path>         Fixtures directory or .tar.gz archive (default: built-in)
-  --edit-variant <v>        Edit variant: any string (e.g. replace, patch, hashline, vim, atom, apply_patch), or auto (default: auto)
-  --edit-fuzzy <bool>       Fuzzy matching: true, false, auto (default: auto)
-  --edit-fuzzy-threshold <n> Fuzzy threshold 0-1 or auto (default: auto)
-  --auto-format             Auto-format output files after verify (debug only)
-  --guided                  Include an authoritative suggested edit payload (default: false)
-  --no-guided               Disable guided mode
-  --max-attempts <n>        Max prompt attempts per run (default: 1)
-  --no-op-retry-limit <n>   Stop after repeated preventable no-op failures (default: 2)
-  --mutation-scope-window <n> Allowed line-distance from mutation target for hashline refs (default: 20)
-  --max-turns <n>           Max turn_start events per attempt before failing (default: 30)
-  --output <file>           Output file (default: run_<model>_<variant>_<fuzzy>_<threshold>_<timestamp>.md)
-  --format <fmt>            Output format: markdown, json (default: markdown)
-  --check-fixtures          Validate fixtures and exit
-  --require-edit-tool-call  Require edit tool usage for success (default: false)
-  --require-read-tool-call  Require read tool usage for success (default: false)
-  --no-edit-required        Remove "must edit" prompt requirement (default: false)
-  --no-early-stop-on-match  Don't short-circuit the run when output matches expected (default: false)
-  --list                    List available tasks and exit
-  --help                    Show this help message
-
-Available Tasks:
-${taskList}
-
-Examples:
-  # Run full benchmark with default model
-  bun run bench:edit
-
-  # Run specific tasks
-  bun run bench:edit --tasks core-memory-recall,operations-division
-
-  # Compare different models
-  bun run bench:edit --model claude-sonnet-4-20250514 --output sonnet.md
-  bun run bench:edit --model claude-opus-4-5-20251101 --output opus.md
-
-  # Run with extended thinking
-  bun run bench:edit --thinking high --runs 5
-
-  # Run from a fixtures archive
-  bun run bench:edit --fixtures edit-fixtures.tar.gz
-`);
-}
-
 async function resolveExtractedDir(tempDir: string): Promise<string> {
 	const entries = await fs.promises.readdir(tempDir, { withFileTypes: true });
 	const dirs = entries.filter(entry => entry.isDirectory());
@@ -211,59 +150,199 @@ async function resolveFixtures(fixturesArg?: string): Promise<{ tasks: EditTask[
 	return { tasks: await loadTasksFromDir(fixturesArg) };
 }
 
-async function main(): Promise<void> {
-	const { values } = parseArgs({
-		options: {
-			provider: { type: "string" },
-			model: { type: "string", default: "anthropic/claude-sonnet-4-20250514" },
-			thinking: { type: "string", default: "low" },
-			runs: { type: "string", default: "2" },
-			timeout: { type: "string", default: "120000" },
-			"connection-timeout": { type: "string", default: "30000" },
-			"max-turns": { type: "string", default: "30" },
-			"task-concurrency": { type: "string", default: "32" },
-			tasks: { type: "string" },
-			fixtures: { type: "string" },
-			output: { type: "string" },
-			format: { type: "string", default: "markdown" },
-			"check-fixtures": { type: "boolean", default: false },
-			"auto-format": { type: "boolean", default: false },
-			guided: { type: "boolean", default: false },
-			"no-guided": { type: "boolean", default: false },
-			"max-attempts": { type: "string", default: "1" },
-			"no-op-retry-limit": { type: "string", default: "2" },
-			"max-timeout-retries": { type: "string", default: "3" },
-			"max-provider-retries": { type: "string", default: "3" },
-			"mutation-scope-window": { type: "string", default: "20" },
-			"require-edit-tool-call": { type: "boolean", default: false },
-			"require-read-tool-call": { type: "boolean", default: false },
-			"no-edit-required": { type: "boolean", default: false },
-			"edit-variant": { type: "string" },
-			"edit-fuzzy": { type: "string" },
-			"edit-fuzzy-threshold": { type: "string" },
-			"no-in-process": { type: "boolean", default: false },
-			"no-early-stop-on-match": { type: "boolean", default: false },
-			"max-tasks": { type: "string", default: "80" },
-			list: { type: "boolean", default: false },
-			help: { type: "boolean", default: false },
-		},
-		allowPositionals: true,
-	});
+// ---------------------------------------------------------------------------
+// Effect CLI flag descriptors
+// ---------------------------------------------------------------------------
 
-	// Extract provider for display/config purposes only.
-	// The full model string (e.g. "openrouter/google/gemini-2.5-flash-lite") is passed
-	// as --model to the CLI, which handles resolution via parseModelPattern.
-	const model = values.model!;
+const VALID_THINKING_LEVELS = [ThinkingLevel.Off, ...THINKING_EFFORTS] as [string, ...string[]];
+
+const benchmarkCommand = Command.make(
+	"typescript-edit-benchmark",
+	{
+		model: Flag.string("model").pipe(
+			Flag.withDescription("Provider/model ID, e.g. anthropic/claude-sonnet-4-20250514"),
+			Flag.withDefault("anthropic/claude-sonnet-4-20250514"),
+		),
+		provider: Flag.optional(
+			Flag.string("provider").pipe(
+				Flag.withDescription("Override provider (auto-detected from model prefix if omitted)"),
+			),
+		),
+		thinking: Flag.choice("thinking", VALID_THINKING_LEVELS).pipe(
+			Flag.withDescription("Thinking level: off, minimal, low, medium, high, xhigh"),
+			Flag.withDefault("low" as string),
+		),
+		runs: Flag.integer("runs").pipe(
+			Flag.withDescription("Runs per task"),
+			Flag.withDefault(2),
+		),
+		timeout: Flag.integer("timeout").pipe(
+			Flag.withDescription("Timeout per run in ms"),
+			Flag.withDefault(120_000),
+		),
+		connectionTimeout: Flag.integer("connection-timeout").pipe(
+			Flag.withDescription("Timeout for first event before fast-retry"),
+			Flag.withDefault(30_000),
+		),
+		maxTurns: Flag.integer("max-turns").pipe(
+			Flag.withDescription("Max turn_start events per attempt before failing"),
+			Flag.withDefault(30),
+		),
+		taskConcurrency: Flag.integer("task-concurrency").pipe(
+			Flag.withDescription("Max tasks to run in parallel"),
+			Flag.withDefault(32),
+		),
+		tasks: Flag.optional(
+			Flag.string("tasks").pipe(
+				Flag.withDescription("Comma-separated task IDs to run (default: all)"),
+			),
+		),
+		fixtures: Flag.optional(
+			Flag.string("fixtures").pipe(
+				Flag.withDescription("Fixtures directory or .tar.gz archive (default: built-in)"),
+			),
+		),
+		output: Flag.optional(
+			Flag.string("output").pipe(
+				Flag.withDescription("Output file"),
+			),
+		),
+		format: Flag.choice("format", ["markdown", "json"] as const).pipe(
+			Flag.withDescription("Output format: markdown, json"),
+			Flag.withDefault("markdown" as string),
+		),
+		checkFixtures: Flag.boolean("check-fixtures").pipe(
+			Flag.withDescription("Validate fixtures and exit"),
+			Flag.withDefault(false),
+		),
+		autoFormat: Flag.boolean("auto-format").pipe(
+			Flag.withDescription("Auto-format output files after verify (debug only)"),
+			Flag.withDefault(false),
+		),
+		guided: Flag.boolean("guided").pipe(
+			Flag.withDescription("Include an authoritative suggested edit payload"),
+			Flag.withDefault(false),
+		),
+		maxAttempts: Flag.integer("max-attempts").pipe(
+			Flag.withDescription("Max prompt attempts per run (1-5)"),
+			Flag.withDefault(1),
+		),
+		noOpRetryLimit: Flag.integer("no-op-retry-limit").pipe(
+			Flag.withDescription("Stop after repeated preventable no-op failures"),
+			Flag.withDefault(2),
+		),
+		maxTimeoutRetries: Flag.integer("max-timeout-retries").pipe(
+			Flag.withDescription("Max timeout retries"),
+			Flag.withDefault(3),
+		),
+		maxProviderRetries: Flag.integer("max-provider-retries").pipe(
+			Flag.withDescription("Max provider failure retries"),
+			Flag.withDefault(3),
+		),
+		mutationScopeWindow: Flag.integer("mutation-scope-window").pipe(
+			Flag.withDescription("Allowed line-distance from mutation target for hashline refs"),
+			Flag.withDefault(20),
+		),
+		requireEditToolCall: Flag.boolean("require-edit-tool-call").pipe(
+			Flag.withDescription("Require edit tool usage for success"),
+			Flag.withDefault(false),
+		),
+		requireReadToolCall: Flag.boolean("require-read-tool-call").pipe(
+			Flag.withDescription("Require read tool usage for success"),
+			Flag.withDefault(false),
+		),
+		noEditRequired: Flag.boolean("no-edit-required").pipe(
+			Flag.withDescription("Remove 'must edit' prompt requirement"),
+			Flag.withDefault(false),
+		),
+		editVariant: Flag.optional(
+			Flag.string("edit-variant").pipe(
+				Flag.withDescription("Edit variant: replace, patch, hashline, vim, atom, apply_patch, or auto"),
+			),
+		),
+		editFuzzy: Flag.optional(
+			Flag.string("edit-fuzzy").pipe(
+				Flag.withDescription("Fuzzy matching: true, false, auto"),
+			),
+		),
+		editFuzzyThreshold: Flag.optional(
+			Flag.string("edit-fuzzy-threshold").pipe(
+				Flag.withDescription("Fuzzy threshold 0-1 or auto"),
+			),
+		),
+		inProcess: Flag.boolean("in-process").pipe(
+			Flag.withDescription("Run benchmark in-process"),
+			Flag.withDefault(true),
+		),
+		earlyStopOnMatch: Flag.boolean("early-stop-on-match").pipe(
+			Flag.withDescription("Short-circuit the run when output matches expected"),
+			Flag.withDefault(true),
+		),
+		maxTasks: Flag.integer("max-tasks").pipe(
+			Flag.withDescription("Max tasks to sample (0 = all)"),
+			Flag.withDefault(80),
+		),
+		list: Flag.boolean("list").pipe(
+			Flag.withDescription("List available tasks and exit"),
+			Flag.withDefault(false),
+		),
+	},
+	(flags) =>
+		Effect.gen(function* () {
+			yield* Effect.promise(() => runBenchmarkCli(flags));
+		}),
+).pipe(
+	Command.withDescription("Edit Benchmark - Evaluate patch application success rates"),
+);
+
+// ---------------------------------------------------------------------------
+// CLI handler — mirrors the original main() with typed flag values
+// ---------------------------------------------------------------------------
+
+interface ParsedFlags {
+	readonly model: string;
+	readonly provider: Option.Option<string>;
+	readonly thinking: string;
+	readonly runs: number;
+	readonly timeout: number;
+	readonly connectionTimeout: number;
+	readonly maxTurns: number;
+	readonly taskConcurrency: number;
+	readonly tasks: Option.Option<string>;
+	readonly fixtures: Option.Option<string>;
+	readonly output: Option.Option<string>;
+	readonly format: string;
+	readonly checkFixtures: boolean;
+	readonly autoFormat: boolean;
+	readonly guided: boolean;
+	readonly maxAttempts: number;
+	readonly noOpRetryLimit: number;
+	readonly maxTimeoutRetries: number;
+	readonly maxProviderRetries: number;
+	readonly mutationScopeWindow: number;
+	readonly requireEditToolCall: boolean;
+	readonly requireReadToolCall: boolean;
+	readonly noEditRequired: boolean;
+	readonly editVariant: Option.Option<string>;
+	readonly editFuzzy: Option.Option<string>;
+	readonly editFuzzyThreshold: Option.Option<string>;
+	readonly inProcess: boolean;
+	readonly earlyStopOnMatch: boolean;
+	readonly maxTasks: number;
+	readonly list: boolean;
+}
+
+async function runBenchmarkCli(flags: ParsedFlags): Promise<void> {
+	const model = flags.model;
 	const slashIndex = model.indexOf("/");
-	const provider = values.provider ?? (slashIndex !== -1 ? model.slice(0, slashIndex) : "anthropic");
+	const provider = Option.getOrElse(flags.provider, () =>
+		slashIndex !== -1 ? model.slice(0, slashIndex) : "anthropic",
+	);
 
-	if (values.help) {
-		printUsage();
-		process.exit(0);
-	}
+	const fixturesArg = Option.getOrUndefined(flags.fixtures);
 
-	if (values["check-fixtures"] && values.fixtures) {
-		const issues = await validateFixturesFromDir(values.fixtures);
+	if (flags.checkFixtures && fixturesArg) {
+		const issues = await validateFixturesFromDir(fixturesArg);
 		if (issues.length === 0) {
 			console.log("Fixtures OK");
 			process.exit(0);
@@ -275,9 +354,9 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	const { tasks: allTasks, cleanup } = await resolveFixtures(values.fixtures);
+	const { tasks: allTasks, cleanup } = await resolveFixtures(fixturesArg);
 
-	if (values.list) {
+	if (flags.list) {
 		console.log("Available Tasks:\n");
 		for (const task of allTasks) {
 			console.log(`  ${task.id}`);
@@ -289,55 +368,48 @@ async function main(): Promise<void> {
 	}
 
 	let thinkingLevel: ResolvedThinkingLevel = Effort.Low;
-	if (values.thinking) {
-		const level = parseThinkingLevel(values.thinking);
-		if (!level) {
-			console.error(`Invalid thinking level: ${values.thinking}`);
-			console.error(`Valid levels: ${[ThinkingLevel.Off, ...THINKING_EFFORTS].join(", ")}`);
-			process.exit(1);
-		}
-		thinkingLevel = level;
+	const level = parseThinkingLevel(flags.thinking);
+	if (!level) {
+		console.error(`Invalid thinking level: ${flags.thinking}`);
+		console.error(`Valid levels: ${[ThinkingLevel.Off, ...THINKING_EFFORTS].join(", ")}`);
+		process.exit(1);
 	}
+	thinkingLevel = level;
 
-	const runsPerTask = parseInt(values.runs!, 10);
-	if (Number.isNaN(runsPerTask) || runsPerTask < 1) {
-		console.error(`Invalid runs value: ${values.runs}`);
+	const runsPerTask = flags.runs;
+	if (runsPerTask < 1) {
+		console.error(`Invalid runs value: ${runsPerTask}`);
 		process.exit(1);
 	}
 
-	const timeout = parseInt(values.timeout!, 10);
-	if (Number.isNaN(timeout) || timeout < 1000) {
-		console.error(`Invalid timeout value: ${values.timeout}`);
+	const timeout = flags.timeout;
+	if (timeout < 1000) {
+		console.error(`Invalid timeout value: ${timeout}`);
 		process.exit(1);
 	}
 
-	const maxTurns = parseInt(values["max-turns"]!, 10);
-	if (Number.isNaN(maxTurns) || maxTurns < 1) {
-		console.error(`Invalid max-turns value: ${values["max-turns"]}. Must be >= 1.`);
+	const maxTurns = flags.maxTurns;
+	if (maxTurns < 1) {
+		console.error(`Invalid max-turns value: ${maxTurns}. Must be >= 1.`);
 		process.exit(1);
 	}
 
-	const taskConcurrency = parseInt(values["task-concurrency"]!, 10);
-	if (Number.isNaN(taskConcurrency) || taskConcurrency < 1) {
-		console.error(`Invalid task concurrency value: ${values["task-concurrency"]}`);
+	const taskConcurrency = flags.taskConcurrency;
+	if (taskConcurrency < 1) {
+		console.error(`Invalid task concurrency value: ${taskConcurrency}`);
 		process.exit(1);
 	}
 
-	const maxAttempts = parseInt(values["max-attempts"] ?? "2", 10);
-	if (Number.isNaN(maxAttempts) || maxAttempts < 1 || maxAttempts > 5) {
-		console.error(`Invalid max-attempts value: ${values["max-attempts"]}. Must be 1-5.`);
+	const maxAttempts = flags.maxAttempts;
+	if (maxAttempts < 1 || maxAttempts > 5) {
+		console.error(`Invalid max-attempts value: ${maxAttempts}. Must be 1-5.`);
 		process.exit(1);
 	}
 
-	const noOpRetryLimit = parseInt(values["no-op-retry-limit"] ?? "2", 10);
-	const maxTimeoutRetries = parseInt(values["max-timeout-retries"] ?? "3", 10);
-	const maxProviderRetries = parseInt(values["max-provider-retries"] ?? "3", 10);
-	const mutationScopeWindow = parseInt(values["mutation-scope-window"] ?? "20", 10);
-	const connectionTimeout = parseInt(values["connection-timeout"] ?? "30000", 10);
-
+	const tasksFilter = Option.getOrUndefined(flags.tasks);
 	let tasksToRun = allTasks;
-	if (values.tasks) {
-		const taskIds = values.tasks.split(",").map(s => s.trim());
+	if (tasksFilter) {
+		const taskIds = tasksFilter.split(",").map(s => s.trim());
 		tasksToRun = [];
 		for (const id of taskIds) {
 			const task = allTasks.find(t => t.id === id);
@@ -351,48 +423,48 @@ async function main(): Promise<void> {
 	}
 
 	// Apply --max-tasks sampling (deterministic by sorting on id)
-	const maxTasks = parseInt(values["max-tasks"] ?? "80", 10);
-	if (maxTasks > 0 && tasksToRun.length > maxTasks && !values.tasks) {
+	const maxTasks = flags.maxTasks;
+	if (maxTasks > 0 && tasksToRun.length > maxTasks && !tasksFilter) {
 		// Evenly sample across mutation categories for representative coverage
 		const sorted = tasksToRun.slice().sort((a, b) => a.id.localeCompare(b.id));
 		const step = sorted.length / maxTasks;
 		tasksToRun = Array.from({ length: maxTasks }, (_, i) => sorted[Math.floor(i * step)]!);
 	}
 
-	const rawEditVariant = values["edit-variant"] as string | undefined;
+	const rawEditVariant = Option.getOrUndefined(flags.editVariant);
 	const editVariant = rawEditVariant === "" ? undefined : rawEditVariant;
 
 	let editFuzzy: boolean | "auto" | undefined;
-	if (values["edit-fuzzy"] !== undefined) {
-		if (values["edit-fuzzy"] === "auto") {
+	const editFuzzyRaw = Option.getOrUndefined(flags.editFuzzy);
+	if (editFuzzyRaw !== undefined) {
+		if (editFuzzyRaw === "auto") {
 			editFuzzy = "auto";
-		} else if (values["edit-fuzzy"] === "true" || values["edit-fuzzy"] === "1") {
+		} else if (editFuzzyRaw === "true" || editFuzzyRaw === "1") {
 			editFuzzy = true;
-		} else if (values["edit-fuzzy"] === "false" || values["edit-fuzzy"] === "0") {
+		} else if (editFuzzyRaw === "false" || editFuzzyRaw === "0") {
 			editFuzzy = false;
 		} else {
-			console.error(`Invalid edit-fuzzy: ${values["edit-fuzzy"]}. Must be true, false, 1, 0, or auto.`);
+			console.error(`Invalid edit-fuzzy: ${editFuzzyRaw}. Must be true, false, 1, 0, or auto.`);
 			process.exit(1);
 		}
 	}
 
 	let editFuzzyThreshold: number | "auto" | undefined;
-	if (values["edit-fuzzy-threshold"] !== undefined) {
-		if (values["edit-fuzzy-threshold"] === "auto") {
+	const editFuzzyThresholdRaw = Option.getOrUndefined(flags.editFuzzyThreshold);
+	if (editFuzzyThresholdRaw !== undefined) {
+		if (editFuzzyThresholdRaw === "auto") {
 			editFuzzyThreshold = "auto";
 		} else {
-			const parsed = parseFloat(values["edit-fuzzy-threshold"]);
+			const parsed = parseFloat(editFuzzyThresholdRaw);
 			if (Number.isNaN(parsed) || parsed < 0 || parsed > 1) {
-				console.error(`Invalid edit-fuzzy-threshold: ${values["edit-fuzzy-threshold"]}. Must be 0-1 or auto.`);
+				console.error(`Invalid edit-fuzzy-threshold: ${editFuzzyThresholdRaw}. Must be 0-1 or auto.`);
 				process.exit(1);
 			}
 			editFuzzyThreshold = parsed;
 		}
 	}
 
-	const guided = values["no-guided"] ? false : values.guided;
-
-	const formatType = values.format === "json" ? "json" : "markdown";
+	const formatType = flags.format === "json" ? "json" : "markdown";
 	const config: BenchmarkConfig = {
 		provider,
 		model,
@@ -401,24 +473,24 @@ async function main(): Promise<void> {
 		timeout,
 		maxTurns,
 		taskConcurrency,
-		autoFormat: values["auto-format"],
-		guided,
+		autoFormat: flags.autoFormat,
+		guided: flags.guided,
 		maxAttempts,
-		requireEditToolCall: values["require-edit-tool-call"],
-		requireReadToolCall: values["require-read-tool-call"],
-		noEditRequired: values["no-edit-required"],
+		requireEditToolCall: flags.requireEditToolCall,
+		requireReadToolCall: flags.requireReadToolCall,
+		noEditRequired: flags.noEditRequired,
 		editVariant,
 		editFuzzy,
 		editFuzzyThreshold,
-		noOpRetryLimit,
-		maxTimeoutRetries,
-		maxProviderFailureRetries: maxProviderRetries,
-		mutationScopeWindow,
-		connectionTimeout,
-		inProcess: !values["no-in-process"],
-		earlyStopOnMatch: !values["no-early-stop-on-match"],
+		noOpRetryLimit: flags.noOpRetryLimit,
+		maxTimeoutRetries: flags.maxTimeoutRetries,
+		maxProviderFailureRetries: flags.maxProviderRetries,
+		mutationScopeWindow: flags.mutationScopeWindow,
+		connectionTimeout: flags.connectionTimeout,
+		inProcess: flags.inProcess,
+		earlyStopOnMatch: flags.earlyStopOnMatch,
 	};
-	const outputPath = values.output ?? generateReportFilename(config, formatType);
+	const outputPath = Option.getOrElse(flags.output, () => generateReportFilename(config, formatType));
 	config.conversationDumpDir = await resolveConversationDumpDir(outputPath);
 
 	console.log("Edit Benchmark");
@@ -518,16 +590,10 @@ async function main(): Promise<void> {
 		`  Task success rate (best of ${config.runsPerTask}): ${(result.summary.taskSuccessRate * 100).toFixed(1)}% (${result.summary.successfulTasks}/${result.summary.totalTasks})`,
 	);
 	console.log(
-		`  Total tokens (best, overall): ${result.summary.totalTokens.input} in / ${result.summary.totalTokens.output} out`,
+		`  Total tokens (best): ${result.summary.totalTokens.input} in / ${result.summary.totalTokens.output} out`,
 	);
 	console.log(
-		`  Tokens/task (best, overall): mean=${result.summary.avgTokensPerTask.total} median=${result.summary.medianTokensPerTask.total} p1=${result.summary.p1TokensPerTask.total} p99=${result.summary.p99TokensPerTask.total} reasoning=${result.summary.avgTokensPerTask.reasoning}`,
-	);
-	console.log(
-		`  Total tokens (one-shot successes): ${result.summary.totalOneShotSuccessTokens.input} in / ${result.summary.totalOneShotSuccessTokens.output} out`,
-	);
-	console.log(
-		`  Tokens/task (one-shot successes): mean=${result.summary.avgOneShotSuccessTokensPerTask.total} median=${result.summary.medianOneShotSuccessTokensPerTask.total} p1=${result.summary.p1OneShotSuccessTokensPerTask.total} p99=${result.summary.p99OneShotSuccessTokensPerTask.total} reasoning=${result.summary.avgOneShotSuccessTokensPerTask.reasoning}`,
+		`  Tokens/task (best total): mean=${result.summary.avgTokensPerTask.total} median=${result.summary.medianTokensPerTask.total} p1=${result.summary.p1TokensPerTask.total} p99=${result.summary.p99TokensPerTask.total}`,
 	);
 	if (result.summary.ghostRuns > 0) {
 		console.log(`  Ghost runs (0/0/0): ${result.summary.ghostRuns}`);
@@ -550,6 +616,10 @@ async function main(): Promise<void> {
 	await postmortem.quit(0);
 }
 
+// ---------------------------------------------------------------------------
+// LiveProgress — unchanged
+// ---------------------------------------------------------------------------
+
 class LiveProgress {
 	readonly #totalRuns: number;
 	readonly #runsPerTask: number;
@@ -569,7 +639,6 @@ class LiveProgress {
 	#inputTokens: number[] = [];
 	#outputTokens: number[] = [];
 	#totalTokens: number[] = [];
-	#oneShotSuccessTokens: number[] = [];
 	#lastLineLength = 0;
 
 	constructor(totalRuns: number, runsPerTask: number) {
@@ -592,9 +661,6 @@ class LiveProgress {
 		if (event.result) {
 			if (event.result.success) {
 				this.#success += 1;
-			}
-			if (event.result.success && event.runIndex === 0) {
-				this.#oneShotSuccessTokens.push(event.result.tokens.total);
 			}
 			this.#totalInput += event.result.tokens.input;
 			this.#totalOutput += event.result.tokens.output;
@@ -699,7 +765,6 @@ class LiveProgress {
 		console.log(`  Tokens/task in:   ${fmtTokens(this.#inputTokens)}`);
 		console.log(`  Tokens/task out:  ${fmtTokens(this.#outputTokens)}`);
 		console.log(`  Tokens/task tot:  ${fmtTokens(this.#totalTokens)}`);
-		console.log(`  Tokens/task (one-shot successes): ${fmtTokens(this.#oneShotSuccessTokens)}`);
 		console.log(`  Avg time/task:    ${Math.round(this.#totalDuration / denom)}ms`);
 	}
 
@@ -752,7 +817,15 @@ class LiveProgress {
 	}
 }
 
-main().catch(async err => {
+// ---------------------------------------------------------------------------
+// Entry point — single Effect.runPromise boundary
+// ---------------------------------------------------------------------------
+
+Effect.runPromise(
+	Command.run(benchmarkCommand, { version: "0.0.1" }).pipe(
+		Effect.provide(NodeServices.layer),
+	),
+).catch(async (err) => {
 	console.error("Benchmark failed:", err);
 	await postmortem.quit(1);
 });

@@ -1,4 +1,4 @@
-import { DEFAULT_TAB_WIDTH, sanitizeText } from "@oh-my-pi/pi-utils";
+import { getIndentation, sanitizeText } from "@oh-my-pi/pi-utils";
 import * as Diff from "diff";
 import { getLanguageFromPath, highlightCode, theme } from "../../modes/theme/theme";
 import { type CodeFrameMarker, formatCodeFrameLine, replaceTabs } from "../../tools/render-utils";
@@ -13,12 +13,12 @@ const DIM_OFF = "\x1b[22m";
  * before the first non-whitespace character; remaining tabs in code
  * content are replaced with spaces (like replaceTabs).
  */
-function visualizeIndent(text: string): string {
+function visualizeIndent(text: string, filePath?: string): string {
 	const match = text.match(/^([ \t]+)/);
-	if (!match) return replaceTabs(text);
+	if (!match) return replaceTabs(text, filePath);
 	const indent = match[1];
 	const rest = text.slice(indent.length);
-	const tabWidth = DEFAULT_TAB_WIDTH;
+	const tabWidth = getIndentation(filePath);
 	const leftPadding = Math.floor(tabWidth / 2);
 	const rightPadding = Math.max(0, tabWidth - leftPadding - 1);
 	const tabMarker = `${DIM}${" ".repeat(leftPadding)}→${" ".repeat(rightPadding)}${DIM_OFF}`;
@@ -30,7 +30,7 @@ function visualizeIndent(text: string): string {
 			visible += `${DIM}·${DIM_OFF}`;
 		}
 	}
-	return `${visible}${replaceTabs(rest)}`;
+	return `${visible}${replaceTabs(rest, filePath)}`;
 }
 
 /**
@@ -153,7 +153,7 @@ export function renderDiff(diffText: string, options: RenderDiffOptions = {}): s
 			// unicode ellipsis.
 			const trimmed = line.trim();
 			const isGapRow = trimmed.length === 0 || trimmed === "..." || trimmed === "…";
-			result.push(theme.fg("toolDiffContext", isGapRow ? "…" : replaceTabs(line)));
+			result.push(theme.fg("toolDiffContext", isGapRow ? "…" : replaceTabs(line, options.filePath)));
 			i++;
 			continue;
 		}
@@ -184,24 +184,47 @@ export function renderDiff(diffText: string, options: RenderDiffOptions = {}): s
 					replaceTabs(added.content),
 				);
 
-				result.push(theme.fg("toolDiffRemoved", formatLine("-", removed.lineNum, visualizeIndent(removedLine))));
-				result.push(theme.fg("toolDiffAdded", formatLine("+", added.lineNum, visualizeIndent(addedLine))));
+				result.push(
+					theme.fg(
+						"toolDiffRemoved",
+						formatLine("-", removed.lineNum, visualizeIndent(removedLine, options.filePath)),
+					),
+				);
+				result.push(
+					theme.fg("toolDiffAdded", formatLine("+", added.lineNum, visualizeIndent(addedLine, options.filePath))),
+				);
 			} else {
 				for (const removed of removedLines) {
 					result.push(
-						theme.fg("toolDiffRemoved", formatLine("-", removed.lineNum, visualizeIndent(removed.content))),
+						theme.fg(
+							"toolDiffRemoved",
+							formatLine("-", removed.lineNum, visualizeIndent(removed.content, options.filePath)),
+						),
 					);
 				}
 				for (const added of addedLines) {
-					result.push(theme.fg("toolDiffAdded", formatLine("+", added.lineNum, visualizeIndent(added.content))));
+					result.push(
+						theme.fg(
+							"toolDiffAdded",
+							formatLine("+", added.lineNum, visualizeIndent(added.content, options.filePath)),
+						),
+					);
 				}
 			}
 		} else if (parsed.prefix === "+") {
-			result.push(theme.fg("toolDiffAdded", formatLine("+", parsed.lineNum, visualizeIndent(parsed.content))));
+			result.push(
+				theme.fg(
+					"toolDiffAdded",
+					formatLine("+", parsed.lineNum, visualizeIndent(parsed.content, options.filePath)),
+				),
+			);
 			i++;
 		} else {
 			const highlighted = contextHighlights.get(i);
-			const content = highlighted !== undefined ? replaceTabs(highlighted) : visualizeIndent(parsed.content);
+			const content =
+				highlighted !== undefined
+					? replaceTabs(highlighted, options.filePath)
+					: visualizeIndent(parsed.content, options.filePath);
 			result.push(theme.fg("toolDiffContext", formatLine(" ", parsed.lineNum, content)));
 			i++;
 		}

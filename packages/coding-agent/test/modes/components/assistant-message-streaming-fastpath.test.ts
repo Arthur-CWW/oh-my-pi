@@ -191,22 +191,37 @@ describe("AssistantMessageComponent streaming fast path", () => {
 		reused.updateContent(filled);
 		expect(reused.render(W).join("\n")).toBe(teardownRender(filled));
 	});
-	it("does not re-format an already-display thinking block (rawThinking set)", () => {
-		// buildDisplayMessage emits a thinking block whose `thinking` is already the
-		// formatted display text and stamps the original under `rawThinking`.
-		// resolveThinkingDisplay must treat `thinking` as display-ready and NOT
-		// re-run the fence-stripping formatter — otherwise the fenced content
-		// ("keep me") is stripped a second time.
-		const m = msg([
-			{
-				type: "thinking",
-				thinking: "Visible\n```\nkeep me\n```",
-				rawThinking: "raw",
-			},
-		] as unknown as AssistantMessage["content"]);
-		const component = new AssistantMessageComponent();
-		component.updateContent(m);
-		const rendered = Bun.stripANSI(component.render(W).join("\n"));
-		expect(rendered).toContain("keep me");
+	it("disposes replaced thinking-extension subtrees across long streams", () => {
+		class TimedThinkingExtension implements Component {
+			static active = 0;
+			#timer: NodeJS.Timeout | undefined;
+
+			constructor() {
+				TimedThinkingExtension.active++;
+				this.#timer = setInterval(() => {}, 60_000);
+				this.#timer.unref?.();
+			}
+
+			render(): readonly string[] {
+				return [];
+			}
+
+			dispose(): void {
+				if (!this.#timer) return;
+				clearInterval(this.#timer);
+				this.#timer = undefined;
+				TimedThinkingExtension.active--;
+			}
+		}
+
+		const component = new AssistantMessageComponent(undefined, false, undefined, [
+			() => new TimedThinkingExtension(),
+		]);
+		for (let index = 0; index < 2_000; index++) {
+			component.updateContent(msg([{ type: "thinking", thinking: `reasoning ${index}` }]));
+			expect(TimedThinkingExtension.active).toBe(1);
+		}
+		component.dispose();
+		expect(TimedThinkingExtension.active).toBe(0);
 	});
 });

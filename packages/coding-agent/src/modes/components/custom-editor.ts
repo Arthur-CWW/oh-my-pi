@@ -1,7 +1,17 @@
-import { fileURLToPath } from "node:url";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { addKeyAliases, canonicalKeyId, Editor, type KeyId, parseKey, parseKittySequence } from "@oh-my-pi/pi-tui";
-import { BracketedPasteHandler } from "@oh-my-pi/pi-tui/bracketed-paste";
+import {
+	addKeyAliases,
+	canonicalKeyId,
+	createVimState,
+	Editor,
+	parseKey,
+	parseKittySequence,
+	reduceVimKey,
+	type KeyId,
+	type VimEffect,
+	type VimKey,
+	type VimMode,
+	type VimPosition,
+} from "@oh-my-pi/pi-tui";
 import type { AppKeybinding } from "../../config/keybindings";
 import { isSettingsInitialized, settings } from "../../config/settings";
 import { imageReferenceHyperlink, PLACEHOLDER_REGEX, renderPlaceholders } from "../image-references";
@@ -11,6 +21,7 @@ import { fgOrPlain } from "../theme/theme";
 type ConfigurableEditorAction = Extract<
 	AppKeybinding,
 	| "app.interrupt"
+	| "ui.dismiss"
 	| "app.clear"
 	| "app.exit"
 	| "app.suspend"
@@ -25,14 +36,14 @@ type ConfigurableEditorAction = Extract<
 	| "app.editor.external"
 	| "app.history.search"
 	| "app.message.dequeue"
-	| "app.retry"
 	| "app.clipboard.pasteImage"
 	| "app.clipboard.pasteTextRaw"
 	| "app.clipboard.copyPrompt"
 >;
 
 const DEFAULT_ACTION_KEYS: Record<ConfigurableEditorAction, KeyId[]> = {
-	"app.interrupt": ["escape"],
+	"app.interrupt": ["ctrl+q"],
+	"ui.dismiss": ["escape"],
 	"app.clear": ["ctrl+c"],
 	"app.exit": ["ctrl+d"],
 	"app.suspend": ["ctrl+z"],
@@ -47,7 +58,6 @@ const DEFAULT_ACTION_KEYS: Record<ConfigurableEditorAction, KeyId[]> = {
 	"app.editor.external": ["ctrl+g"],
 	"app.history.search": ["ctrl+r"],
 	"app.message.dequeue": ["alt+up"],
-	"app.retry": ["alt+r"],
 	"app.clipboard.pasteImage": ["ctrl+v"],
 	"app.clipboard.pasteTextRaw": ["ctrl+shift+v", "alt+shift+v"],
 	"app.clipboard.copyPrompt": ["alt+shift+c"],
@@ -64,181 +74,75 @@ function buildMatchKeys(keys: readonly KeyId[]): Set<string> {
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_IMAGE_PATH_REGEX = /\.(?:png|jpe?g|gif|webp)$/i;
+const BRACKETED_IMAGE_PATH_BOUNDARY_REGEX = /\.(?:png|jpe?g|gif|webp)(?=$|["']?\s)/gi;
 const SHELL_ESCAPED_PATH_CHAR_REGEX = /\\([\\\s'"()[\]{}&;<>|?*!$`])/g;
-const URI_SCHEME_REGEX = /^[a-z][a-z0-9+.-]*:/i;
-const FILE_URI_REGEX = /^file:\/\//i;
-const WINDOWS_DRIVE_PATH_REGEX = /^[a-z]:[\\/]/i;
-/**
- * Whole-string anchor for paths that are unambiguously absolute. Restricts the
- * "treat the entire clipboard text as one path" branch of
- * {@link extractImagePathFromText} to inputs that start with a clearly-anchored
- * filesystem prefix, so prose containing a path-shaped fragment (e.g.
- * "see /tmp/x.png") never hijacks the smart fallback.
- */
-const ABSOLUTE_PATH_PREFIX_REGEX = /^(?:\/|~\/|file:\/\/|\\\\|[A-Za-z]:[\\/])/;
 
-/** Max gap (ms) between two spaces for the later one to count as OS key auto-repeat rather than a
- *  deliberate press. OS auto-repeat is fast; a deliberate tap (even a fast one) is slower. */
-export const SPACE_REPEAT_MAX_GAP_MS = 120;
-/** Two consecutive inter-space gaps are "mechanical" (machine-driven auto-repeat) when both are
- *  within {@link SPACE_REPEAT_MAX_GAP_MS} and differ by no more than this — an absolute jitter floor
- *  or, for slower repeat rates, {@link SPACE_REPEAT_JITTER_RATIO} of the smaller gap. OS key-repeat
- *  is metronomic; a human smashing the bar is fast but irregular, so its deltas never stay this
- *  steady. */
-export const SPACE_REPEAT_JITTER_MS = 18;
-export const SPACE_REPEAT_JITTER_RATIO = 0.35;
-/** Consecutive mechanical (fast + steady) deltas that confirm the space bar is held and start
- *  recording. Needs a sustained metronomic cadence, so jittery smashing and deliberate taps never
- *  reach it. */
-export const SPACE_HOLD_MECHANICAL_RUN = 2;
+/** Plain spaces from one auto-repeat run that trigger the space-hold push-to-talk STT gesture.
+ *  Holding the space bar makes the terminal emit a burst of spaces; once more than this many land
+ *  in the editor we treat it as "space held", track them back out, and start recording. */
+export const SPACE_HOLD_THRESHOLD = 5;
 /** Idle gap (ms) after the last repeated space that counts as the space bar being released, ending
  *  the push-to-talk recording. Must comfortably exceed the OS key-repeat interval. */
 export const SPACE_HOLD_RELEASE_MS = 250;
-
-/** Whether two consecutive inter-space gaps look machine-driven: both within the auto-repeat band
- *  and steady enough (small absolute or proportional difference). OS key-repeat is metronomic, so
- *  its successive deltas match closely; human smashing is fast but irregular and deliberate taps are
- *  too slow, so neither passes. */
-function gapsAreMechanical(gap: number, prevGap: number): boolean {
-	if (gap > SPACE_REPEAT_MAX_GAP_MS || prevGap > SPACE_REPEAT_MAX_GAP_MS) return false;
-	const tolerance = Math.max(SPACE_REPEAT_JITTER_MS, Math.min(gap, prevGap) * SPACE_REPEAT_JITTER_RATIO);
-	return Math.abs(gap - prevGap) <= tolerance;
-}
 
 function isPastedPathSeparator(char: string | undefined): boolean {
 	return char === undefined || char === " " || char === "\t" || char === "\r" || char === "\n";
 }
 
-function normalizePastedPath(path: string): string {
+function imagePathBoundaryEnd(payload: string, segmentStart: number, extensionEnd: number): number | undefined {
+	const quote = payload[segmentStart];
+	const afterExtension = payload[extensionEnd];
+	if (quote === '"' || quote === "'") {
+		return afterExtension === quote && isPastedPathSeparator(payload[extensionEnd + 1])
+			? extensionEnd + 1
+			: undefined;
+	}
+	if (isPastedPathSeparator(afterExtension)) return extensionEnd;
+	return undefined;
+}
+
+function normalizePastedImagePath(path: string): string {
 	const trimmed = path.trim();
 	const first = trimmed[0];
 	const last = trimmed[trimmed.length - 1];
 	const unquoted =
 		trimmed.length > 1 && (first === '"' || first === "'") && last === first ? trimmed.slice(1, -1) : trimmed;
-	// `file://` URL → local filesystem path. Mirrors Codex's
-	// `normalize_pasted_path` (codex-rs/tui/src/clipboard_paste.rs) so a
-	// pasteboard whose text representation is a `file:///Users/…/img.png`
-	// URL — common when terminals forward the macOS pasteboard's
-	// `public.file-url` representation — loads as the file itself rather
-	// than failing in `loadImageInput` with a literal-`file://` path.
-	if (FILE_URI_REGEX.test(unquoted)) {
-		try {
-			return fileURLToPath(unquoted);
-		} catch {
-			// Malformed file URL: drop through to the shell-unescape branch
-			// so the caller can still reject it as a non-explicit path.
-		}
-	}
 	return unquoted.replace(SHELL_ESCAPED_PATH_CHAR_REGEX, "$1");
 }
 
-function isExplicitPastedPath(path: string): boolean {
-	if (WINDOWS_DRIVE_PATH_REGEX.test(path) || FILE_URI_REGEX.test(path)) return true;
-	if (URI_SCHEME_REGEX.test(path)) return false;
-	return path.includes("/") || path.includes("\\");
-}
-
-function isImagePath(path: string): boolean {
-	return BRACKETED_IMAGE_PATH_REGEX.test(path);
-}
-
-function splitPastedPathSegments(payload: string): string[] | undefined {
-	const segments: string[] = [];
-	let segment = "";
-	let quote: string | undefined;
-	let escaped = false;
-
-	for (let i = 0; i < payload.length; i++) {
-		const char = payload[i];
-		if (escaped) {
-			segment += char;
-			escaped = false;
-			continue;
-		}
-		if (char === "\\") {
-			segment += char;
-			escaped = true;
-			continue;
-		}
-		if (quote) {
-			segment += char;
-			if (char === quote) quote = undefined;
-			continue;
-		}
-		if (char === '"' || char === "'") {
-			segment += char;
-			quote = char;
-			continue;
-		}
-		if (isPastedPathSeparator(char)) {
-			if (segment) {
-				segments.push(segment);
-				segment = "";
-			}
-			continue;
-		}
-		segment += char;
-	}
-
-	if (escaped || quote) return undefined;
-	if (segment) segments.push(segment);
-	return segments.length > 0 ? segments : undefined;
-}
-
-/**
- * Extract whitespace/quoted-separated path-like segments from `payload`.
- * Shared backend of {@link extractBracketedPastePaths} and {@link extractPastePathsFromText}.
- * Returns the segments only when EVERY segment looks like an explicit path
- * (`/`, `\`, drive letter, or `file://`); otherwise undefined so the caller
- * falls back to a plain text paste.
- */
-function extractExplicitPathSegments(payload: string): string[] | undefined {
-	const pasted = payload.trim();
-	if (!pasted) return undefined;
-
-	const segments = splitPastedPathSegments(pasted);
-	if (!segments) return undefined;
-
-	const paths: string[] = [];
-	for (const segment of segments) {
-		const path = normalizePastedPath(segment);
-		if (!path || !isExplicitPastedPath(path)) return undefined;
-		paths.push(path);
-	}
-	return paths;
-}
-
-/**
- * Extract image-or-other file paths from plain (un-bracketed) clipboard text.
- * Mirrors {@link extractBracketedPastePaths} for terminals/handlers that
- * already stripped the `\x1b[200~`…`\x1b[201~` markers (e.g. clipboard text
- * read directly via `pbpaste`/PowerShell).
- */
-export function extractPastePathsFromText(text: string): string[] | undefined {
-	return extractExplicitPathSegments(text);
-}
-
-export function extractBracketedPastePaths(data: string): string[] | undefined {
+export function extractBracketedImagePastePaths(data: string): string[] | undefined {
 	if (!data.startsWith(BRACKETED_PASTE_START)) return undefined;
 	const endIndex = data.indexOf(BRACKETED_PASTE_END, BRACKETED_PASTE_START.length);
 	if (endIndex === -1 || endIndex + BRACKETED_PASTE_END.length !== data.length) return undefined;
-	return extractExplicitPathSegments(data.slice(BRACKETED_PASTE_START.length, endIndex));
-}
 
-export function extractBracketedImagePastePaths(data: string): string[] | undefined {
-	const paths = extractBracketedPastePaths(data);
-	return paths?.every(isImagePath) ? paths : undefined;
-}
+	const pasted = data.slice(BRACKETED_PASTE_START.length, endIndex).trim();
+	if (!pasted) return undefined;
 
-/**
- * Same shape as {@link extractBracketedImagePastePaths} but operates on a
- * payload that has already been stripped of the `\x1b[200~` / `\x1b[201~`
- * markers — used by the assembled-paste router in {@link CustomEditor.handleInput}
- * so split bracketed pastes get the same image-path detection as single-chunk ones.
- */
-export function extractImagePastePathsFromText(text: string): string[] | undefined {
-	const paths = extractPastePathsFromText(text);
-	return paths?.every(isImagePath) ? paths : undefined;
+	const paths: string[] = [];
+	let segmentStart = 0;
+	BRACKETED_IMAGE_PATH_BOUNDARY_REGEX.lastIndex = 0;
+	for (
+		let match = BRACKETED_IMAGE_PATH_BOUNDARY_REGEX.exec(pasted);
+		match;
+		match = BRACKETED_IMAGE_PATH_BOUNDARY_REGEX.exec(pasted)
+	) {
+		const extensionEnd = match.index + match[0].length;
+		const boundaryEnd = imagePathBoundaryEnd(pasted, segmentStart, extensionEnd);
+		if (boundaryEnd === undefined) continue;
+
+		const path = normalizePastedImagePath(pasted.slice(segmentStart, boundaryEnd));
+		if (!path || !BRACKETED_IMAGE_PATH_REGEX.test(path)) return undefined;
+		paths.push(path);
+
+		segmentStart = boundaryEnd;
+		while (segmentStart < pasted.length && isPastedPathSeparator(pasted[segmentStart])) {
+			segmentStart++;
+		}
+		BRACKETED_IMAGE_PATH_BOUNDARY_REGEX.lastIndex = segmentStart;
+	}
+
+	if (paths.length === 0 || segmentStart !== pasted.length) return undefined;
+	return paths;
 }
 
 export function extractBracketedImagePastePath(data: string): string | undefined {
@@ -247,65 +151,19 @@ export function extractBracketedImagePastePath(data: string): string | undefined
 }
 
 /**
- * Return a single image file path when `text` is exactly one explicit path
- * pointing at a supported image extension (`.png`, `.jpg`/`.jpeg`, `.gif`,
- * `.webp`). Used by the keybind-driven clipboard image paste path so a
- * clipboard whose only payload is an image file (e.g. Finder `Cmd+C` on
- * macOS) attaches the image instead of pasting the path as literal text.
- *
- * Two-stage detection:
- *
- * 1. Splitter pass (shared with the bracketed-paste handler) — handles
- *    quoted paths, shell-escaped spaces, and unambiguous single tokens.
- *    Returns the single image path when it parses cleanly; explicitly
- *    returns `undefined` when the splitter found multiple segments (so
- *    ambiguous multi-path clipboard text like `/tmp/a.png /tmp/b.png`
- *    still falls through to the text fallback instead of being mis-loaded
- *    as one giant path).
- * 2. Whole-text-as-path pass — only reached when the splitter failed
- *    (every segment must look like an explicit path; an unescaped space in
- *    a real path breaks that). Restricted to inputs anchored by
- *    {@link ABSOLUTE_PATH_PREFIX_REGEX} so prose containing a path-shaped
- *    fragment ("see /tmp/x.png") never hijacks the smart fallback. This
- *    is what recovers macOS screenshot filenames like
- *    `/Users/me/Desktop/Screenshot 2026-06-25 at 1.23.45 PM.png`.
- */
-export function extractImagePathFromText(text: string): string | undefined {
-	const paths = extractPastePathsFromText(text);
-	if (paths?.length === 1 && isImagePath(paths[0])) return paths[0];
-	if (paths !== undefined) return undefined;
-	const trimmed = text.trim();
-	if (!trimmed || /[\r\n]/.test(trimmed) || !ABSOLUTE_PATH_PREFIX_REGEX.test(trimmed)) return undefined;
-	const wholePath = normalizePastedPath(trimmed);
-	if (wholePath && isExplicitPastedPath(wholePath) && isImagePath(wholePath)) {
-		return wholePath;
-	}
-	return undefined;
-}
-
-/**
  * Custom editor that handles configurable app-level shortcuts for coding-agent.
  */
+type CustomVimTarget = Extract<VimEffect, { type: "delete" | "change" | "yank" }>["target"];
+type CustomVimSelection = {
+	text: string;
+	linewise: boolean;
+	startOffset: number;
+	endOffset: number;
+	startLine: number;
+	endLine: number;
+};
 export class CustomEditor extends Editor {
 	imageLinks?: readonly (string | undefined)[];
-
-	/** Draft images pasted into the composer, consumed on submit. Co-located with
-	 *  {@link imageLinks} so every piece of draft-image state lives on the editor. */
-	pendingImages: ImageContent[] = [];
-	/** Per-image source links (file:// targets) parallel to {@link pendingImages};
-	 *  `undefined` entries are images without a backing reference yet. */
-	pendingImageLinks: (string | undefined)[] = [];
-
-	/** Clear the composer draft: optionally commit `historyText` to history, then
-	 *  reset the editor text and all pending draft-image state. The shared tail of
-	 *  every "message submitted" path; pass no argument for a plain discard. */
-	clearDraft(historyText?: string): void {
-		if (historyText !== undefined) this.addToHistory(historyText);
-		this.setText("");
-		this.imageLinks = undefined;
-		this.pendingImages = [];
-		this.pendingImageLinks = [];
-	}
 
 	/** Treat image/paste markers as indivisible: a stray backspace deletes the whole token
 	 *  instead of corrupting `[Paste #1, +30 lines]` into plain text. */
@@ -318,14 +176,13 @@ export class CustomEditor extends Editor {
 	/** Time for the gradient to sweep one full cycle across each keyword. */
 	static readonly SHIMMER_PERIOD_MS = 1800;
 
-	/** Per-render scratch flag: did any layout line in this render contain a magic
-	 *  keyword that should shimmer? Reset by {@link #scheduleShimmerIfNeeded} each
-	 *  time a frame is queued. */
-	#shimmerTimer: Timer | undefined;
+	/** Pending magic-keyword shimmer repaint timer. */
+	#shimmerTimer: ReturnType<typeof setTimeout> | undefined;
 	/** Repaint hook the host wires once at construction. Called from the shimmer
 	 *  timer to request the next animation frame. Undefined when nobody is
 	 *  listening (tests, headless callers); the timer chain still self-cleans. */
 	#requestShimmerRepaint: (() => void) | undefined;
+	#disposed = false;
 
 	/** Gradient-highlight the "ultrathink" / "orchestrate" / "workflowz" keywords as the user types
 	 *  them, skipping any occurrence inside code spans, fenced blocks, or XML sections. Also make
@@ -336,7 +193,7 @@ export class CustomEditor extends Editor {
 	 *  stops the animation on its own. The static glow itself runs even when shimmering is gated
 	 *  off, matching existing behavior for the editor and sent bubbles. */
 	decorateText = (text: string): string => {
-		const animated = this.focused && this.#shimmerEnabled() && hasMagicKeyword(this.getText());
+		const animated = this.#shouldShimmer();
 		const phase = animated ? (Date.now() % CustomEditor.SHIMMER_PERIOD_MS) / CustomEditor.SHIMMER_PERIOD_MS : 0;
 		if (animated) this.#scheduleShimmerFrame();
 		return renderPlaceholders(text, {
@@ -372,6 +229,7 @@ export class CustomEditor extends Editor {
 	 *  once after construction (and again after `setEditorComponent` swaps the
 	 *  editor). Passing `undefined` clears any pending frame. */
 	setShimmerRepaintHandler(handler: (() => void) | undefined): void {
+		if (this.#disposed) return;
 		this.#requestShimmerRepaint = handler;
 		if (!handler && this.#shimmerTimer) {
 			clearTimeout(this.#shimmerTimer);
@@ -379,18 +237,24 @@ export class CustomEditor extends Editor {
 		}
 	}
 
+	#shouldShimmer(): boolean {
+		return !this.#disposed && this.focused && this.#shimmerEnabled() && hasMagicKeyword(this.getText());
+	}
+
 	/** Schedule one shimmer frame if none is already pending. The next render
 	 *  decides whether to schedule another, so the chain stops by itself when
 	 *  `focused` flips off or the keyword leaves the buffer. */
 	#scheduleShimmerFrame(): void {
-		if (this.#shimmerTimer || !this.#requestShimmerRepaint) return;
+		if (this.#shimmerTimer || !this.#requestShimmerRepaint || this.#disposed) return;
 		this.#shimmerTimer = setTimeout(() => {
 			this.#shimmerTimer = undefined;
+			if (!this.#shouldShimmer()) return;
 			this.#requestShimmerRepaint?.();
 		}, CustomEditor.SHIMMER_FRAME_MS);
 		this.#shimmerTimer.unref?.();
 	}
-	onEscape?: () => void;
+	onInterrupt?: (key: KeyId) => void;
+	onEscape?: (key: KeyId) => void;
 	onClear?: () => void;
 	onExit?: () => void;
 	onDisplayReset?: () => void;
@@ -412,10 +276,8 @@ export class CustomEditor extends Editor {
 	onPasteImagePath?: (path: string) => void | Promise<void>;
 	/** Called when the configured raw text-paste shortcut is pressed. */
 	onPasteTextRaw?: () => void;
-	/** Called when the configured dequeue shortcut is pressed. */
-	onDequeue?: () => void;
-	/** Called when the configured retry shortcut is pressed. */
-	onRetry?: () => void;
+	/** Called when the configured dequeue shortcut is pressed. Return false to preserve editor history navigation. */
+	onDequeue?: () => boolean;
 	/** Called when Caps Lock is pressed. */
 	onCapsLock?: () => void;
 	/** Called when left-arrow is pressed while the editor is empty (cursor necessarily at start). */
@@ -434,27 +296,8 @@ export class CustomEditor extends Editor {
 	/** Custom key handlers from extensions and non-built-in app actions. */
 	#customKeyHandlers = new Map<KeyId, () => void>();
 	#customMatchKeys = new Map<string, () => void>();
-	/** Bracketed-paste assembler that runs ahead of the inherited handler so terminals which
-	 *  deliver `\x1b[200~` and `\x1b[201~` in separate stdin chunks still resolve to a single
-	 *  assembled payload here; the empty-paste / image-path branches must see the full content,
-	 *  not the raw single-chunk byte sequence. */
-	#pasteHandler = new BracketedPasteHandler();
-	/** Number of async pastes (clipboard-image reads / image-path attachments) currently in flight.
-	 *  While > 0, `handleInput` queues subsequent keystrokes into {@link #pendingInput} instead of
-	 *  dispatching them so a trailing `Enter` after `Cmd+V` can't submit before the image lands on
-	 *  `pendingImages` (Codex PR #3602 review). */
-	#pasteInFlight = 0;
-	/** Input chunks deferred behind an in-flight paste, drained in FIFO order once the paste
-	 *  count returns to zero. */
-	#pendingInput: string[] = [];
-	/** Spaces actually inserted in the current run; tracked back out when a hold is recognized. */
+	/** Consecutive plain spaces inserted in the current run; any other key resets it. */
 	#spaceRunInserted = 0;
-	/** Consecutive "mechanical" deltas (fast + steady); a sustained run of these confirms a held bar. */
-	#mechanicalRun = 0;
-	/** Inter-space gap (ms) of the previous space pair, compared against the next to judge steadiness. */
-	#prevSpaceGap: number | undefined;
-	/** Monotonic timestamp (ms) of the last space, to measure the gap to the next one. */
-	#lastSpaceAt = Number.NEGATIVE_INFINITY;
 	/** True while a recognized space-hold push-to-talk recording is in progress. */
 	#spaceHoldActive = false;
 	/** Idle timer that fires `onSpaceHoldEnd` once repeated spaces stop arriving. */
@@ -468,6 +311,475 @@ export class CustomEditor extends Editor {
 			buildMatchKeys(keys),
 		]),
 	);
+	#vimEnabled = false;
+	#vimState = createVimState();
+	#vimInsertGroupOpen = false;
+	#vimVisualAnchor: VimPosition | undefined;
+
+	/** Optional host bridge for the named system clipboard register (+). */
+	onVimClipboardRead?: () => string | undefined;
+	onVimClipboardWrite?: (text: string, linewise: boolean) => void;
+
+	setVimEnabled(on: boolean): void {
+		if (on === this.#vimEnabled) return;
+		if (!on && this.#vimInsertGroupOpen) this.#closeVimInsertGroup(false);
+		this.#vimEnabled = on;
+	}
+
+	isVimEnabled(): boolean {
+		return this.#vimEnabled;
+	}
+
+	getVimMode(): VimMode | null {
+		return this.#vimEnabled ? this.#vimState.mode : null;
+	}
+
+	#startVimInsertGroup(): void {
+		if (this.#vimInsertGroupOpen) return;
+		this.beginUndoGroup();
+		this.#vimInsertGroupOpen = true;
+	}
+
+	#closeVimInsertGroup(normalizeCursor: boolean): void {
+		if (this.#vimInsertGroupOpen) {
+			this.endUndoGroup();
+			this.#vimInsertGroupOpen = false;
+		}
+		if (normalizeCursor) this.#normalizeVimNormalCursor();
+	}
+
+	#normalizeVimNormalCursor(): void {
+		const cursor = this.getCursor();
+		const line = this.getLines()[cursor.line] ?? "";
+		if (line.length > 0 && cursor.col >= line.length) {
+			this.#moveVimCursor({ line: cursor.line, col: line.length - 1 });
+		}
+	}
+
+	#vimKey(data: string, canonical: string | undefined): VimKey {
+		const printable = data.length === 1 && data.charCodeAt(0) >= 32 ? data : undefined;
+		if (!canonical) return { char: data };
+		const parts = canonical.split("+");
+		const raw = parts.pop() ?? canonical;
+		return {
+			...(printable === undefined ? { key: raw } : { char: printable }),
+			ctrl: parts.includes("ctrl"),
+			alt: parts.includes("alt"),
+			meta: parts.includes("meta") || parts.includes("super"),
+			shift: parts.includes("shift"),
+		};
+	}
+
+	#isSinglePrintable(data: string): boolean {
+		return data.length === 1 && data.charCodeAt(0) >= 32;
+	}
+
+	#applyVimPassthrough(data: string, mode: VimMode): void {
+		if (mode === "insert") {
+			this.#startVimInsertGroup();
+			super.handleInput(data);
+			return;
+		}
+		// Normal-mode Escape is a Vim grammar cancel/consume key, not a
+		// request for the base editor or its app-level handlers to act.
+		if (mode === "normal" && data === "\x1b") return;
+		if (!this.#isSinglePrintable(data)) super.handleInput(data);
+	}
+
+	#moveVimCursor(position: VimPosition): void {
+		const lines = this.getLines();
+		const targetLine = Math.max(0, Math.min(position.line, lines.length - 1));
+		const targetCol = Math.max(0, Math.min(position.col, lines[targetLine]?.length ?? 0));
+		let cursor = this.getCursor();
+		while (cursor.line > 0) {
+			super.handleInput("\x1b[A");
+			cursor = this.getCursor();
+		}
+		while (cursor.line < targetLine) {
+			super.handleInput("\x1b[B");
+			cursor = this.getCursor();
+			if (cursor.line === targetLine) break;
+		}
+		this.moveToLineStart();
+		for (let col = 0; col < targetCol; col++) super.handleInput("\x1b[C");
+	}
+
+	#vimOffset(position: VimPosition): number {
+		const lines = this.getLines();
+		let offset = 0;
+		for (let line = 0; line < position.line; line++) offset += (lines[line]?.length ?? 0) + 1;
+		return offset + position.col;
+	}
+
+	#vimPosition(offset: number): VimPosition {
+		const text = this.getText();
+		const clamped = Math.max(0, Math.min(offset, text.length));
+		let line = 0;
+		let lineStart = 0;
+		for (;;) {
+			const newline = text.indexOf("\n", lineStart);
+			if (newline === -1 || clamped <= newline) return { line, col: clamped - lineStart };
+			line++;
+			lineStart = newline + 1;
+		}
+	}
+
+	#vimWordChar(char: string | undefined, wide: boolean): boolean {
+		if (char === undefined || char === "\n" || /\s/.test(char)) return false;
+		return wide ? true : /[A-Za-z0-9_]/.test(char);
+	}
+
+	#vimWordForward(offset: number, count: number, wide: boolean): number {
+		const text = this.getText();
+		let result = offset;
+		for (let n = 0; n < count; n++) {
+			if (result < text.length && this.#vimWordChar(text[result], wide)) {
+				while (result < text.length && this.#vimWordChar(text[result], wide)) result++;
+			}
+			while (result < text.length && !this.#vimWordChar(text[result], wide)) result++;
+		}
+		return result;
+	}
+
+	#vimWordBackward(offset: number, count: number, wide: boolean): number {
+		const text = this.getText();
+		let result = offset;
+		for (let n = 0; n < count; n++) {
+			result = Math.max(0, result - 1);
+			while (result > 0 && !this.#vimWordChar(text[result], wide)) result--;
+			while (result > 0 && this.#vimWordChar(text[result - 1], wide)) result--;
+		}
+		return result;
+	}
+
+	#vimWordEnd(offset: number, count: number, wide: boolean): number {
+		const text = this.getText();
+		let result = offset;
+		for (let n = 0; n < count; n++) {
+			if (result < text.length && this.#vimWordChar(text[result], wide)) {
+				while (result + 1 < text.length && this.#vimWordChar(text[result + 1], wide)) result++;
+			} else {
+				while (result < text.length && !this.#vimWordChar(text[result], wide)) result++;
+				if (result < text.length) while (result + 1 < text.length && this.#vimWordChar(text[result + 1], wide)) result++;
+			}
+		}
+		return result;
+	}
+
+	#vimMotion(position: VimPosition, motion: string, count: number, explicit = false): VimPosition {
+		const lines = this.getLines();
+		const line = lines[position.line] ?? "";
+		switch (motion) {
+			case "h":
+				return { line: position.line, col: Math.max(0, position.col - count) };
+			case "l":
+				return { line: position.line, col: Math.min(line.length, position.col + count) };
+			case "j":
+				return {
+					line: Math.min(lines.length - 1, position.line + count),
+					col: Math.min(lines[Math.min(lines.length - 1, position.line + count)]?.length ?? 0, position.col),
+				};
+			case "k":
+				return {
+					line: Math.max(0, position.line - count),
+					col: Math.min(lines[Math.max(0, position.line - count)]?.length ?? 0, position.col),
+				};
+			case "0":
+				return { line: position.line, col: 0 };
+			case "^": {
+				const first = line.search(/\S/);
+				return { line: position.line, col: first < 0 ? 0 : first };
+			}
+			case "$":
+				return { line: position.line, col: line.length };
+			case "w":
+				return this.#vimPosition(this.#vimWordForward(this.#vimOffset(position), count, false));
+			case "W":
+				return this.#vimPosition(this.#vimWordForward(this.#vimOffset(position), count, true));
+			case "b":
+				return this.#vimPosition(this.#vimWordBackward(this.#vimOffset(position), count, false));
+			case "B":
+				return this.#vimPosition(this.#vimWordBackward(this.#vimOffset(position), count, true));
+			case "e":
+				return this.#vimPosition(this.#vimWordEnd(this.#vimOffset(position), count, false));
+			case "E":
+				return this.#vimPosition(this.#vimWordEnd(this.#vimOffset(position), count, true));
+			case "gg":
+				return { line: explicit ? Math.min(lines.length - 1, count - 1) : 0, col: 0 };
+			case "G":
+				return {
+					line: explicit ? Math.min(lines.length - 1, count - 1) : lines.length - 1,
+					col: 0,
+				};
+			default:
+				return position;
+		}
+	}
+
+	#vimSelection(target: CustomVimTarget): {
+		text: string;
+		linewise: boolean;
+		startOffset: number;
+		endOffset: number;
+		startLine: number;
+		endLine: number;
+	} | undefined {
+		const cursor = this.getCursor();
+		const lines = this.getLines();
+		if (target.kind === "line" || target.kind === "vertical" || target.kind === "goto" || (target.kind === "visual" && target.linewise)) {
+			let startLine = cursor.line;
+			let endLine = cursor.line;
+			if (target.kind === "line") endLine = Math.min(lines.length - 1, cursor.line + target.count - 1);
+			if (target.kind === "vertical") {
+				if (target.direction === "down") endLine = Math.min(lines.length - 1, cursor.line + target.count);
+				else startLine = Math.max(0, cursor.line - target.count);
+			}
+			if (target.kind === "goto") {
+				const targetLine = target.line === "last" ? lines.length - 1 : Math.max(0, Math.min(lines.length - 1, target.line));
+				if (targetLine < cursor.line) startLine = targetLine;
+				else endLine = targetLine;
+			}
+			if (target.kind === "visual") {
+				const anchor = this.#vimVisualAnchor ?? cursor;
+				startLine = Math.min(anchor.line, cursor.line);
+				endLine = Math.max(anchor.line, cursor.line);
+			}
+			return {
+				text: lines.slice(startLine, endLine + 1).join("\n"),
+				linewise: true,
+				startOffset: this.#vimOffset({ line: startLine, col: 0 }),
+				endOffset: this.#vimOffset({ line: endLine, col: lines[endLine]?.length ?? 0 }),
+				startLine,
+				endLine,
+			};
+		}
+		let startOffset: number;
+		let endOffset: number;
+		if (target.kind === "characters") {
+			const cursorOffset = this.#vimOffset(cursor);
+			if (target.direction === "forward") {
+				startOffset = cursorOffset;
+				endOffset = Math.min(this.getText().length, cursorOffset + target.count);
+			} else {
+				startOffset = Math.max(0, cursorOffset - target.count);
+				endOffset = cursorOffset;
+			}
+		} else if (target.kind === "line-end") {
+			startOffset = this.#vimOffset(cursor);
+			endOffset = this.#vimOffset({ line: cursor.line, col: (lines[cursor.line] ?? "").length });
+		} else if (target.kind === "visual") {
+			const anchor = this.#vimVisualAnchor ?? cursor;
+			const anchorOffset = this.#vimOffset(anchor);
+			const cursorOffset = this.#vimOffset(cursor);
+			startOffset = Math.min(anchorOffset, cursorOffset);
+			endOffset = Math.max(anchorOffset, cursorOffset) + 1;
+			endOffset = Math.min(this.getText().length, endOffset);
+		} else {
+			const endpoint = this.#vimMotion(cursor, target.motion, target.count);
+			const cursorOffset = this.#vimOffset(cursor);
+			const endpointOffset = this.#vimOffset(endpoint);
+			if (target.motion === "h" || target.motion === "b" || target.motion === "B" || target.motion === "0" || target.motion === "^") {
+				startOffset = Math.min(cursorOffset, endpointOffset);
+				endOffset = Math.max(cursorOffset, endpointOffset);
+			} else if (target.motion === "e" || target.motion === "E") {
+				startOffset = Math.min(cursorOffset, endpointOffset);
+				endOffset = Math.min(this.getText().length, Math.max(cursorOffset, endpointOffset) + 1);
+			} else {
+				startOffset = Math.min(cursorOffset, endpointOffset);
+				endOffset = Math.max(cursorOffset, endpointOffset);
+			}
+		}
+		if (endOffset <= startOffset) return undefined;
+		const start = this.#vimPosition(startOffset);
+		const end = this.#vimPosition(endOffset);
+		return {
+			text: this.getText().slice(startOffset, endOffset),
+			linewise: false,
+			startOffset,
+			endOffset,
+			startLine: start.line,
+			endLine: end.line,
+		};
+	}
+
+	#writeVimRegister(text: string, linewise: boolean, registerName?: "+"): void {
+		this.#vimState = { ...this.#vimState, register: { text, linewise } };
+		if (registerName === "+") this.onVimClipboardWrite?.(text, linewise);
+	}
+
+	#deleteVimSelection(selection: CustomVimSelection): void {
+		if (selection.linewise) {
+			const lines = this.getLines();
+			const next = lines.slice(0, selection.startLine).concat(lines.slice(selection.endLine + 1));
+			this.setText(next.join("\n"));
+			this.#moveVimCursor({ line: Math.min(selection.startLine, next.length - 1), col: 0 });
+		} else {
+			const text = this.getText();
+			this.setText(text.slice(0, selection.startOffset) + text.slice(selection.endOffset));
+			this.#moveVimCursor(this.#vimPosition(Math.min(selection.startOffset, this.getText().length)));
+		}
+	}
+
+	#applyVimOperation(
+		type: "delete" | "change" | "yank",
+		target: CustomVimTarget,
+		registerName?: "+",
+	): boolean {
+		const selection = this.#vimSelection(target);
+		if (!selection) return false;
+		this.#writeVimRegister(selection.text, selection.linewise, registerName);
+		if (type === "yank") return true;
+		if (type === "change") {
+			this.#startVimInsertGroup();
+			this.#deleteVimSelection(selection);
+			return true;
+		}
+		this.beginUndoGroup();
+		this.#deleteVimSelection(selection);
+		this.endUndoGroup();
+		return true;
+	}
+
+	#applyVimPut(effect: Extract<VimEffect, { type: "put" }>): void {
+		if (!effect.register.text) return;
+		this.beginUndoGroup();
+		if (effect.register.linewise) {
+			const lines = this.getLines();
+			const registerLines = effect.register.text.split("\n");
+			const inserted: string[] = [];
+			for (let n = 0; n < effect.count; n++) inserted.push(...registerLines);
+			const cursor = this.getCursor();
+			const index = effect.before ? cursor.line : cursor.line + 1;
+			lines.splice(index, 0, ...inserted);
+			this.setText(lines.join("\n"));
+			this.#moveVimCursor({ line: index, col: 0 });
+		} else {
+			const text = effect.register.text.repeat(effect.count);
+			const cursorOffset = this.#vimOffset(this.getCursor());
+			const point = effect.before ? cursorOffset : Math.min(this.getText().length, cursorOffset + 1);
+			this.setText(this.getText().slice(0, point) + text + this.getText().slice(point));
+			this.#moveVimCursor(this.#vimPosition(point + Math.max(0, text.length - 1)));
+		}
+		this.endUndoGroup();
+	}
+
+	#applyVimReplace(char: string, count: number): void {
+		const cursor = this.getCursor();
+		const line = this.getLines()[cursor.line] ?? "";
+		const length = Math.min(count, Math.max(0, line.length - cursor.col));
+		if (length === 0) return;
+		this.beginUndoGroup();
+		const start = this.#vimOffset(cursor);
+		const text = this.getText();
+		this.setText(text.slice(0, start) + char.repeat(length) + text.slice(start + length));
+		this.#moveVimCursor({ line: cursor.line, col: cursor.col + length - 1 });
+		this.endUndoGroup();
+	}
+
+	#applyVimEnterInsert(variant: Extract<VimEffect, { type: "enter-insert" }>["variant"], count: number): void {
+		this.#startVimInsertGroup();
+		const cursor = this.getCursor();
+		const lines = this.getLines();
+		switch (variant) {
+			case "line-start":
+				this.moveToLineStart();
+				break;
+			case "line-end":
+				this.moveToLineEnd();
+				break;
+			case "after-cursor":
+				if ((lines[cursor.line] ?? "").length > cursor.col) this.#moveVimCursor({ line: cursor.line, col: cursor.col + 1 });
+				break;
+			case "open-below": {
+				const inserted = Array.from({ length: count }, () => "");
+				lines.splice(cursor.line + 1, 0, ...inserted);
+				this.setText(lines.join("\n"));
+				this.#moveVimCursor({ line: cursor.line + 1, col: 0 });
+				break;
+			}
+			case "open-above": {
+				const inserted = Array.from({ length: count }, () => "");
+				lines.splice(cursor.line, 0, ...inserted);
+				this.setText(lines.join("\n"));
+				this.#moveVimCursor({ line: cursor.line, col: 0 });
+				break;
+			}
+			case "cursor":
+				break;
+		}
+	}
+
+	#applyVimEffect(effect: VimEffect): void {
+		switch (effect.type) {
+			case "passthrough":
+				this.#applyVimPassthrough(this.#vimPassthroughData, this.#vimPassthroughMode);
+				break;
+			case "motion":
+				this.#moveVimCursor(this.#vimMotion(this.getCursor(), effect.motion, effect.count, effect.explicit));
+				break;
+			case "enter-insert":
+				this.#applyVimEnterInsert(effect.variant, effect.count);
+				break;
+			case "delete":
+			case "change":
+			case "yank": {
+				const changed = this.#applyVimOperation(effect.type, effect.target, effect.registerName);
+				// The grammar emits a bare change effect for operator motions such as
+				// `cc`/`cw`; those operations must enter insert mode after opening the
+				// same undo group as the deletion.
+				if (effect.type === "change" && changed && this.#vimState.mode === "normal") {
+					this.#vimState = { ...this.#vimState, mode: "insert" };
+					this.#applyVimEnterInsert("cursor", 1);
+				}
+				break;
+			}
+			case "put":
+				this.#applyVimPut(effect);
+				break;
+			case "replace-char":
+				this.#applyVimReplace(effect.char, effect.count);
+				break;
+			case "undo":
+				for (let i = 0; i < effect.count; i++) if (!this.undo()) break;
+				break;
+			case "redo":
+				for (let i = 0; i < effect.count; i++) if (!this.redo()) break;
+				break;
+			case "set-visual-anchor":
+				this.#vimVisualAnchor = this.getCursor();
+				break;
+			case "clear-visual-anchor":
+				this.#vimVisualAnchor = undefined;
+				break;
+			case "swap-visual-anchor":
+				this.#vimVisualAnchor = this.getCursor();
+				break;
+			case "toggle-paste":
+				this.expandPasteAtCursor();
+				break;
+			case "end-insert-session":
+				this.#closeVimInsertGroup(true);
+				break;
+			case "mode":
+				break;
+		}
+	}
+
+	#vimPassthroughData = "";
+	#vimPassthroughMode: VimMode = "insert";
+
+	#handleVimInput(data: string, canonical: string | undefined): void {
+		if (this.#vimState.selectedRegister === "+" && this.onVimClipboardRead) {
+			const clipboardText = this.onVimClipboardRead();
+			if (clipboardText !== undefined) this.#vimState = { ...this.#vimState, register: { text: clipboardText, linewise: false } };
+		}
+		const mode = this.#vimState.mode;
+		const result = reduceVimKey(this.#vimState, this.#vimKey(data, canonical));
+		this.#vimState = result.state;
+		this.#vimPassthroughData = data;
+		this.#vimPassthroughMode = mode;
+		for (const effect of result.effects) this.#applyVimEffect(effect);
+	}
 
 	setActionKeys(action: ConfigurableEditorAction, keys: KeyId[]): void {
 		this.#actionKeys.set(action, [...keys]);
@@ -488,7 +800,7 @@ export class CustomEditor extends Editor {
 		}
 	}
 
-	#matchesAction(canonical: string | undefined, action: ConfigurableEditorAction): boolean {
+	#matchesAction(canonical: string | undefined, action: ConfigurableEditorAction): canonical is KeyId {
 		return canonical !== undefined && (this.#actionMatchKeys.get(action)?.has(canonical) ?? false);
 	}
 
@@ -521,12 +833,9 @@ export class CustomEditor extends Editor {
 	}
 
 	/** Drive the space-hold push-to-talk state machine. Returns true when the gesture consumed the
-	 *  input so it must not reach normal editing. A held space bar emits OS auto-repeat: a *steady*
-	 *  stream of spaces at a fixed fast interval. We watch the inter-space deltas and only recognize a
-	 *  hold once {@link SPACE_HOLD_MECHANICAL_RUN} consecutive deltas are "mechanical" — both
-	 *  auto-repeat-fast and near-identical (see {@link gapsAreMechanical}). Smashing the bar is fast
-	 *  but jittery and deliberate taps are too slow, so neither escalates and both keep typing real
-	 *  spaces; the few spaces typed before a real hold is recognized are tracked back out. */
+	 *  input so it must not reach normal editing. Holding the space bar makes the terminal emit a
+	 *  burst of auto-repeat spaces; once more than {@link SPACE_HOLD_THRESHOLD} of them land we treat
+	 *  it as a hold, delete the spam, and start recording until the repeats stop. */
 	#handleSpaceHold(data: string, canonical: string | undefined): boolean {
 		const isSpace = canonical === "space";
 		if (this.#spaceHoldActive) {
@@ -540,38 +849,19 @@ export class CustomEditor extends Editor {
 			return false;
 		}
 		if (!isSpace) {
-			this.#resetSpaceRun();
+			this.#spaceRunInserted = 0;
 			return false;
 		}
 		if (!this.#spaceHoldGestureEnabled()) return false;
-		const now = performance.now();
-		const gap = now - this.#lastSpaceAt;
-		const prevGap = this.#prevSpaceGap;
-		this.#lastSpaceAt = now;
-		this.#prevSpaceGap = gap;
-		if (prevGap === undefined || !gapsAreMechanical(gap, prevGap)) {
-			// First space, a deliberate tap, or jittery smashing: not a steady machine cadence yet, so
-			// type a real space and reset the mechanical run.
-			this.#mechanicalRun = 0;
-			super.handleInput(data);
-			this.#spaceRunInserted++;
-			return true;
-		}
-		// Steady fast repeat: swallow it. Once the cadence has held for SPACE_HOLD_MECHANICAL_RUN
-		// deltas it's a held bar — track back the few pre-burst spaces already typed and start.
-		if (++this.#mechanicalRun >= SPACE_HOLD_MECHANICAL_RUN) {
+		// A short tap should still type a normal space, so insert optimistically and count the run.
+		super.handleInput(data);
+		this.#spaceRunInserted++;
+		if (this.#spaceRunInserted > SPACE_HOLD_THRESHOLD) {
 			this.deleteBeforeCursor(this.#spaceRunInserted);
-			this.#resetSpaceRun();
+			this.#spaceRunInserted = 0;
 			this.#beginSpaceHold();
 		}
 		return true;
-	}
-
-	#resetSpaceRun(): void {
-		this.#spaceRunInserted = 0;
-		this.#mechanicalRun = 0;
-		this.#prevSpaceGap = undefined;
-		this.#lastSpaceAt = Number.NEGATIVE_INFINITY;
 	}
 
 	#beginSpaceHold(): void {
@@ -592,7 +882,7 @@ export class CustomEditor extends Editor {
 	#endSpaceHold(): void {
 		if (!this.#spaceHoldActive) return;
 		this.#spaceHoldActive = false;
-		this.#resetSpaceRun();
+		this.#spaceRunInserted = 0;
 		if (this.#spaceHoldTimer) {
 			clearTimeout(this.#spaceHoldTimer);
 			this.#spaceHoldTimer = undefined;
@@ -600,34 +890,19 @@ export class CustomEditor extends Editor {
 		this.onSpaceHoldEnd?.();
 	}
 
-	/** Decrement {@link #pasteInFlight} once an async paste settles and, when the count returns
-	 *  to zero, drain {@link #pendingInput} through `handleInput` so requeueing still works if a
-	 *  drained chunk triggers another async paste. Bound member so it can be passed straight to
-	 *  `Promise.then(callback, callback)`. */
-	#onPasteSettled = (): void => {
-		this.#pasteInFlight--;
-		if (this.#pasteInFlight > 0) return;
-		const drained = this.#pendingInput.splice(0);
-		for (const chunk of drained) this.handleInput(chunk);
-	};
-
-	/** Track `promise` as an in-flight paste so subsequent `handleInput` calls queue behind it,
-	 *  then drain the queue once it settles. Codex PR #3602 review: without this, a trailing
-	 *  keystroke (Enter most painfully) in the same stdin read processes synchronously while the
-	 *  clipboard read is still pending — submit fires with the text but `pendingImages` is still
-	 *  empty and the image lands on the *next* draft instead. */
-	#trackAsyncPaste(promise: Promise<unknown>): void {
-		this.#pasteInFlight++;
-		void promise.then(this.#onPasteSettled, this.#onPasteSettled);
+	dispose(): void {
+		if (this.#vimInsertGroupOpen) this.#closeVimInsertGroup(false);
+		if (this.#disposed) return;
+		this.#disposed = true;
+		if (this.#shimmerTimer) clearTimeout(this.#shimmerTimer);
+		this.#shimmerTimer = undefined;
+		this.#requestShimmerRepaint = undefined;
+		if (this.#spaceHoldTimer) clearTimeout(this.#spaceHoldTimer);
+		this.#spaceHoldTimer = undefined;
+		this.#endSpaceHold();
 	}
 
 	handleInput(data: string): void {
-		// Serialize behind any in-flight async paste so a trailing Enter / follow-up key can't
-		// submit before the clipboard image reaches `pendingImages` (Codex PR #3602 review).
-		if (this.#pasteInFlight > 0) {
-			this.#pendingInput.push(data);
-			return;
-		}
 		const kittyParsed = parseKittySequence(data);
 		if (kittyParsed && (kittyParsed.modifier & 64) !== 0 && this.onCapsLock) {
 			// Caps Lock is modifier bit 64
@@ -635,49 +910,35 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
-		// Bracketed-paste assembly. Some terminals fragment the start marker,
-		// the payload, and the end marker across separate stdin chunks
-		// (Windows Terminal under heavy load, certain SSH muxes, …); the
-		// inherited handler then sees a zero-length payload and silently
-		// drops it through the normal text-insert path. Running our own
-		// `BracketedPasteHandler` ahead of `super.handleInput` lets us route
-		// the assembled content regardless of chunk boundaries:
-		//  - empty payload → `onPasteImage` (#3601: `Cmd+V`/`Ctrl+V` on an
-		//    image-only macOS pasteboard the terminal stripped to `""` first);
-		//  - explicit image-file paths → `onPasteImagePath` (#3506);
-		//  - anything else → the base editor's `pasteText` so `[Paste #N]`
-		//    markers, autocomplete, and undo state stay intact.
-		const paste = this.#pasteHandler.process(data);
-		if (paste.handled) {
-			if (paste.pasteContent === undefined) return; // still buffering — wait for end marker
-			const content = paste.pasteContent;
-			const remaining = paste.remaining;
-			// Queue any trailing bytes from the same read (typically a follow-up keystroke such as
-			// Enter that the user pressed right after Cmd+V) so they only fire *after* the paste
-			// completes — fixes the race where submit runs against an empty `pendingImages`.
-			if (remaining.length > 0) this.#pendingInput.push(remaining);
-			if (content.length === 0 && this.onPasteImage) {
-				this.#trackAsyncPaste(Promise.resolve(this.onPasteImage()));
-				return;
-			}
-			const imagePaths = extractImagePastePathsFromText(content);
-			if (imagePaths && this.onPasteImagePath) {
-				this.#trackAsyncPaste(
-					(async () => {
-						for (const p of imagePaths) await this.onPasteImagePath?.(p);
-					})(),
-				);
-				return;
-			}
-			this.pasteText(content);
-			// No async paste was started; drain the queued trailing bytes ourselves.
-			const drained = this.#pendingInput.splice(0);
-			for (const chunk of drained) this.handleInput(chunk);
+		const pastedImagePaths = extractBracketedImagePastePaths(data);
+		if (pastedImagePaths && this.onPasteImagePath) {
+			void (async () => {
+				for (const path of pastedImagePaths) {
+					await this.onPasteImagePath?.(path);
+				}
+			})();
 			return;
 		}
 
 		const parsedKey = parseKey(data);
 		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
+
+		// Vim owns Escape before app-level dismiss/clear actions. The base editor
+		// still gets first refusal when its autocomplete overlay is open so an
+		// Escape dismisses that overlay without touching the buffer; the next
+		// Escape is then consumed by the Vim grammar.
+		if (this.#vimEnabled && canonical === "escape") {
+			if (this.isShowingAutocomplete()) super.handleInput(data);
+			else this.#handleVimInput(data, canonical);
+			return;
+		}
+
+		// Ctrl+Q always reaches the direct-interrupt lifecycle before any
+		// configurable action or local editor overlay can claim the key.
+		if (canonical === "ctrl+q" && this.onInterrupt) {
+			this.onInterrupt(canonical);
+			return;
+		}
 
 		// Left-arrow on an empty editor: surface for the agent-hub double-tap
 		// gesture. Plain "left" only — modified arrows and any in-text cursor
@@ -687,8 +948,9 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
-		// Space-hold push-to-talk: a sustained space bar starts/stops STT instead of typing spaces.
-		if (this.#handleSpaceHold(data, canonical)) return;
+		// Space-hold push-to-talk remains an insert-mode overlay; normal-mode
+		// spaces must be owned by the Vim reducer.
+		if ((!this.#vimEnabled || this.#vimState.mode === "insert") && this.#handleSpaceHold(data, canonical)) return;
 
 		if (canonical !== undefined) {
 			// Intercept configured image paste (async - fires and handles result)
@@ -769,15 +1031,15 @@ export class CustomEditor extends Editor {
 				return;
 			}
 
-			// Intercept configured interrupt shortcut.
-			// When the autocomplete popup is visible, ESC's first job is to dismiss
-			// the popup — let super.handleInput() route it to #cancelAutocomplete().
-			// The user can press ESC again afterward to fire the global interrupt
-			// handler. This matches the standard TUI/IDE pattern and prevents a
-			// single ESC from both closing an @ completion and aborting an active
-			// agent run (#1655).
-			if (this.#matchesAction(canonical, "app.interrupt") && this.onEscape && !this.isShowingAutocomplete()) {
-				this.onEscape();
+			if (this.#matchesAction(canonical, "app.interrupt") && this.onInterrupt) {
+				this.onInterrupt(canonical);
+				return;
+			}
+
+			// Dismissal remains context-sensitive: autocomplete dismisses first,
+			// then the controller unwinds the active UI without cancelling a turn.
+			if (this.#matchesAction(canonical, "ui.dismiss") && this.onEscape && !this.isShowingAutocomplete()) {
+				this.onEscape(canonical);
 				return;
 			}
 
@@ -795,9 +1057,11 @@ export class CustomEditor extends Editor {
 				return;
 			}
 
-			// Intercept configured dequeue shortcut (restore queued message to editor)
+			// Intercept dequeue only when the controller accepted a queued input.
+			// A declined Alt+Up is translated to the base editor's history-up action.
 			if (this.#matchesAction(canonical, "app.message.dequeue") && this.onDequeue) {
-				this.onDequeue();
+				if (this.onDequeue()) return;
+				super.handleInput("\x1b[A");
 				return;
 			}
 
@@ -807,26 +1071,16 @@ export class CustomEditor extends Editor {
 				return;
 			}
 
-			// Intercept configured retry shortcut. Later user/custom handlers keep
-			// precedence so adding the default Alt+R binding does not steal existing
-			// shortcuts such as app.plan.toggle or extension commands; copy-prompt is
-			// checked above for the same reason.
-			if (this.#matchesAction(canonical, "app.retry") && this.onRetry) {
-				const customHandler = this.#customMatchKeys.get(canonical);
-				if (customHandler) {
-					customHandler();
-					return;
-				}
-				this.onRetry();
-				return;
-			}
-
 			// Check custom key handlers (extensions)
 			const handler = this.#customMatchKeys.get(canonical);
 			if (handler) {
 				handler();
 				return;
 			}
+		}
+		if (this.#vimEnabled) {
+			this.#handleVimInput(data, canonical);
+			return;
 		}
 
 		// Pass to parent for normal handling

@@ -1,6 +1,32 @@
 import { performance } from "node:perf_hooks";
 import { logger, takeRecentLoopPhase } from "@oh-my-pi/pi-utils";
 
+/**
+ * Timer handle the watchdog arms. `cancel`, when present, is invoked on
+ * stop() so a stopped watchdog leaves no armed timer to wake the loop even once.
+ */
+interface LoopWatchdogTimer {
+	unref?(): void;
+	cancel?(): void;
+}
+
+export interface LoopWatchdogViolation {
+	readonly timestamp: number;
+	readonly blockedMs: number;
+	readonly phase: string;
+	readonly pid: number;
+	readonly attribution?: string;
+}
+
+export interface LoopWatchdogCounters {
+	readonly totalViolations: number;
+	readonly maxBlockedMs: number;
+}
+
+export interface LoopWatchdogSnapshot extends LoopWatchdogCounters {
+	readonly violations: readonly LoopWatchdogViolation[];
+}
+
 export interface LoopWatchdogOptions {
 	/** How far ahead each probe tick is scheduled, in ms. Default 250. */
 	intervalMs?: number;
@@ -8,17 +34,14 @@ export interface LoopWatchdogOptions {
 	thresholdMs?: number;
 	/** Monotonic clock source; injectable for tests. Default `performance.now`. */
 	now?: () => number;
+	/** Epoch timestamp source for violation records; injectable for tests. Default `Date.now`. */
+	timestamp?: () => number;
 	/** Timer source; injectable for tests. Default `setTimeout`. */
 	schedule?: (cb: () => void, ms: number) => LoopWatchdogTimer;
-}
-
-/**
- * Timer handle the watchdog arms. `cancel`, when present, is invoked on stop()
- * so a stopped watchdog leaves no armed timer to wake the loop even once.
- */
-interface LoopWatchdogTimer {
-	unref?(): void;
-	cancel?(): void;
+	/** Maximum number of violation records retained in the ring. Default 64. */
+	maxViolations?: number;
+	/** Optional host-defined label attached to new violation records. */
+	attribution?: string;
 }
 
 /**
@@ -39,7 +62,13 @@ export class LoopWatchdog {
 	#intervalMs: number;
 	#thresholdMs: number;
 	#now: () => number;
+	#timestamp: () => number;
 	#schedule: (cb: () => void, ms: number) => LoopWatchdogTimer;
+	#maxViolations: number;
+	#attribution: string | undefined;
+	#violations: LoopWatchdogViolation[] = [];
+	#totalViolations = 0;
+	#maxBlockedMs = 0;
 	#expected = 0;
 	#wasBlocked = false;
 	#running = false;
@@ -53,12 +82,50 @@ export class LoopWatchdog {
 		this.#intervalMs = options.intervalMs ?? 250;
 		this.#thresholdMs = options.thresholdMs ?? 250;
 		this.#now = options.now ?? (() => performance.now());
+		this.#timestamp = options.timestamp ?? (() => Date.now());
+		const maxViolations = options.maxViolations ?? 64;
+		this.#maxViolations = Number.isFinite(maxViolations) ? Math.max(1, Math.floor(maxViolations)) : 64;
+		this.#attribution = options.attribution;
 		this.#schedule =
 			options.schedule ??
 			((cb, ms) => {
 				const timer = setTimeout(cb, ms);
 				return { unref: () => timer.unref?.(), cancel: () => clearTimeout(timer) };
 			});
+	}
+
+	/** Number of rising-edge violations observed since construction. */
+	get totalViolations(): number {
+		return this.#totalViolations;
+	}
+
+	/** Largest rounded blocked duration observed since construction. */
+	get maxBlockedMs(): number {
+		return this.#maxBlockedMs;
+	}
+
+	/** A frozen copy of the retained violation ring, oldest record first. */
+	get violations(): readonly LoopWatchdogViolation[] {
+		return Object.freeze(this.#violations.slice());
+	}
+
+	/** Returns frozen counters and a frozen copy of the retained violation ring. */
+	getSnapshot(): LoopWatchdogSnapshot {
+		return Object.freeze({
+			totalViolations: this.#totalViolations,
+			maxBlockedMs: this.#maxBlockedMs,
+			violations: this.violations,
+		});
+	}
+
+	/** Sets the host-defined label attached to subsequently recorded violations. */
+	setAttribution(attribution?: string): void {
+		this.#attribution = attribution;
+	}
+
+	/** Returns the current host-defined violation attribution label. */
+	getAttribution(): string | undefined {
+		return this.#attribution;
 	}
 
 	start(): void {
@@ -83,6 +150,20 @@ export class LoopWatchdog {
 		this.#handle.unref?.();
 	}
 
+	#recordViolation(blockedMs: number, phase: string): void {
+		this.#totalViolations++;
+		this.#maxBlockedMs = Math.max(this.#maxBlockedMs, blockedMs);
+		const record: LoopWatchdogViolation = Object.freeze({
+			timestamp: this.#timestamp(),
+			blockedMs,
+			phase,
+			pid: process.pid,
+			...(this.#attribution === undefined ? {} : { attribution: this.#attribution }),
+		});
+		this.#violations.push(record);
+		if (this.#violations.length > this.#maxViolations) this.#violations.shift();
+	}
+
 	#tick(generation: number): void {
 		if (!this.#running || generation !== this.#generation) return;
 		const blockedMs = this.#now() - this.#expected;
@@ -93,6 +174,7 @@ export class LoopWatchdog {
 		if (blockedMs > this.#thresholdMs) {
 			if (!this.#wasBlocked) {
 				this.#wasBlocked = true;
+				this.#recordViolation(Math.round(blockedMs), phase ?? "unknown");
 				logger.warn("ui.loop-blocked", {
 					blockedMs: Math.round(blockedMs),
 					phase: phase ?? "unknown",

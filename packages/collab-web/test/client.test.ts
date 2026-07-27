@@ -1,310 +1,100 @@
-import { describe, expect, it, vi } from "bun:test";
-import type {
-	AgentSnapshot,
-	AssistantMessage,
-	GuestFrame,
-	HostFrame,
-	SessionEntry,
-	SessionHeader,
-	SessionState,
-	SubagentProgressPayload,
-	WireMessage,
-} from "@oh-my-pi/pi-wire";
-import { GuestClient } from "../src/lib/client";
-import { COLLAB_PROTO, encodeBase64Url } from "../src/lib/link";
-import { CollabSocket } from "../src/lib/socket";
+import { describe, expect, it } from "bun:test";
+import type { CollabRunnerSnapshot, HostFrame } from "@oh-my-pi/pi-wire";
+import { GuestClient, reduceRunnerDelta } from "../src/lib/client";
+import { encodeBase64Url } from "../src/lib/link";
 
 const LINK = `roomroomroom1234#${encodeBase64Url(new Uint8Array(32))}`;
+const snapshot = (
+	runnerSequence = 4,
+	revision = 7,
+	transcript: CollabRunnerSnapshot["transcript"] = [],
+): CollabRunnerSnapshot => ({
+	revision, runnerSequence, sessionRevision: 3, transcript, durableInputs: [], activeOperations: [],
+	workflow: {}, tools: {}, todos: {}, model: {}, session: {},
+});
+const welcome = (capability: "observer" | "controller" = "observer"): Extract<HostFrame, { t: "welcome" }> => ({
+	t: "welcome", connectionId: "connection", viewId: "view", capability,
+	controllerEpoch: capability === "controller" ? 8 : undefined, snapshot: snapshot(), sequence: 1,
+});
 
-const HEADER: SessionHeader = { type: "session", id: "s1", timestamp: "2026-06-12T00:00:00Z", cwd: "/work" };
-
-const STATE: SessionState = {
-	isStreaming: false,
-	queuedMessageCount: 0,
-	cwd: "/work",
-	participants: [{ name: "host", role: "host" }],
-};
-
-const AGENTS: AgentSnapshot[] = [
-	{
-		id: "main",
-		displayName: "Main",
-		kind: "main",
-		status: "running",
-		hasSessionFile: true,
-		createdAt: 1,
-		lastActivity: 2,
-	},
-];
-
-function assistantMessage(text: string): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [{ type: "text", text }],
-		model: "test/model",
-		usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3, cost: { total: 0 } },
-		stopReason: "stop",
-		timestamp: 1,
-	};
-}
-
-function messageEntry(id: string, message: WireMessage): SessionEntry {
-	return { type: "message", id, parentId: null, timestamp: "2026-06-12T00:00:01Z", message };
-}
-
-function welcomeFrame(entryCount = 0, readOnly?: boolean): HostFrame {
-	return { t: "welcome", proto: COLLAB_PROTO, header: HEADER, state: STATE, agents: AGENTS, entryCount, readOnly };
-}
-
-function snapshotChunk(entries: SessionEntry[], final = true): HostFrame {
-	return { t: "snapshot-chunk", entries, final };
-}
-
-function liveClient(entries: SessionEntry[] = []): GuestClient {
-	const client = new GuestClient(LINK, "tester");
-	client.applyFrameForTest(welcomeFrame(entries.length));
-	if (entries.length > 0) client.applyFrameForTest(snapshotChunk(entries));
-	return client;
-}
-
-describe("GuestClient frame apply", () => {
-	it("throws on an invalid link", () => {
-		expect(() => new GuestClient("not a link", "tester")).toThrow();
+describe("protocol v2 runner projection", () => {
+	it("atomically replaces state on welcome and resync", () => {
+		const client = new GuestClient(LINK, "guest");
+		client.applyFrameForTest(welcome("controller"));
+		expect(client.getSnapshot().phase).toBe("live");
+		expect(client.getSnapshot().runner?.revision).toBe(7);
+		expect(client.getSnapshot().capability).toBe("controller");
+		expect(client.getSnapshot().controllerEpoch).toBe(8);
+		client.applyFrameForTest({ t: "resync", snapshot: snapshot(20, 21), expectedSequence: 5, observedSequence: 20 });
+		expect(client.getSnapshot().runner?.runnerSequence).toBe(20);
+		expect(client.getSnapshot().runner?.revision).toBe(21);
 	});
 
-	it("welcome populates the snapshot and goes live", () => {
-		const userEntry = messageEntry("e1", { role: "user", content: "hi", timestamp: 1 });
-		const client = liveClient([userEntry]);
-		const snap = client.getSnapshot();
-		expect(snap.phase).toBe("live");
-		expect(snap.header).toEqual(HEADER);
-		expect(snap.entries).toEqual([userEntry]);
-		expect(snap.state).toEqual(STATE);
-		expect(snap.agents).toEqual(AGENTS);
-		expect(snap.working).toBe(false);
-		expect(snap.stream).toBeNull();
-		expect(snap.activeTools.size).toBe(0);
+	it("retains full transcript history across welcome, resync, and the next delta", () => {
+		const first = { type: "message", id: "m1", parentId: null, timestamp: "first", message: { role: "user", content: "first", timestamp: 1 } } as const;
+		const second = { type: "message", id: "m2", parentId: "m1", timestamp: "second", message: { role: "assistant", content: "second", timestamp: 2 } } as const;
+		const third = { type: "message", id: "m3", parentId: "m2", timestamp: "third", message: { role: "user", content: "third", timestamp: 3 } } as const;
+		const client = new GuestClient(LINK, "guest");
+		client.applyFrameForTest({ ...welcome(), snapshot: snapshot(4, 7, [first]) });
+		expect(client.getSnapshot().runner?.transcript).toEqual([first]);
+		client.applyFrameForTest({
+			t: "resync",
+			snapshot: snapshot(20, 21, [first, second]),
+			expectedSequence: 5,
+			observedSequence: 20,
+		});
+		client.applyFrameForTest({
+			t: "delta",
+			delivery: {
+				kind: "event",
+				event: {
+					kind: "transcriptEntryAppended",
+					sequence: 21,
+					revision: 22,
+					sessionRevision: 4,
+					transcriptEntry: third,
+				},
+			},
+		});
+		expect(client.getSnapshot().runner?.transcript).toEqual([first, second, third]);
 	});
 
-	it("welcome readOnly flag lands in the snapshot", () => {
-		const client = new GuestClient(LINK, "tester");
-		expect(client.getSnapshot().readOnly).toBe(false);
-		client.applyFrameForTest(welcomeFrame(0, true));
+	it("applies only contiguous deltas and appends immutable transcript entries", () => {
+		const base = snapshot();
+		const event = { kind: "transcriptEntryAppended", sequence: 5, revision: 8, sessionRevision: 4,
+			transcriptEntry: { type: "message", id: "m1", parentId: null, timestamp: "now", message: { role: "user", content: "hello", timestamp: 1 } } };
+		const result = reduceRunnerDelta(base, { kind: "event", event });
+		expect(result.kind).toBe("applied");
+		if (result.kind === "applied") {
+			expect(result.snapshot.runnerSequence).toBe(5);
+			expect(result.snapshot.revision).toBe(8);
+			expect(result.snapshot.transcript).toHaveLength(1);
+		}
+	});
+
+	it("ignores duplicates and reports future gaps without partial mutation", () => {
+		const base = snapshot();
+		const duplicate = reduceRunnerDelta(base, { kind: "event", event: { sequence: 4, revision: 99 } });
+		expect(duplicate).toEqual({ kind: "duplicate", snapshot: base });
+		const gap = reduceRunnerDelta(base, { kind: "event", event: { sequence: 7, revision: 99 } });
+		expect(gap).toEqual({ kind: "gap", expectedSequence: 5, observedSequence: 7 });
+		expect(base.revision).toBe(7);
+	});
+
+	it("drops controller state immediately when the host changes capability", () => {
+		const client = new GuestClient(LINK, "guest");
+		client.applyFrameForTest(welcome("controller"));
+		client.applyFrameForTest({ t: "controllerChanged", capability: "observer" });
+		expect(client.getSnapshot().capability).toBe("observer");
+		expect(client.getSnapshot().controllerEpoch).toBeNull();
 		expect(client.getSnapshot().readOnly).toBe(true);
 	});
 
-	it("times out stalled snapshot chunks and resets the clock on progress", () => {
-		vi.useFakeTimers();
-		try {
-			const firstEntry = messageEntry("e1", { role: "user", content: "hi", timestamp: 1 });
-			const client = new GuestClient(LINK, "tester");
-			client.applyFrameForTest(welcomeFrame(2));
-			expect(client.getSnapshot().phase).toBe("connecting");
-
-			vi.advanceTimersByTime(29_999);
-			expect(client.getSnapshot().phase).toBe("connecting");
-			client.applyFrameForTest(snapshotChunk([firstEntry], false));
-			expect(client.getSnapshot().entries).toEqual([firstEntry]);
-			expect(client.getSnapshot().phase).toBe("connecting");
-
-			vi.advanceTimersByTime(29_999);
-			expect(client.getSnapshot().phase).toBe("connecting");
-			vi.advanceTimersByTime(1);
-			const snap = client.getSnapshot();
-			expect(snap.phase).toBe("ended");
-			expect(snap.endedReason).toBe("timed out waiting for the host's session snapshot");
-
-			const completeClient = new GuestClient(LINK, "tester");
-			completeClient.applyFrameForTest(welcomeFrame(1));
-			completeClient.applyFrameForTest(snapshotChunk([firstEntry]));
-			vi.advanceTimersByTime(30_000);
-			expect(completeClient.getSnapshot().phase).toBe("live");
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	it("message_update sets the stream ghost (synthesizing a missed start)", () => {
-		const client = liveClient();
-		const partial = assistantMessage("hel");
-		client.applyFrameForTest({ t: "event", event: { type: "message_update", message: partial } });
-		const snap = client.getSnapshot();
-		expect(snap.stream).toEqual(partial);
-		expect(snap.streamDone).toBe(false);
-	});
-
-	it("message_end keeps the ghost until the matching entry lands", () => {
-		const client = liveClient();
-		const message = assistantMessage("hello");
-		client.applyFrameForTest({ t: "event", event: { type: "message_update", message } });
-		client.applyFrameForTest({ t: "event", event: { type: "message_end", message } });
-		let snap = client.getSnapshot();
-		expect(snap.streamDone).toBe(true);
-		expect(snap.stream).toEqual(message);
-
-		client.applyFrameForTest({ t: "entry", entry: messageEntry("e2", message) });
-		snap = client.getSnapshot();
-		expect(snap.stream).toBeNull();
-		expect(snap.streamDone).toBe(false);
-		expect(snap.entries).toHaveLength(1);
-	});
-
-	it("tool start/update/end maintains activeTools", () => {
-		const client = liveClient();
-		client.applyFrameForTest({
-			t: "event",
-			event: {
-				type: "tool_execution_start",
-				toolCallId: "tc1",
-				toolName: "bash",
-				args: { command: "ls" },
-				intent: "Listing",
-			},
-		});
-		let tool = client.getSnapshot().activeTools.get("tc1");
-		expect(tool?.toolName).toBe("bash");
-		expect(tool?.intent).toBe("Listing");
-
-		client.applyFrameForTest({
-			t: "event",
-			event: {
-				type: "tool_execution_update",
-				toolCallId: "tc1",
-				toolName: "bash",
-				args: { command: "ls" },
-				partialResult: "src",
-			},
-		});
-		tool = client.getSnapshot().activeTools.get("tc1");
-		expect(tool?.partialResult).toBe("src");
-
-		client.applyFrameForTest({
-			t: "event",
-			event: { type: "tool_execution_end", toolCallId: "tc1", toolName: "bash", result: "src\ntest" },
-		});
-		expect(client.getSnapshot().activeTools.size).toBe(0);
-	});
-
-	it("agent_start/agent_end and state reconcile the working flag", () => {
-		const client = liveClient();
-		client.applyFrameForTest({ t: "event", event: { type: "agent_start" } });
-		expect(client.getSnapshot().working).toBe(true);
-		client.applyFrameForTest({ t: "state", state: { ...STATE, isStreaming: false } });
-		expect(client.getSnapshot().working).toBe(false);
-	});
-
-	it("bus progress frames update the progress map", () => {
-		const client = liveClient();
-		const payload: SubagentProgressPayload = {
-			index: 0,
-			agent: "task",
-			task: "do things",
-			progress: {
-				index: 0,
-				id: "Sub1",
-				agent: "task",
-				status: "running",
-				task: "do things",
-				recentTools: [],
-				recentOutput: [],
-				toolCount: 1,
-				requests: 1,
-				tokens: 100,
-				cost: 0.01,
-				durationMs: 1000,
-			},
-		};
-		client.applyFrameForTest({ t: "bus", channel: "task:subagent:progress", data: payload });
-		expect(client.getSnapshot().progress.get("Sub1")).toEqual(payload);
-	});
-
-	it("bye ends the session with a reason", () => {
-		const client = liveClient();
-		client.applyFrameForTest({ t: "bye", reason: "host left" });
-		const snap = client.getSnapshot();
-		expect(snap.phase).toBe("ended");
-		expect(snap.endedReason).toBe("host left");
-	});
-
-	it("error frames append notices", () => {
-		const client = liveClient();
-		client.applyFrameForTest({ t: "error", message: "boom" });
-		const notices = client.getSnapshot().notices;
-		expect(notices).toHaveLength(1);
-		expect(notices[0]).toMatchObject({ level: "error", message: "boom" });
-	});
-
-	it("a pre-welcome error (hello rejection, e.g. protocol mismatch) ends the session with the host's reason", () => {
-		const client = new GuestClient(LINK, "tester");
-		client.applyFrameForTest({
-			t: "error",
-			message: `protocol mismatch: host speaks v${COLLAB_PROTO}, guest sent v${COLLAB_PROTO - 1}`,
-		});
-		const snap = client.getSnapshot();
-		expect(snap.phase).toBe("ended");
-		expect(snap.endedReason).toContain("protocol mismatch");
-		expect(snap.endedReason).toContain(`v${COLLAB_PROTO}`);
-	});
-
-	it("tracks host UI requests and sends responses", () => {
-		const sent: GuestFrame[] = [];
-		const sendSpy = vi.spyOn(CollabSocket.prototype, "send").mockImplementation((frame: GuestFrame) => {
-			sent.push(frame);
-		});
-		try {
-			const client = liveClient();
-			const request = {
-				reqId: 7,
-				kind: "select" as const,
-				title: "Continue?",
-				options: ["Yes", { label: "No", description: "Stop here" }],
-				selectionMarker: "radio" as const,
-			};
-			client.applyFrameForTest({ t: "ui-request", request });
-			expect(client.getSnapshot().uiRequest).toEqual(request);
-
-			client.sendUiResponse(7, "Yes");
-			expect(sent).toEqual([{ t: "ui-response", reqId: 7, value: "Yes" }]);
-			expect(client.getSnapshot().uiRequest).toBeNull();
-		} finally {
-			sendSpy.mockRestore();
-		}
-	});
-
-	it("clears pending host UI requests when the host ends them", () => {
-		const client = liveClient();
-		client.applyFrameForTest({
-			t: "ui-request",
-			request: { reqId: 8, kind: "editor", title: "Other", prefill: "draft" },
-		});
-		expect(client.getSnapshot().uiRequest?.reqId).toBe(8);
-		client.applyFrameForTest({ t: "ui-request-end", reqId: 8 });
-		expect(client.getSnapshot().uiRequest).toBeNull();
-	});
-
-	it("queues overlapping host UI requests until the active one resolves", () => {
-		const client = liveClient();
-		const first = { reqId: 9, kind: "select" as const, title: "First?", options: ["A"] };
-		const second = { reqId: 10, kind: "editor" as const, title: "Second?", prefill: "draft" };
-		client.applyFrameForTest({ t: "ui-request", request: first });
-		client.applyFrameForTest({ t: "ui-request", request: second });
-		expect(client.getSnapshot().uiRequest).toEqual(first);
-
-		client.applyFrameForTest({ t: "ui-request-end", reqId: 9 });
-		expect(client.getSnapshot().uiRequest).toEqual(second);
-
-		client.applyFrameForTest({ t: "ui-request-end", reqId: 10 });
-		expect(client.getSnapshot().uiRequest).toBeNull();
-	});
-
-	it("snapshot reference is stable between frames and replaced per frame", () => {
-		const client = liveClient();
-		const before = client.getSnapshot();
-		expect(client.getSnapshot()).toBe(before);
-		client.applyFrameForTest({ t: "agents", agents: AGENTS });
-		const after = client.getSnapshot();
-		expect(after).not.toBe(before);
-		expect(after.agents).not.toBe(before.agents);
-		expect(after.entries).toBe(before.entries);
+	it("ends on bye", () => {
+		const client = new GuestClient(LINK, "guest");
+		client.applyFrameForTest(welcome());
+		client.applyFrameForTest({ t: "bye", reason: "host stopped" });
+		expect(client.getSnapshot().phase).toBe("ended");
+		expect(client.getSnapshot().endedReason).toBe("host stopped");
 	});
 });

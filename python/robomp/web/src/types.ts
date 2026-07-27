@@ -8,11 +8,9 @@ export type IssueState =
   | "new"
   | "reproducing"
   | "fixing"
-  | "reviewing"
   | "opened"
   | "merged"
   | "closed"
-  | "needs_info"
   | "abandoned";
 
 export interface RuntimeInfo {
@@ -39,7 +37,7 @@ export interface IssueRow {
   number: number;
   branch: string | null;
   pr_number: number | null;
-  state: IssueState;
+  state: IssueState | string;
   classification: string | null;
   updated_at: string;
   latest_event: LatestEvent | null;
@@ -67,7 +65,6 @@ export interface RecentEvent {
   attempts: number;
   received_at: string;
   last_error: string | null;
-  issue_state: IssueState | null;
 }
 
 export interface StatusResponse {

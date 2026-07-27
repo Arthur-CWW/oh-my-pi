@@ -6,7 +6,7 @@ import type { ImageContent, Static, TextContent, TSchema } from "@oh-my-pi/pi-ai
 import type { Settings } from "../../config/settings";
 import type { Theme } from "../../modes/theme/theme";
 import { type ApprovalMode, formatApprovalPrompt, requiresApproval } from "../../tools/approval";
-import { normalizeToolEventInput, resolveToolEventInput } from "../tool-event-input";
+import { setToolOrigin } from "../../tools/tool-origin";
 import { applyToolProxy } from "../tool-proxy";
 import type { ExtensionRunner } from "./runner";
 import type { RegisteredTool, ToolCallEventResult } from "./types";
@@ -28,6 +28,12 @@ export class RegisteredToolAdapter implements AgentTool<any, any, any> {
 		private registeredTool: RegisteredTool,
 		private runner: ExtensionRunner,
 	) {
+		if (!registeredTool.definition.origin) {
+			setToolOrigin(registeredTool.definition, {
+				kind: "extension",
+				source: registeredTool.extensionPath,
+			});
+		}
 		applyToolProxy(registeredTool.definition, this);
 
 		// Only define render methods when the underlying definition provides them.
@@ -186,10 +192,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 					type: "tool_call",
 					toolName: this.tool.name,
 					toolCallId,
-					input: normalizeToolEventInput(
-						this.tool.name,
-						resolveToolEventInput(this.tool, params as Record<string, unknown>),
-					),
+					input: params as Record<string, unknown>,
 				})) as ToolCallEventResult | undefined;
 
 				if (callResult?.block) {
@@ -224,10 +227,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 				type: "tool_result",
 				toolName: this.tool.name,
 				toolCallId,
-				input: normalizeToolEventInput(
-					this.tool.name,
-					resolveToolEventInput(this.tool, params as Record<string, unknown>),
-				),
+				input: params as Record<string, unknown>,
 				content: result.content,
 				details: result.details,
 				isError: !!executionError,

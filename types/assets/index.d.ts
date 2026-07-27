@@ -13,22 +13,7 @@ declare module "*.py" {
 	export default content;
 }
 
-declare module "*.rb" {
-	const content: string;
-	export default content;
-}
-
-declare module "*.jl" {
-	const content: string;
-	export default content;
-}
-
 declare module "*.lark" {
-	const content: string;
-	export default content;
-}
-
-declare module "*.sh" {
 	const content: string;
 	export default content;
 }

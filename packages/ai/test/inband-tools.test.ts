@@ -38,9 +38,9 @@ const DIALECTS: readonly Dialect[] = [
 	"kimi",
 	"xml",
 	"anthropic",
-	"minimax",
 	"deepseek",
 	"harmony",
+	"pi",
 	"qwen3",
 	"gemini",
 	"gemma",
@@ -94,61 +94,6 @@ function expectRawBlock(dialect: Dialect, text: string, expected: string): void 
 	expect(firstRawBlock(dialect, text), dialect).toBe(expected);
 }
 
-function parameterDeltaEvents(
-	events: readonly InbandScanEvent[],
-): Extract<InbandScanEvent, { type: "toolArgDelta" }>[] {
-	return events.filter((event): event is Extract<InbandScanEvent, { type: "toolArgDelta" }> => {
-		return event.type === "toolArgDelta";
-	});
-}
-
-const XML_PARAMETER_STREAMS: readonly { dialect: Dialect; chunks: readonly string[] }[] = [
-	{
-		dialect: "anthropic",
-		chunks: [
-			'<function_calls>\n<invoke name="read"><parameter name="path">',
-			"src/",
-			"a.ts</para",
-			'meter><parameter name="count" string="false">',
-			"2</para",
-			"meter></invoke>\n</function_calls>",
-		],
-	},
-	{
-		dialect: "xml",
-		chunks: [
-			'<function_calls>\n<invoke name="read"><parameter name="path">',
-			"src/",
-			"a.ts</para",
-			'meter><parameter name="count" string="false">',
-			"2</para",
-			"meter></invoke>\n</function_calls>",
-		],
-	},
-	{
-		dialect: "minimax",
-		chunks: [
-			'<minimax:tool_call>\n<invoke name="read"><parameter name="path">',
-			"src/",
-			"a.ts</para",
-			'meter><parameter name="count" string="false">',
-			"2</para",
-			"meter></invoke>\n</minimax:tool_call>",
-		],
-	},
-	{
-		dialect: "deepseek",
-		chunks: [
-			'<｜DSML｜tool_calls>\n<｜DSML｜invoke name="read"><｜DSML｜parameter name="path" string="true">',
-			"src/",
-			"a.ts</｜DSML｜para",
-			'meter><｜DSML｜parameter name="count" string="false">',
-			"2</｜DSML｜para",
-			"meter></｜DSML｜invoke>\n</｜DSML｜tool_calls>",
-		],
-	},
-];
-
 describe("in-band tool dialects", () => {
 	it("renders a tool prompt for every dialect", () => {
 		for (const dialect of DIALECTS) {
@@ -177,44 +122,6 @@ describe("in-band tool dialects", () => {
 		}
 	});
 
-	it("streams keyed parameter argument deltas before the final XML-family tool end", () => {
-		for (const { dialect, chunks } of XML_PARAMETER_STREAMS) {
-			const scanner = createInbandScanner(dialect, { tools: TOOLS, parseThinking: true });
-			const perFeedEvents = chunks.map(chunk => scanner.feed(chunk));
-			const events = perFeedEvents.flat();
-			events.push(...scanner.flush());
-			const starts = events.filter((event): event is Extract<InbandScanEvent, { type: "toolStart" }> => {
-				return event.type === "toolStart";
-			});
-			expect(starts, dialect).toHaveLength(1);
-
-			const callId = starts[0]!.id;
-			expect(starts[0], dialect).toMatchObject({ id: callId, name: "read" });
-			expect(parameterDeltaEvents(perFeedEvents[1]!), dialect).toEqual([
-				{ type: "toolArgDelta", id: callId, name: "read", key: "path", delta: "src/" },
-			]);
-			expect(parameterDeltaEvents(perFeedEvents[2]!), dialect).toEqual([
-				{ type: "toolArgDelta", id: callId, name: "read", key: "path", delta: "a.ts" },
-			]);
-			expect(toolEnds(perFeedEvents[2]!), dialect).toHaveLength(0);
-			expect(parameterDeltaEvents(perFeedEvents[4]!), dialect).toEqual([
-				{ type: "toolArgDelta", id: callId, name: "read", key: "count", delta: "2" },
-			]);
-
-			const calls = toolEnds(events);
-			expect(calls, dialect).toHaveLength(1);
-			expect(calls[0], dialect).toMatchObject({
-				id: callId,
-				name: "read",
-				arguments: { path: "src/a.ts", count: 2 },
-			});
-			const finalIndex = events.findIndex(event => event.type === "toolEnd");
-			const lastDeltaIndex = events.findLastIndex(event => event.type === "toolArgDelta");
-			expect(lastDeltaIndex, dialect).toBeGreaterThan(-1);
-			expect(finalIndex, dialect).toBeGreaterThan(lastDeltaIndex);
-		}
-	});
-
 	it("captures exact raw tool call blocks for debugging", () => {
 		expectRawBlock(
 			"glm",
@@ -237,14 +144,14 @@ describe("in-band tool dialects", () => {
 			'<invoke name="read"><parameter name="path" string="true">src/a.ts</parameter></invoke>',
 		);
 		expectRawBlock(
-			"minimax",
-			'<minimax:tool_call>\n<invoke name="read"><parameter name="path" string="true">src/a.ts</parameter></invoke>\n</minimax:tool_call>',
-			'<invoke name="read"><parameter name="path" string="true">src/a.ts</parameter></invoke>',
-		);
-		expectRawBlock(
 			"harmony",
 			'<|start|>assistant<|channel|>commentary to=functions.read<|message|>{"path":"src/a.ts"}<|call|>',
 			'<|start|>assistant<|channel|>commentary to=functions.read<|message|>{"path":"src/a.ts"}<|call|>',
+		);
+		expectRawBlock(
+			"pi",
+			'<call:write path="out.ts">\nhello\n</call:write>',
+			'<call:write path="out.ts">\nhello\n</call:write>',
 		);
 	});
 
@@ -254,35 +161,6 @@ describe("in-band tool dialects", () => {
 		const call = parsed.content.find((block): block is ToolCall => block.type === "toolCall");
 
 		expect(call?.rawBlock).toBe(raw);
-	});
-
-	it("parses MiniMax tool-call wrapper arguments without mangling parameter names", () => {
-		const raw =
-			'<minimax:tool_call>\n<invoke name="read">\n<parameter name="path" string="true">src/a.ts</parameter>\n<parameter name="count" string="false">2</parameter>\n</invoke>\n</minimax:tool_call>';
-		const parsed = parseInbandToolMessage(assistant([{ type: "text", text: raw }]), "minimax", TOOLS);
-		const calls = parsed.content.filter((block): block is ToolCall => block.type === "toolCall");
-
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.name).toBe("read");
-		expect(calls[0]?.arguments).toEqual({ path: "src/a.ts", count: 2 });
-		expect(calls[0]?.arguments).not.toHaveProperty('parameter name="path"');
-		expect(calls[0]?.arguments).not.toHaveProperty('parameter name="count"');
-	});
-
-	it("buffers unprefixed MiniMax wrappers across streaming tag splits", () => {
-		const raw =
-			'<tool_call>\n<invoke name="read">\n<parameter name="path" string="true">src/a.ts</parameter>\n<parameter name="count" string="false">2</parameter>\n</invoke>\n</tool_call>';
-		const events = feedText("minimax", raw);
-		const calls = toolEnds(events);
-		const visibleText = events
-			.filter((event): event is Extract<InbandScanEvent, { type: "text" }> => event.type === "text")
-			.map(event => event.text)
-			.join("");
-
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.name).toBe("read");
-		expect(calls[0]?.arguments).toEqual({ path: "src/a.ts", count: 2 });
-		expect(visibleText).toBe("");
 	});
 
 	it("stops before hallucinated Anthropic function results", () => {
@@ -325,10 +203,10 @@ describe("in-band tool dialects", () => {
 		expect(getDialectDefinition("anthropic").renderToolResults([resultBlock])).toBe(
 			"<function_results>\n<result>\n<tool_name>read</tool_name>\n<stdout>FILE</stdout>\n</result>\n</function_results>",
 		);
-		expect(getDialectDefinition("minimax").renderToolResults([resultBlock])).toBe(
-			"<function_results>\n<result>\n<tool_name>read</tool_name>\n<stdout>FILE</stdout>\n</result>\n</function_results>",
-		);
 		expect(getDialectDefinition("qwen3").renderToolResults([resultBlock])).toBe(
+			"<tool_response>\nFILE\n</tool_response>",
+		);
+		expect(getDialectDefinition("pi").renderToolResults([resultBlock])).toBe(
 			"<tool_response>\nFILE\n</tool_response>",
 		);
 		expect(getDialectDefinition("gemini").renderToolResults([resultBlock])).toBe("```tool_outputs\nFILE\n```");

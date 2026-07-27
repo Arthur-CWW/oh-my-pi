@@ -235,37 +235,6 @@ describe("Tool argument coercion", () => {
 		expect(result.paths).toEqual(["src/**/*.ts"]);
 	});
 
-	it("wraps bracket and brace glob strings when schema expects string array", () => {
-		const tool: Tool = {
-			name: "glob_paths",
-			description: "",
-			parameters: z.object({ paths: z.array(z.string()) }),
-		};
-
-		const bracketResult = validateToolArguments(tool, {
-			type: "toolCall",
-			id: "call-bracket-glob",
-			name: "glob_paths",
-			arguments: { paths: "[a-z]*.ts" },
-		}) as { paths: string[] };
-		const numericBracketResult = validateToolArguments(tool, {
-			type: "toolCall",
-			id: "call-numeric-bracket-glob",
-			name: "glob_paths",
-			arguments: { paths: "[0-9]*.ts" },
-		}) as { paths: string[] };
-		const braceResult = validateToolArguments(tool, {
-			type: "toolCall",
-			id: "call-brace-glob",
-			name: "glob_paths",
-			arguments: { paths: "{src,test}/**/*.ts" },
-		}) as { paths: string[] };
-
-		expect(bracketResult.paths).toEqual(["[a-z]*.ts"]);
-		expect(numericBracketResult.paths).toEqual(["[0-9]*.ts"]);
-		expect(braceResult.paths).toEqual(["{src,test}/**/*.ts"]);
-	});
-
 	it("wraps a singleton object in an array when schema expects object array", () => {
 		const tool: Tool = {
 			name: "todo_like",
@@ -300,145 +269,6 @@ describe("Tool argument coercion", () => {
 		expect(result).toEqual({
 			ops: [{ op: "init", list: [{ phase: "Repro", items: ["capture"] }] }],
 		});
-	});
-
-	it("parses a JSON array string when schema expects object array", () => {
-		const tool: Tool = {
-			name: "todo_like_json_array",
-			description: "",
-			parameters: z.object({
-				ops: z.array(
-					z.object({
-						op: z.literal("init"),
-						list: z.array(
-							z.object({
-								phase: z.string(),
-								items: z.array(z.string()),
-							}),
-						),
-					}),
-				),
-			}),
-		};
-
-		const result = validateToolArguments(tool, {
-			type: "toolCall",
-			id: "call-json-array-object-array",
-			name: "todo_like_json_array",
-			arguments: {
-				ops: JSON.stringify([{ op: "init", list: [{ phase: "Repro", items: ["capture"] }] }]),
-			},
-		});
-
-		expect(result).toEqual({
-			ops: [{ op: "init", list: [{ phase: "Repro", items: ["capture"] }] }],
-		});
-	});
-
-	it("parses a double-encoded JSON array string when schema expects object array", () => {
-		const tool: Tool = {
-			name: "todo_like_double_json_array",
-			description: "",
-			parameters: z.object({
-				ops: z.array(
-					z.object({
-						op: z.literal("init"),
-						list: z.array(
-							z.object({
-								phase: z.string(),
-								items: z.array(z.string()),
-							}),
-						),
-					}),
-				),
-			}),
-		};
-		const encodedOps = JSON.stringify([{ op: "init", list: [{ phase: "Repro", items: ["capture"] }] }]);
-
-		const result = validateToolArguments(tool, {
-			type: "toolCall",
-			id: "call-double-json-array-object-array",
-			name: "todo_like_double_json_array",
-			arguments: {
-				ops: JSON.stringify(encodedOps),
-			},
-		});
-
-		expect(result).toEqual({
-			ops: [{ op: "init", list: [{ phase: "Repro", items: ["capture"] }] }],
-		});
-	});
-
-	it("parses a JSON object string as singleton when schema expects object array", () => {
-		const tool: Tool = {
-			name: "todo_like_json_object",
-			description: "",
-			parameters: z.object({
-				ops: z.array(
-					z.object({
-						op: z.literal("init"),
-						list: z.array(
-							z.object({
-								phase: z.string(),
-								items: z.array(z.string()),
-							}),
-						),
-					}),
-				),
-			}),
-		};
-
-		const result = validateToolArguments(tool, {
-			type: "toolCall",
-			id: "call-json-object-array",
-			name: "todo_like_json_object",
-			arguments: {
-				ops: JSON.stringify({ op: "init", list: [{ phase: "Repro", items: ["capture"] }] }),
-			},
-		});
-
-		expect(result).toEqual({
-			ops: [{ op: "init", list: [{ phase: "Repro", items: ["capture"] }] }],
-		});
-	});
-
-	it("does not wrap malformed JSON array strings into object arrays", () => {
-		const tool: Tool = {
-			name: "todo_like_malformed_json_array",
-			description: "",
-			parameters: z.object({
-				ops: z.array(
-					z.object({
-						op: z.literal("init"),
-						list: z.array(
-							z.object({
-								phase: z.string(),
-								items: z.array(z.string()),
-							}),
-						),
-					}),
-				),
-			}),
-		};
-
-		let thrown: Error | undefined;
-		try {
-			validateToolArguments(tool, {
-				type: "toolCall",
-				id: "call-malformed-json-array",
-				name: "todo_like_malformed_json_array",
-				arguments: {
-					ops: '[{"op":"init","list":[{"phase":"Repro","items":["capture"]}]',
-				},
-			});
-		} catch (error) {
-			if (error instanceof Error) thrown = error;
-			else throw error;
-		}
-
-		expect(thrown?.message).toContain("ops: Invalid input: expected array, received string");
-		expect(thrown?.message).not.toContain("ops/0");
-		expect(thrown?.message).not.toContain('"normalized"');
 	});
 
 	it("wraps a singleton number in an array when schema expects number array", () => {
@@ -692,7 +522,7 @@ describe("Tool argument coercion", () => {
 			arguments: { payload: { items: "[4, 5]" } },
 		};
 
-		const result = validateToolArguments(tool, toolCall) as { payload: { items: number[] } };
+		const result = validateToolArguments(tool, toolCall);
 		expect(result.payload.items).toEqual([4, 5]);
 	});
 
@@ -898,53 +728,6 @@ describe("Tool argument coercion", () => {
 		expect(result).toEqual({ requiredText: "ok" });
 	});
 
-	it("strips empty strings from optional properties before schema validation", () => {
-		const tool: Tool = {
-			name: "mcp-like",
-			description: "",
-			parameters: {
-				type: "object",
-				properties: {
-					namespace: { type: "string" },
-					fieldSelector: { type: "string", pattern: "^.+$" },
-					limit: { type: "number" },
-				},
-				required: ["namespace"],
-				additionalProperties: false,
-			},
-		};
-
-		const result = validateToolArguments(tool, {
-			type: "toolCall",
-			id: "call-empty-optionals",
-			name: "mcp-like",
-			arguments: { namespace: "kube-system", fieldSelector: "", limit: "" },
-		});
-
-		expect(result).toEqual({ namespace: "kube-system" });
-	});
-
-	it("preserves schema-valid empty strings on optional properties", () => {
-		const tool: Tool = {
-			name: "empty-string-tool",
-			description: "",
-			parameters: z.object({
-				requiredText: z.string(),
-				optionalText: z.string().optional(),
-				optionalEnum: z.enum(["", "clear"]).optional(),
-			}),
-		};
-
-		const result = validateToolArguments(tool, {
-			type: "toolCall",
-			id: "call-valid-empty-optionals",
-			name: "empty-string-tool",
-			arguments: { requiredText: "ok", optionalText: "", optionalEnum: "" },
-		});
-
-		expect(result).toEqual({ requiredText: "ok", optionalText: "", optionalEnum: "" });
-	});
-
 	it("drops null optional properties nested in array objects", () => {
 		const tool: Tool = {
 			name: "t12",
@@ -971,7 +754,7 @@ describe("Tool argument coercion", () => {
 		expect(result).toEqual({ edits: [{ target: "a", end: "e" }] });
 	});
 
-	it("drops null while preserving valid empty-string optional properties in anyOf object branches", () => {
+	it("drops null optional properties in anyOf object branches", () => {
 		const opSchema = z.union([
 			z.object({
 				op: z.literal("add_task"),
@@ -1018,14 +801,14 @@ describe("Tool argument coercion", () => {
 				{
 					op: "update",
 					id: "task-1",
-					notes: "",
 					status: "completed",
+					notes: "",
 				},
 			],
 		});
 	});
 
-	it("parses double-encoded numeric strings when schema expects number", () => {
+	it("does not parse quoted JSON strings when schema expects number", () => {
 		const tool: Tool = {
 			name: "t6",
 			description: "",
@@ -1039,8 +822,7 @@ describe("Tool argument coercion", () => {
 			arguments: { timeout: '"300"' },
 		};
 
-		const result = validateToolArguments(tool, toolCall) as { timeout: number };
-		expect(result.timeout).toBe(300);
+		expect(() => validateToolArguments(tool, toolCall)).toThrow('Validation failed for tool "t6"');
 	});
 
 	it("coerces numeric string for Optional<number> (anyOf:[number,null])", () => {
@@ -1677,214 +1459,6 @@ describe("Tool argument coercion", () => {
 				},
 			}) as { payload: { paths: unknown } };
 			expect(result.payload.paths).toEqual(["package.json"]);
-		});
-	});
-
-	describe("double-JSON-encoded object keys", () => {
-		const opsTool: Tool = {
-			name: "todo",
-			description: "",
-			parameters: z.object({
-				ops: z.array(
-					z.object({
-						op: z.string(),
-						task: z.string().optional(),
-					}),
-				),
-			}),
-		};
-
-		it("unwraps keys serialized one extra time (reported case)", () => {
-			const result = validateToolArguments(opsTool, {
-				type: "toolCall",
-				id: "dk1",
-				name: "todo",
-				arguments: {
-					ops: [
-						{ '"op"': "done", '"task"': "Resolve failures" },
-						{ '"op"': "start", '"task"': "Draft response" },
-					],
-				},
-			}) as { ops: Array<{ op: string; task?: string }> };
-			expect(result.ops).toEqual([
-				{ op: "done", task: "Resolve failures" },
-				{ op: "start", task: "Draft response" },
-			]);
-		});
-
-		it("unwraps a double-encoded key at the root", () => {
-			const tool: Tool = {
-				name: "rooted",
-				description: "",
-				parameters: z.object({ label: z.string() }),
-			};
-			const result = validateToolArguments(tool, {
-				type: "toolCall",
-				id: "dk2",
-				name: "rooted",
-				arguments: { '"label"': "hi" },
-			}) as { label: string };
-			expect(result.label).toBe("hi");
-		});
-
-		it("peels multiple layers of accidental encoding off a key", () => {
-			const tool: Tool = {
-				name: "deep",
-				description: "",
-				parameters: z.object({ label: z.string() }),
-			};
-			const result = validateToolArguments(tool, {
-				type: "toolCall",
-				id: "dk3",
-				name: "deep",
-				// Key serialized twice: real name `label` -> `"label"` -> `"\"label\""`.
-				arguments: { [JSON.stringify(JSON.stringify("label"))]: "hi" },
-			}) as { label: string };
-			expect(result.label).toBe("hi");
-		});
-
-		it("does not clobber an existing decoded sibling key", () => {
-			const tool: Tool = {
-				name: "clobber",
-				description: "",
-				parameters: z.object({ value: z.string() }),
-			};
-			const result = validateToolArguments(tool, {
-				type: "toolCall",
-				id: "dk4",
-				name: "clobber",
-				arguments: { value: "real", '"value"': "encoded" },
-			}) as { value: string };
-			expect(result.value).toBe("real");
-		});
-
-		it("unwraps keys exposed after a JSON-string field is parsed", () => {
-			const tool: Tool = {
-				name: "wrap",
-				description: "",
-				parameters: z.object({
-					payload: z.object({ op: z.string() }),
-				}),
-			};
-			const result = validateToolArguments(tool, {
-				type: "toolCall",
-				id: "dk5",
-				name: "wrap",
-				arguments: {
-					payload: JSON.stringify({ '"op"': "done" }),
-				},
-			}) as { payload: { op: string } };
-			expect(result.payload.op).toBe("done");
-		});
-
-		it("unwraps keys when the entire arguments payload is a JSON string", () => {
-			const result = validateToolArguments(opsTool, {
-				type: "toolCall",
-				id: "dk7",
-				name: "todo",
-				// Whole arg object stringified, with each op key double-encoded.
-				arguments: JSON.stringify({
-					ops: [{ '"op"': "done", '"task"': "Resolve failures" }],
-				}) as unknown as Record<string, unknown>,
-			}) as { ops: Array<{ op: string; task?: string }> };
-			expect(result.ops).toEqual([{ op: "done", task: "Resolve failures" }]);
-		});
-
-		it("unwraps keys inside a JSON-array string on a string|array union", () => {
-			const tool: Tool = {
-				name: "union",
-				description: "",
-				parameters: z.object({
-					items: z.union([z.string(), z.array(z.object({ op: z.string() }))]),
-				}),
-			};
-			const result = validateToolArguments(tool, {
-				type: "toolCall",
-				id: "dk8",
-				name: "union",
-				// Array value double-serialized AND each object key double-encoded.
-				arguments: { items: JSON.stringify([{ '"op"': "done" }]) },
-			}) as { items: Array<{ op: string }> };
-			expect(result.items).toEqual([{ op: "done" }]);
-		});
-
-		it("leaves ordinary keys untouched", () => {
-			const tool: Tool = {
-				name: "plain",
-				description: "",
-				parameters: z.object({ op: z.string(), count: z.number() }),
-			};
-			const result = validateToolArguments(tool, {
-				type: "toolCall",
-				id: "dk6",
-				name: "plain",
-				arguments: { op: "done", count: 2 },
-			}) as { op: string; count: number };
-			expect(result).toEqual({ op: "done", count: 2 });
-		});
-	});
-
-	describe("single-string-field coercion", () => {
-		it("remaps a different string field to the single required string field when target is absent", () => {
-			const tool: Tool = {
-				name: "single-arg",
-				description: "",
-				parameters: z.object({ input: z.string() }),
-			};
-			const result = validateToolArguments(tool, {
-				type: "toolCall",
-				id: "c1",
-				name: "single-arg",
-				arguments: { _input: "hello payload" },
-			}) as { input: string };
-			expect(result).toEqual({ input: "hello payload" });
-		});
-
-		it("leaves arguments alone when the target field is present but has the wrong type", () => {
-			const tool: Tool = {
-				name: "single-arg",
-				description: "",
-				parameters: z.object({ input: z.string() }),
-			};
-			const result = validateToolArguments(tool, {
-				type: "toolCall",
-				id: "c2",
-				name: "single-arg",
-				arguments: { input: 123, _input: "hello" },
-			}) as { input: string };
-			expect(result.input).toBe("123");
-		});
-
-		it("does not remap when the schema has multiple fields", () => {
-			const tool: Tool = {
-				name: "multi-arg",
-				description: "",
-				parameters: z.object({ input: z.string(), path: z.string() }),
-			};
-			expect(() =>
-				validateToolArguments(tool, {
-					type: "toolCall",
-					id: "c3",
-					name: "multi-arg",
-					arguments: { other: "hello", path: "file.ts" },
-				}),
-			).toThrow();
-		});
-
-		it("does not remap when there is no string candidate", () => {
-			const tool: Tool = {
-				name: "single-arg",
-				description: "",
-				parameters: z.object({ input: z.string() }),
-			};
-			expect(() =>
-				validateToolArguments(tool, {
-					type: "toolCall",
-					id: "c4",
-					name: "single-arg",
-					arguments: { other: 123 },
-				}),
-			).toThrow();
 		});
 	});
 });

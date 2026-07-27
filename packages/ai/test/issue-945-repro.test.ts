@@ -2,12 +2,12 @@ import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import type { Context, Model, Tool } from "@oh-my-pi/pi-ai/types";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { type } from "arktype";
+import { z } from "zod/v4";
 
 const echoTool: Tool = {
 	name: "echo",
 	description: "Echo input",
-	parameters: type({ text: "string" }),
+	parameters: z.object({ text: z.string() }),
 };
 
 const context: Context = {

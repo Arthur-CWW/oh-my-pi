@@ -23,13 +23,13 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 		customRendered: true,
 		// Streaming: agent chosen, assignment still landing.
 		streamingArgs: {
-			agent: "task",
+			agent: "implementer",
 			id: "AuthLoader",
 			description: "Load auth middleware",
 			assignment: "Read packages/server/src/auth/*.ts and summarize the session-cookie",
 		},
 		args: {
-			agent: "task",
+			agent: "implementer",
 			id: "AuthLoader",
 			description: "Load auth middleware",
 			assignment:
@@ -50,7 +50,7 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 					{
 						index: 0,
 						id: "AuthLoader",
-						agent: "task",
+						agent: "implementer",
 						agentSource: "bundled",
 						status: "completed",
 						task: "Read packages/server/src/auth/session.ts and middleware.ts",
@@ -75,7 +75,7 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 					{
 						index: 0,
 						id: "AuthLoader",
-						agent: "task",
+						agent: "implementer",
 						agentSource: "bundled",
 						description: "Load auth middleware",
 						task: "Read packages/server/src/auth/session.ts and middleware.ts",
@@ -117,7 +117,7 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 					{
 						index: 0,
 						id: "RateLimiter",
-						agent: "task",
+						agent: "implementer",
 						agentSource: "bundled",
 						description: "Audit rate limiter",
 						task: "Inspect packages/server/src/auth/rate-limit.ts",
@@ -176,6 +176,7 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 					to: "Main",
 					body: "Done with auth.ts — go ahead, just rebase past my session-store rename.",
 					ts: FIXTURE_NOW - 5_000,
+					origin: "agent",
 					replyTo: "7181122334455667788",
 				},
 			} satisfies IrcDetails,
@@ -218,6 +219,7 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 					from: "AuthLoader",
 					to: "Main",
 					body: "session-store rename is merged; auth.ts is yours.",
+					origin: "agent",
 					ts: FIXTURE_NOW - 30_000,
 				},
 			} satisfies IrcDetails,
@@ -251,6 +253,7 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 						to: "Main",
 						body: "hub table reads unreadCount — ping me when the bus lands.",
 						ts: FIXTURE_NOW - 4 * 60_000,
+						origin: "agent",
 					},
 					{
 						id: "7181122334455667792",
@@ -258,15 +261,11 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 						to: "Main",
 						body: "bus is in; receipts carry outcome.",
 						ts: FIXTURE_NOW - 60_000,
+						origin: "agent",
 						replyTo: "7181122334455667791",
 					},
 				],
 			} satisfies IrcDetails,
-		},
-		errorResult: {
-			isError: true,
-			content: [{ type: "text", text: "IRC inbox failed: message store unavailable." }],
-			details: { op: "inbox" } satisfies IrcDetails,
 		},
 	},
 
@@ -314,11 +313,6 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 				],
 			} satisfies IrcDetails,
 		},
-		errorResult: {
-			isError: true,
-			content: [{ type: "text", text: "IRC list failed: agent hub is unavailable." }],
-			details: { op: "list" } satisfies IrcDetails,
-		},
 	},
 
 	goal: {
@@ -328,7 +322,6 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 		args: {
 			op: "create",
 			objective: "Ship the auth hardening pass: per-account rate limits and sliding session expiry.",
-			token_budget: 500_000,
 		},
 		result: {
 			content: [
@@ -339,13 +332,11 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 			],
 			details: {
 				op: "create",
-				remainingTokens: 451_800,
-				completionBudgetReport: null,
+				completionUsageReport: null,
 				goal: {
 					id: "goal_8f2a",
 					objective: "Ship the auth hardening pass: per-account rate limits and sliding session expiry.",
 					status: "active",
-					tokenBudget: 500_000,
 					tokensUsed: 48_200,
 					timeUsedSeconds: 312,
 					createdAt: 1_749_200_000_000,
@@ -398,18 +389,19 @@ export const agenticFixtures: Record<string, GalleryFixture> = {
 		},
 		errorResult: {
 			isError: true,
-			content: [{ type: "text", text: "1 job failed." }],
+			content: [{ type: "text", text: "Job cancelled by user." }],
 			details: {
 				jobs: [
 					{
 						id: "job_d4",
 						type: "task",
-						status: "failed",
+						status: "cancelled",
 						label: "Refactor the session store to Redis",
 						durationMs: 52_300,
-						errorText: "Subagent exited 1: Redis connection string is missing.",
+						errorText: "Aborted: superseded by goal re-scope.",
 					},
 				],
+				cancelled: [{ id: "job_d4", status: "cancelled" }],
 			},
 		},
 	},

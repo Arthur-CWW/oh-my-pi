@@ -1,9 +1,11 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Usage } from "@oh-my-pi/pi-ai";
 import { $env } from "@oh-my-pi/pi-utils";
-import { type BaseType, type } from "arktype";
+import { z } from "zod/v4";
 import type { AgentSessionEvent } from "../session/agent-session";
+import type { SessionSpawnCordon } from "../session/session-control";
 import type { NestedRepoPatch } from "./worktree";
+import type { SpawnRouteReceipt } from "./route-resolution";
 
 /** Source of an agent definition */
 export type AgentSource = "bundled" | "user" | "project";
@@ -78,23 +80,51 @@ export interface SubagentLifecyclePayload {
 export const ROLE_LABEL_MAX = 80;
 /** Schema bound on the raw `role` input, before it is label-normalized at every use site. */
 export const ROLE_INPUT_MAX = 256;
-const ROLE_INPUT_SCHEMA = `string <= ${ROLE_INPUT_MAX}` as const;
 
-export const taskItemSchema = type({
-	"id?": "string",
-	"description?": "string",
-	"role?": ROLE_INPUT_SCHEMA,
-	assignment: "string",
-	"+": "delete",
-});
-const taskItemSchemaIsolated = type({
-	"id?": "string",
-	"description?": "string",
-	"role?": ROLE_INPUT_SCHEMA,
-	assignment: "string",
-	"isolated?": "boolean",
-	"+": "delete",
-});
+/**
+ * One unit of work. The single-spawn schema is `{ agent, ...taskItemSchema }`;
+ * the batch schema (`task.batch`) is `{ agent, context, tasks: taskItemSchema[] }`.
+ * When task isolation is enabled, `isolated` joins the item shape (per-item in
+ * batch form, top-level in the flat form via the spread).
+ */
+const modelShape = {
+	model: z
+		.union([z.string().min(1), z.array(z.string().min(1)).min(1)])
+		.optional()
+		.describe("model selector override for this spawn; accepts provider/model, fuzzy selector, or model role"),
+};
+const taskItemShape = {
+	id: z.string().max(48).optional().describe("stable agent id; default generated"),
+	description: z.string().optional().describe("ui label, not seen by subagent"),
+	role: z
+		.string()
+		.max(ROLE_INPUT_MAX)
+		.optional()
+		.describe(
+			"specialist role/expertise this subagent embodies (e.g. 'Rust async-runtime specialist'); shapes its identity and display name",
+		),
+	...modelShape,
+	assignment: z.string().describe("the work; self-contained instructions"),
+	timeoutSec: z
+		.number()
+		.int()
+		.min(60)
+		.max(3600)
+		.optional()
+		.describe("per-spawn wall-clock timeout in seconds; overrides task.maxRuntimeMs for this spawn only"),
+};
+const isolatedShape = {
+	isolated: z.boolean().optional().describe("run in isolated env; returns patches"),
+};
+const agentShape = {
+	agent: z.string().describe("agent type to spawn"),
+};
+const contextShape = {
+	context: z.string().describe("shared background prepended to each assignment"),
+};
+
+export const taskItemSchema = z.object(taskItemShape);
+const taskItemSchemaIsolated = z.object({ ...taskItemShape, ...isolatedShape });
 
 /** Single task item. Fields are optional defensively: args stream in token by token. */
 export interface TaskItem {
@@ -104,124 +134,42 @@ export interface TaskItem {
 	description?: string;
 	/** Specialist role/expertise this subagent embodies; shapes its system-prompt identity and display name. */
 	role?: string;
+	/** Model selector override for this spawn. */
+	model?: string | string[];
 	/** The work; required by the schema. */
 	assignment?: string;
 	/** Run this spawn in an isolated worktree (batch form; flat form carries it top-level). */
 	isolated?: boolean;
+	/** Per-spawn wall-clock timeout in seconds; overrides task.maxRuntimeMs for this spawn only. */
+	timeoutSec?: number;
 }
 
-export const taskSchema = type({
-	agent: "string = 'task'",
-	"id?": "string",
-	"description?": "string",
-	"role?": ROLE_INPUT_SCHEMA,
-	assignment: "string",
-	"isolated?": "boolean",
-	"+": "delete",
+export const taskSchema = z.object({ ...agentShape, ...taskItemShape, ...isolatedShape });
+const taskSchemaNoIsolation = z.object({ ...agentShape, ...taskItemShape });
+const taskSchemaBatch = z.object({
+	...agentShape,
+	...modelShape,
+	...contextShape,
+	tasks: z.array(taskItemSchemaIsolated).describe("tasks to spawn; one subagent per item"),
 });
-const taskSchemaNoIsolation = type({
-	agent: "string = 'task'",
-	"id?": "string",
-	"description?": "string",
-	"role?": ROLE_INPUT_SCHEMA,
-	assignment: "string",
-	"+": "delete",
-});
-const taskSchemaBatch = type({
-	agent: "string = 'task'",
-	context: "string",
-	tasks: taskItemSchemaIsolated.array(),
-	"+": "delete",
-});
-const taskSchemaBatchNoIsolation = type({
-	agent: "string = 'task'",
-	context: "string",
-	tasks: taskItemSchema.array(),
-	"+": "delete",
+const taskSchemaBatchNoIsolation = z.object({
+	...agentShape,
+	...modelShape,
+	...contextShape,
+	tasks: z.array(taskItemSchema).describe("tasks to spawn; one subagent per item"),
 });
 const ALL_TASK_SCHEMAS = [taskSchema, taskSchemaNoIsolation, taskSchemaBatch, taskSchemaBatchNoIsolation] as const;
 
 type DynamicTaskSchema = (typeof ALL_TASK_SCHEMAS)[number];
 export type TaskSchema = typeof taskSchema;
 /** Active task tool parameter schema for the current isolation / batch flags */
-export type TaskToolSchemaInstance = DynamicTaskSchema | BaseType;
+export type TaskToolSchemaInstance = DynamicTaskSchema;
 
-const TASK_AGENT_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
-const taskSchemaCache = new Map<string, BaseType>();
-
-function taskAgentSchemaRule(defaultAgent: string): string {
-	const trimmed = defaultAgent.trim();
-	if (TASK_AGENT_NAME_PATTERN.test(trimmed)) {
-		return `string = '${trimmed}'`;
-	}
-	return "string";
-}
-
-function createTaskSchema(options: {
-	isolationEnabled: boolean;
-	batchEnabled: boolean;
-	defaultAgent: string;
-}): BaseType {
-	const agent = taskAgentSchemaRule(options.defaultAgent);
+export function getTaskSchema(options: { isolationEnabled: boolean; batchEnabled: boolean }): DynamicTaskSchema {
 	if (options.batchEnabled) {
-		if (options.isolationEnabled) {
-			return type.raw({
-				agent,
-				context: "string",
-				tasks: taskItemSchemaIsolated.array(),
-				"+": "delete",
-			});
-		}
-		return type.raw({
-			agent,
-			context: "string",
-			tasks: taskItemSchema.array(),
-			"+": "delete",
-		});
+		return options.isolationEnabled ? taskSchemaBatch : taskSchemaBatchNoIsolation;
 	}
-	if (options.isolationEnabled) {
-		return type.raw({
-			agent,
-			"id?": "string",
-			"description?": "string",
-			"role?": ROLE_INPUT_SCHEMA,
-			assignment: "string",
-			"isolated?": "boolean",
-			"+": "delete",
-		});
-	}
-	return type.raw({
-		agent,
-		"id?": "string",
-		"description?": "string",
-		"role?": ROLE_INPUT_SCHEMA,
-		assignment: "string",
-		"+": "delete",
-	});
-}
-
-export function getTaskSchema(options: { isolationEnabled: boolean; batchEnabled: boolean }): DynamicTaskSchema;
-export function getTaskSchema(options: {
-	isolationEnabled: boolean;
-	batchEnabled: boolean;
-	defaultAgent: string;
-}): TaskToolSchemaInstance;
-export function getTaskSchema(options: {
-	isolationEnabled: boolean;
-	batchEnabled: boolean;
-	defaultAgent?: string;
-}): TaskToolSchemaInstance {
-	const defaultAgent = options.defaultAgent ?? "task";
-	if (defaultAgent === "task") {
-		if (options.batchEnabled) return options.isolationEnabled ? taskSchemaBatch : taskSchemaBatchNoIsolation;
-		return options.isolationEnabled ? taskSchema : taskSchemaNoIsolation;
-	}
-	const key = `${options.isolationEnabled ? "iso" : "flat"}:${options.batchEnabled ? "batch" : "single"}:${defaultAgent}`;
-	const cached = taskSchemaCache.get(key);
-	if (cached) return cached;
-	const schema = createTaskSchema({ ...options, defaultAgent });
-	taskSchemaCache.set(key, schema);
-	return schema;
+	return options.isolationEnabled ? taskSchema : taskSchemaNoIsolation;
 }
 
 /**
@@ -231,7 +179,7 @@ export function getTaskSchema(options: {
  * transcripts using the flat form keep working under either setting.
  */
 export interface TaskParams {
-	/** Agent type to spawn; omitted values resolve from the session spawn policy. */
+	/** Agent type; required. */
 	agent?: string;
 	/** Stable agent id (flat form); default = generated AdjectiveNoun. */
 	id?: string;
@@ -239,6 +187,8 @@ export interface TaskParams {
 	description?: string;
 	/** Specialist role/expertise this subagent embodies; shapes its system-prompt identity and display name. */
 	role?: string;
+	/** Model selector default for all spawns in this call; per-item model wins in batch form. */
+	model?: string | string[];
 	/** The work (flat form). */
 	assignment?: string;
 	/** Batch form (`task.batch`): one subagent per item. */
@@ -247,6 +197,8 @@ export interface TaskParams {
 	context?: string;
 	/** Run in an isolated worktree (flat form; per-item in batch form). */
 	isolated?: boolean;
+	/** Per-spawn wall-clock timeout in seconds (flat form). */
+	timeoutSec?: number;
 }
 
 /**
@@ -328,23 +280,6 @@ export interface AgentDefinition {
 	filePath?: string;
 }
 
-/** Details extracted from a subagent `yield` tool call for final-result assembly and task rendering. */
-export interface YieldItem {
-	data?: unknown;
-	status?: "success" | "aborted";
-	error?: string;
-	/** A string label is terminal; a non-empty array of labels is incremental. */
-	type?: string | string[];
-	/** Resolve this yield's payload from the latest durable assistant text instead of `data`. */
-	useLastTurn?: boolean;
-	/**
-	 * Set by the in-tool yield validator when it exhausted its retry budget and
-	 * accepted schema-invalid data anyway. The executor preserves that override
-	 * during post-mortem validation.
-	 */
-	schemaOverridden?: boolean;
-}
-
 /** Progress tracking for a single agent */
 export interface AgentProgress {
 	index: number;
@@ -352,8 +287,16 @@ export interface AgentProgress {
 	agent: string;
 	agentSource: AgentSource;
 	status: "pending" | "running" | "completed" | "failed" | "aborted";
+	/** Parent-side worker liveness projection. Set only while a subprocess is being probed or confirmed dead. */
+	livenessState?: "stalled" | "dead";
 	task: string;
 	assignment?: string;
+	/** Shared spawn context supplied alongside the per-agent assignment. */
+	spawnContext?: string;
+	/** Definition file used to specialize this agent type. */
+	definitionSourcePath?: string;
+	/** Immediate agent which issued this spawn. */
+	spawnerId?: string;
 	description?: string;
 	lastIntent?: string;
 	currentTool?: string;
@@ -366,6 +309,8 @@ export interface AgentProgress {
 	requests: number;
 	/** Cumulative input + output + cacheWrite tokens across all turns. Excludes cacheRead (re-reads cached context every turn, making cumulative sum misleading). */
 	tokens: number;
+	/** Cumulative output tokens across all turns. Drives the HUD generation-speed rate (output tok/s). */
+	outputTokens?: number;
 	/**
 	 * Current per-turn context size: latest assistant message's `usage.totalTokens`.
 	 * This is the number to compare against `contextWindow` — what compaction
@@ -381,6 +326,10 @@ export interface AgentProgress {
 	modelOverride?: string | string[];
 	/** Resolved model display string in the form `<provider>/<id>`, optionally suffixed with `:<thinkingLevel>` when the level was set explicitly. Undefined when the model could not be resolved. */
 	resolvedModel?: string;
+	/** Installed binary provenance captured at the spawn boundary. */
+	buildVersion?: string;
+	buildDigest?: string;
+	routeReceipt?: SpawnRouteReceipt;
 	/** Data extracted by registered subprocess tool handlers (keyed by tool name) */
 	extractedToolData?: Record<string, unknown[]>;
 	/**
@@ -391,6 +340,7 @@ export interface AgentProgress {
 	 * provider quota.
 	 */
 	retryState?: {
+		cause: "network" | "rate-limit" | "provider";
 		attempt: number;
 		maxAttempts: number;
 		delayMs: number;
@@ -417,6 +367,13 @@ export interface AgentProgress {
 	inflightTaskDetails?: TaskToolDetails;
 }
 
+export interface TimeoutPartialProgress {
+	filesCreated: string[];
+	filesModified: string[];
+	lastAssistantText?: string;
+	ircNote?: string;
+}
+
 /** Result from a single agent execution */
 export interface SingleResult {
 	index: number;
@@ -434,6 +391,8 @@ export interface SingleResult {
 	durationMs: number;
 	/** Cumulative input + output + cacheWrite tokens across all turns. Excludes cacheRead (re-reads cached context every turn, making cumulative sum misleading). */
 	tokens: number;
+	/** Cumulative output tokens across all turns. See `AgentProgress.outputTokens`. */
+	outputTokens?: number;
 	/** Count of assistant requests (assistant message_end events) across the run. */
 	requests: number;
 	/** Latest per-turn context size at task completion. See `AgentProgress.contextTokens`. */
@@ -443,6 +402,7 @@ export interface SingleResult {
 	modelOverride?: string | string[];
 	/** Resolved model display string in the form `<provider>/<id>`, optionally suffixed with `:<thinkingLevel>` when the level was set explicitly. Omitted from tool-result JSON when undefined to keep wire payloads small. */
 	resolvedModel?: string;
+	routeReceipt?: SpawnRouteReceipt;
 	error?: string;
 	aborted?: boolean;
 	abortReason?: string;
@@ -454,12 +414,6 @@ export interface SingleResult {
 	patchPath?: string;
 	/** Branch name for isolated branch-mode output */
 	branchName?: string;
-	/**
-	 * Baseline commit SHA the task branch was created from. Passed to
-	 * `mergeTaskBranches` so cherry-pick uses the inclusive range
-	 * `branchBaseSha..branchName` and preserves every agent commit's message.
-	 */
-	branchBaseSha?: string;
 	/** Nested repo patches to apply after parent merge */
 	nestedPatches?: NestedRepoPatch[];
 	/** Data extracted by registered subprocess tool handlers (keyed by tool name) */
@@ -474,8 +428,15 @@ export interface SingleResult {
 		attempt: number;
 		errorMessage: string;
 	};
+	/** Partial progress recovered when a wall-clock timeout aborts the subagent. */
+	timeoutPartial?: TimeoutPartialProgress;
 	/** Output metadata for agent:// URL integration */
 	outputMeta?: { lineCount: number; charCount: number };
+}
+
+export interface SessionControlPauseRefusal {
+	readonly kind: "SessionControlPaused";
+	readonly reason: "session paused by fleet control";
 }
 
 /** Tool details for TUI rendering */
@@ -483,6 +444,10 @@ export interface TaskToolDetails {
 	projectAgentsDir: string | null;
 	results: SingleResult[];
 	totalDurationMs: number;
+	/** Typed spawn-admission refusal while the parent session is rollout-cordoned. */
+	spawnRefusal?: SessionSpawnCordon;
+	/** Typed spawn-admission refusal while fleet control is paused. */
+	pauseRefusal?: SessionControlPauseRefusal;
 	/** Aggregated usage across all subagents. */
 	usage?: Usage;
 	outputPaths?: string[];

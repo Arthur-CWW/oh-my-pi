@@ -9,7 +9,6 @@ import type { TimeRange } from "../types";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
-const FIVE_MIN_MS = 5 * 60 * 1000;
 
 export interface RangeMeta {
 	/** Human label used in chart subtitles ("the last 24 hours"). */
@@ -28,8 +27,8 @@ const RANGE_META: Record<TimeRange, RangeMeta> = {
 	"1h": {
 		windowLabel: "the last hour",
 		trendLabel: "1h Trend",
-		bucketMs: FIVE_MIN_MS,
-		bucketCount: 12,
+		bucketMs: HOUR_MS,
+		bucketCount: 1,
 		tickFormat: "HH:mm",
 	},
 	"24h": {

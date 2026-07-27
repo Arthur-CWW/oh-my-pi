@@ -61,9 +61,6 @@ export type Edit =
 			index: number;
 	  };
 
-/** File-level operation parsed from a section body (`REM` / `MV`). */
-export type FileOp = { kind: "rem" } | { kind: "move"; dest: string };
-
 /** Result of applying a parsed set of edits to a text body. */
 export interface ApplyResult {
 	/** Post-edit text body. */

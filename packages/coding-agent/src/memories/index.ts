@@ -147,42 +147,16 @@ export function startMemoryStartupTask(options: {
 	});
 }
 
-interface MemoryInstructionSession {
-	sessionManager: Pick<AgentSession["sessionManager"], "getSessionFile">;
-}
-
-interface MemoryToolDeveloperInstructionsSnapshot {
-	summary: string;
-	learned: string;
-}
-
-interface CachedMemoryToolDeveloperInstructions {
-	sessionFile: string | undefined;
-	snapshot: MemoryToolDeveloperInstructionsSnapshot | undefined;
-	value: string | undefined;
-}
-
-const memoryToolDeveloperInstructionsBySession = new WeakMap<
-	MemoryInstructionSession,
-	CachedMemoryToolDeveloperInstructions
->();
-const memoryToolDeveloperInstructionsByRoot = new Map<string, MemoryToolDeveloperInstructionsSnapshot | undefined>();
-
-function getMemoryInstructionRoot(agentDir: string, settings: Settings): string {
-	return getMemoryRoot(agentDir, settings.getCwd());
-}
-
-function getMemoryInstructionSessionFile(session: MemoryInstructionSession): string | undefined {
-	return session.sessionManager.getSessionFile() ?? undefined;
-}
-
-async function readMemoryToolDeveloperInstructionsSnapshot(
+/**
+ * Build memory usage instructions for prompt injection.
+ */
+export async function buildMemoryToolDeveloperInstructions(
 	agentDir: string,
 	settings: Settings,
-): Promise<MemoryToolDeveloperInstructionsSnapshot | undefined> {
+): Promise<string | undefined> {
 	const cfg = loadMemoryConfig(settings);
 	if (!cfg.enabled) return undefined;
-	const memoryRoot = getMemoryInstructionRoot(agentDir, settings);
+	const memoryRoot = getMemoryRoot(agentDir, settings.getCwd());
 
 	let summary = "";
 	try {
@@ -192,21 +166,9 @@ async function readMemoryToolDeveloperInstructionsSnapshot(
 		// so any captured lessons still surface on their own.
 	}
 	const learned = await readLearnedLessons(memoryRoot);
-	return { summary, learned };
-}
+	if (!summary && !learned) return undefined;
 
-function renderMemoryToolDeveloperInstructionsSnapshot(
-	snapshot: MemoryToolDeveloperInstructionsSnapshot | undefined,
-	settings: Settings,
-): string | undefined {
-	if (!snapshot) return undefined;
-	const cfg = loadMemoryConfig(settings);
-	if (!cfg.enabled) return undefined;
-	if (!snapshot.summary && !snapshot.learned) return undefined;
-
-	const summaryOut = snapshot.summary
-		? truncateByApproxTokens(snapshot.summary, cfg.summaryInjectionTokenLimit).trim()
-		: "";
+	const summaryOut = summary ? truncateByApproxTokens(summary, cfg.summaryInjectionTokenLimit).trim() : "";
 	// Lessons share ONE injection budget with the summary so the combined block
 	// stays within `summaryInjectionTokenLimit` (~4 chars/token, matching
 	// truncateByApproxTokens). With no summary, lessons get the whole budget.
@@ -214,80 +176,13 @@ function renderMemoryToolDeveloperInstructionsSnapshot(
 	// can exceed `limit * 4` chars and drive the remainder negative — when the
 	// summary already fills the budget, lessons are simply dropped.
 	const learnedBudget = Math.max(0, cfg.summaryInjectionTokenLimit - Math.ceil(summaryOut.length / 4));
-	const learnedOut =
-		snapshot.learned && learnedBudget > 0 ? truncateByApproxTokens(snapshot.learned, learnedBudget).trim() : "";
+	const learnedOut = learned && learnedBudget > 0 ? truncateByApproxTokens(learned, learnedBudget).trim() : "";
 	if (!summaryOut && !learnedOut) return undefined;
 
 	return prompt.render(readPathTemplate, {
 		memory_summary: summaryOut,
 		learned: learnedOut,
 	});
-}
-
-function cacheMemoryToolDeveloperInstructions(
-	session: MemoryInstructionSession,
-	sessionFile: string | undefined,
-	snapshot: MemoryToolDeveloperInstructionsSnapshot | undefined,
-	settings: Settings,
-): string | undefined {
-	const value = renderMemoryToolDeveloperInstructionsSnapshot(snapshot, settings);
-	memoryToolDeveloperInstructionsBySession.set(session, { sessionFile, snapshot, value });
-	return value;
-}
-
-/**
- * Drop the per-session memory instruction snapshot after explicit memory state
- * changes that must affect the active conversation immediately, such as
- * `/memory clear`.
- */
-export function clearMemoryToolDeveloperInstructionsCache(session: MemoryInstructionSession | undefined): void {
-	if (session) memoryToolDeveloperInstructionsBySession.delete(session);
-}
-
-/**
- * Refresh the active session's consolidated-memory snapshot after startup maintenance.
- *
- * Startup may finish after the first prompt build and write `memory_summary.md`;
- * the active session should see that summary. It must not reread `learned.md`,
- * because a `learn` call racing with startup belongs to the next session's
- * memory prompt, not the active prompt-cache prefix.
- */
-export async function refreshMemoryToolDeveloperInstructionsCacheAfterStartup(
-	session: MemoryInstructionSession,
-	agentDir: string,
-	settings: Settings,
-): Promise<void> {
-	const sessionFile = getMemoryInstructionSessionFile(session);
-	const cached = memoryToolDeveloperInstructionsBySession.get(session);
-	const current = await readMemoryToolDeveloperInstructionsSnapshot(agentDir, settings);
-	const root = getMemoryInstructionRoot(agentDir, settings);
-	const baseline = memoryToolDeveloperInstructionsByRoot.get(root);
-	const cachedLearned = cached && cached.sessionFile === sessionFile ? cached.snapshot?.learned : undefined;
-	const learned = cachedLearned ?? baseline?.learned ?? "";
-	const snapshot = current ? { summary: current.summary, learned } : undefined;
-	cacheMemoryToolDeveloperInstructions(session, sessionFile, snapshot, settings);
-}
-
-/**
- * Build memory usage instructions for prompt injection.
- */
-export async function buildMemoryToolDeveloperInstructions(
-	agentDir: string,
-	settings: Settings,
-	session?: MemoryInstructionSession,
-): Promise<string | undefined> {
-	if (!session) {
-		const snapshot = await readMemoryToolDeveloperInstructionsSnapshot(agentDir, settings);
-		memoryToolDeveloperInstructionsByRoot.set(getMemoryInstructionRoot(agentDir, settings), snapshot);
-		return renderMemoryToolDeveloperInstructionsSnapshot(snapshot, settings);
-	}
-
-	const sessionFile = getMemoryInstructionSessionFile(session);
-	const cached = memoryToolDeveloperInstructionsBySession.get(session);
-	if (cached && cached.sessionFile === sessionFile) return cached.value;
-
-	const snapshot = await readMemoryToolDeveloperInstructionsSnapshot(agentDir, settings);
-	return cacheMemoryToolDeveloperInstructions(session, sessionFile, snapshot, settings);
 }
 
 /**
@@ -324,7 +219,6 @@ async function runMemoryStartup(options: {
 }): Promise<void> {
 	await runPhase1(options);
 	await runPhase2(options);
-	await refreshMemoryToolDeveloperInstructionsCacheAfterStartup(options.session, options.agentDir, options.settings);
 	await options.session.refreshBaseSystemPrompt?.();
 }
 
@@ -635,21 +529,12 @@ async function collectThreads(session: AgentSession, currentThreadId?: string): 
 		let id = name.slice(0, -6);
 		try {
 			const fileText = await Bun.file(fullPath).text();
-			let sawTitleSlot = false;
-			for (const rawLine of fileText.split(/\r?\n/)) {
-				const line = rawLine.trim();
-				if (!line) continue;
-				const parsed = parseJsonlLenient<Record<string, unknown>>(line);
-				const header = Array.isArray(parsed) && parsed.length > 0 ? parsed[0] : undefined;
-				if (!sawTitleSlot && header?.type === "title") {
-					sawTitleSlot = true;
-					continue;
-				}
-				if (header?.type === "session") {
-					if (typeof header.cwd === "string") cwd = header.cwd;
-					if (typeof header.id === "string") id = header.id;
-				}
-				break;
+			const firstLine = fileText.split("\n", 1)[0] ?? "";
+			const parsed = parseJsonlLenient(firstLine);
+			const header = Array.isArray(parsed) && parsed.length > 0 ? (parsed[0] as Record<string, unknown>) : undefined;
+			if (header && header.type === "session") {
+				if (typeof header.cwd === "string") cwd = header.cwd;
+				if (typeof header.id === "string") id = header.id;
 			}
 		} catch {
 			// ignore malformed session files
@@ -674,7 +559,7 @@ function shouldPersistResponseItemForMemories(message: AgentMessage): boolean {
 	}
 	if (role !== "toolResult") return false;
 	const toolName = (message as { toolName?: string }).toolName;
-	if (toolName === "bash" || toolName === "eval" || toolName === "read" || toolName === "grep") {
+	if (toolName === "bash" || toolName === "eval" || toolName === "read" || toolName === "search") {
 		const text = extractMessageText(message);
 		return text.length > 0 && text.length <= 32_000;
 	}
@@ -1219,6 +1104,7 @@ async function resolveMemoryModel(options: {
 		const resolved = resolveModelRoleValue(requestedModel, modelRegistry.getAll(), {
 			settings: session.settings,
 			matchPreferences: getModelMatchPreferences(session.settings),
+			modelRegistry,
 		});
 		if (resolved.model) return resolved.model;
 	}

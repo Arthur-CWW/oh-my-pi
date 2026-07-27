@@ -6,12 +6,7 @@
  * credential expires or a 401 surfaces on a supposedly-fresh credential.
  */
 
-import type {
-	AuthCredential,
-	AuthCredentialSnapshot,
-	AuthCredentialSnapshotEntry,
-	StoredCredentialBlock,
-} from "../auth-storage";
+import type { AuthCredential, AuthCredentialSnapshot, AuthCredentialSnapshotEntry } from "../auth-storage";
 import type { UsageReport } from "../usage";
 
 /** GET /v1/healthz response body. */
@@ -27,11 +22,8 @@ export interface RefresherSchedule {
 	nextSweepInMs: number;
 }
 
-export type CredentialBlockSnapshot = Omit<StoredCredentialBlock, "credentialId">;
-
 export type SnapshotEntry = AuthCredentialSnapshotEntry & {
 	rotatesInMs: number | null;
-	blocks?: CredentialBlockSnapshot[];
 };
 
 /** GET /v1/snapshot response body. */
@@ -55,23 +47,15 @@ export interface CredentialRefreshResponse {
 /** POST /v1/credential/:id/disable request body. */
 export interface CredentialDisableRequest {
 	cause: string;
+	/**
+	 * Serialized redacted credential data observed by the caller. When present,
+	 * disable is conditional on the broker still exposing the same snapshot.
+	 */
+	expectedData?: string;
 }
 
 /** POST /v1/credential/:id/disable response body. */
 export interface CredentialDisableResponse {
-	ok: boolean;
-}
-
-/** POST /v1/credential/:id/block request body. */
-export type CredentialBlockRequest = CredentialBlockSnapshot;
-
-/** POST /v1/credential/:id/block response body. */
-export interface CredentialBlockResponse {
-	ok: boolean;
-}
-
-/** DELETE /v1/credential/:id/blocks response body. */
-export interface CredentialBlocksDeleteResponse {
 	ok: boolean;
 }
 

@@ -20,7 +20,6 @@ import {
 	loadFilesFromDir,
 	scanSkillsFromDir,
 } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
-import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
 const PROVIDER_ID = "agents";
 
@@ -56,7 +55,7 @@ describe("agents provider project-level discovery", () => {
 
 	afterEach(() => {
 		clearCache();
-		removeSyncWithRetries(tempDir);
+		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
 	// =========================================================================

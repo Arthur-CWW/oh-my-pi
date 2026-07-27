@@ -3,7 +3,7 @@ import type { PresetDef, StatusLinePreset } from "./types";
 export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 	default: {
 		leftSegments: ["pi", "model", "mode", "collab", "path", "git", "pr", "context_pct", "cost"],
-		rightSegments: ["session_name"],
+		rightSegments: ["memory", "session_name", "token_rate"],
 		separator: "powerline-thin",
 		segmentOptions: {
 			model: { showThinkingLevel: true },
@@ -14,7 +14,7 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 
 	minimal: {
 		leftSegments: ["path", "git"],
-		rightSegments: ["session_name", "mode", "context_pct"],
+		rightSegments: ["memory", "session_name", "mode", "context_pct", "token_rate"],
 		separator: "slash",
 		segmentOptions: {
 			path: { abbreviate: true, maxLength: 30 },
@@ -23,18 +23,20 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 	},
 
 	compact: {
-		leftSegments: ["model", "mode", "git", "pr"],
-		rightSegments: ["session_name", "cost", "context_pct"],
-		separator: "powerline-thin",
+		leftSegments: ["model", "mode", "path", "git"],
+		rightSegments: ["memory", "session_name", "token_rate", "cost", "context_pct"],
+		separator: "pipe",
 		segmentOptions: {
-			model: { showThinkingLevel: false },
-			git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: false },
+			model: { showThinkingLevel: true },
+			path: { abbreviate: true, maxLength: 20, stripWorkPrefix: true },
+			git: { showBranch: true, showStaged: true, showUnstaged: true, showUntracked: true },
 		},
 	},
 
 	full: {
 		leftSegments: ["pi", "hostname", "model", "mode", "path", "git", "pr", "subagents"],
 		rightSegments: [
+			"memory",
 			"session_name",
 			"cache_hit",
 			"token_in",
@@ -59,6 +61,7 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 		// Full preset with all Nerd Font icons
 		leftSegments: ["pi", "hostname", "model", "mode", "path", "git", "pr", "session", "subagents"],
 		rightSegments: [
+			"memory",
 			"session_name",
 			"token_in",
 			"token_out",
@@ -83,7 +86,7 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 	ascii: {
 		// No Nerd Font dependencies
 		leftSegments: ["model", "mode", "path", "git", "pr"],
-		rightSegments: ["session_name", "token_total", "cost", "context_pct"],
+		rightSegments: ["memory", "session_name", "token_total", "token_rate", "cost", "context_pct"],
 		separator: "ascii",
 		segmentOptions: {
 			model: { showThinkingLevel: true },
@@ -95,7 +98,7 @@ export const STATUS_LINE_PRESETS: Record<StatusLinePreset, PresetDef> = {
 	custom: {
 		// User-defined - these are just defaults that get overridden
 		leftSegments: ["model", "mode", "path", "git", "pr"],
-		rightSegments: ["session_name", "token_total", "cost", "context_pct"],
+		rightSegments: ["memory", "session_name", "token_total", "token_rate", "cost", "context_pct"],
 		separator: "powerline-thin",
 		segmentOptions: {},
 	},

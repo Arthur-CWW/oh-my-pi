@@ -12,13 +12,13 @@ import type {
 } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { type } from "arktype";
+import { z } from "zod/v4";
 
 const testTool: Tool = {
 	name: "echo",
 	description: "Echo input",
-	parameters: type({
-		text: "string",
+	parameters: z.object({
+		text: z.string(),
 	}),
 };
 
@@ -139,7 +139,7 @@ describe("OpenAI tool strict mode", () => {
 		expect(payload.tools?.[0]?.function?.strict).toBeUndefined();
 	});
 
-	it("preserves explicit strict:false on the wire for openai-completions", async () => {
+	it("keeps loose yield schemas non-strict for openai-completions", async () => {
 		const model: Model<"openai-completions"> = {
 			...(getBundledModel("openai", "gpt-4o-mini") as Model<"openai-completions">),
 			api: "openai-completions",
@@ -152,28 +152,8 @@ describe("OpenAI tool strict mode", () => {
 		};
 		const fn = payload.tools?.[0]?.function;
 
-		// #4336: `strict: false` from the tool author is semantically distinct from
-		// omitted `strict` on some backends and MUST survive to the wire.
-		expect(fn?.strict).toBe(false);
+		expect(fn?.strict).toBeUndefined();
 		expect(getYieldDataSchema(fn?.parameters).additionalProperties).toBe(true);
-	});
-
-	it("omits explicit strict:false for openai-completions when compat disables the strict field", async () => {
-		const model: Model<"openai-completions"> = buildModel({
-			...(getBundledModel("openai", "gpt-4o-mini") as Model<"openai-completions">),
-			api: "openai-completions",
-			compat: { supportsStrictMode: false } satisfies OpenAICompat,
-		} as ModelSpec<"openai-completions">);
-
-		const payload = (await captureCompletionsPayload(model, {
-			...testContext,
-			tools: [looseYieldTool],
-		})) as {
-			tools?: Array<{ function?: { strict?: boolean } }>;
-		};
-		// `supportsStrictMode: false` providers reject the `strict` key entirely,
-		// so the explicit `false` MUST still be suppressed.
-		expect(payload.tools?.[0]?.function?.strict).toBeUndefined();
 	});
 
 	it("sends strict=true for openai-completions tool schemas on GitHub Copilot", async () => {
@@ -216,8 +196,8 @@ describe("OpenAI tool strict mode", () => {
 				{
 					name: "dynamic_map",
 					description: "Dynamic object map",
-					parameters: type({
-						values: "Record<string, string>?",
+					parameters: z.object({
+						values: z.record(z.string(), z.string()).optional(),
 					}),
 				},
 			],
@@ -226,26 +206,6 @@ describe("OpenAI tool strict mode", () => {
 		const payload = (await captureCompletionsPayload(model, context)) as {
 			tools?: Array<{ function?: { strict?: boolean } }>;
 		};
-		expect(payload.tools).toHaveLength(2);
-		expect(payload.tools?.every(tool => tool.function?.strict === undefined)).toBe(true);
-	});
-
-	it("keeps strict uniformly absent when all_strict collapses on an explicit strict:false tool", async () => {
-		const model: Model<"openai-completions"> = buildModel({
-			...(getBundledModel("openai", "gpt-4o-mini") as Model<"openai-completions">),
-			api: "openai-completions",
-			compat: { toolStrictMode: "all_strict" } satisfies OpenAICompat,
-		} as ModelSpec<"openai-completions">);
-		const payload = (await captureCompletionsPayload(model, {
-			...testContext,
-			tools: [testTool, looseYieldTool],
-		})) as {
-			tools?: Array<{ function?: { strict?: boolean } }>;
-		};
-
-		// #4336: preserving explicit `false` MUST NOT leak into the all_strict →
-		// none collapse — providers that reject mixed strict values still get a
-		// uniformly absent flag.
 		expect(payload.tools).toHaveLength(2);
 		expect(payload.tools?.every(tool => tool.function?.strict === undefined)).toBe(true);
 	});
@@ -398,10 +358,7 @@ describe("OpenAI tool strict mode", () => {
 		}).result();
 
 		expect(result.stopReason).toBe("stop");
-		// A successful strict-grammar fallback must NOT leak the original 400 onto
-		// the done message — agent.ts records errorMessage as turn error regardless
-		// of stopReason, so a non-empty errorMessage here mis-flags a clean turn.
-		expect(result.errorMessage).toBeUndefined();
+		expect(result.errorMessage).toContain("compiled grammar is too large");
 		expect(result.content).toContainEqual({ type: "text", text: "Recovered" });
 		expect(strictFlags).toEqual([[true], [false]]);
 
@@ -414,177 +371,6 @@ describe("OpenAI tool strict mode", () => {
 		expect(nextResult.stopReason).toBe("stop");
 		expect(nextResult.content).toContainEqual({ type: "text", text: "Later" });
 		expect(strictFlags).toEqual([[true], [false], [false]]);
-	});
-
-	it("retries non-strict when a gateway rejects structured outputs for the model", async () => {
-		const model = getBundledModel("openrouter", "anthropic/claude-sonnet-4") as Model<"openai-completions">;
-		const providerSessionState = new Map<string, ProviderSessionState>();
-		const strictFlags: boolean[][] = [];
-		let attempt = 0;
-		const fetchMock: FetchImpl = Object.assign(
-			async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-				attempt += 1;
-				const bodyText = typeof init?.body === "string" ? init.body : "";
-				const payload = JSON.parse(bodyText) as {
-					tools?: Array<{ function?: { strict?: boolean } }>;
-				};
-				strictFlags.push((payload.tools ?? []).map(tool => tool.function?.strict === true));
-				if (attempt === 1) {
-					return new Response(
-						JSON.stringify({ error: { code: "BadRequest", message: "structured_outputs not supported" } }),
-						{ status: 400, headers: { "content-type": "application/json" } },
-					);
-				}
-				return createSseResponse([
-					{
-						id: "chatcmpl-foundry-retry",
-						object: "chat.completion.chunk",
-						created: 0,
-						model: model.id,
-						choices: [{ index: 0, delta: { content: "Recovered" } }],
-					},
-					{
-						id: "chatcmpl-foundry-retry",
-						object: "chat.completion.chunk",
-						created: 0,
-						model: model.id,
-						choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-					},
-					"[DONE]",
-				]);
-			},
-			{ preconnect: fetch.preconnect },
-		);
-
-		const result = await streamOpenAICompletions(model, testContext, {
-			apiKey: "test-key",
-			providerSessionState,
-			fetch: fetchMock,
-		}).result();
-
-		expect(result.stopReason).toBe("stop");
-		expect(result.errorMessage).toBeUndefined();
-		expect(result.content).toContainEqual({ type: "text", text: "Recovered" });
-		expect(strictFlags).toEqual([[true], [false]]);
-	});
-
-	it("clears errorMessage on a successful OpenRouter Anthropic compiled-grammar fallback (responses)", async () => {
-		const model = buildModel({
-			id: "anthropic/claude-sonnet-4",
-			name: "Claude Sonnet 4 via OpenRouter Responses",
-			api: "openai-responses",
-			provider: "openrouter",
-			baseUrl: "https://openrouter.ai/api/v1",
-			reasoning: false,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 200_000,
-			maxTokens: 131_072,
-		} as ModelSpec<"openai-responses">);
-		const providerSessionState = new Map<string, ProviderSessionState>();
-		const strictFlags: Array<Array<boolean | undefined>> = [];
-		let attempt = 0;
-		const fetchMock: FetchImpl = Object.assign(
-			async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-				attempt += 1;
-				const bodyText = typeof init?.body === "string" ? init.body : "";
-				const payload = JSON.parse(bodyText) as { tools?: Array<{ strict?: boolean }> };
-				strictFlags.push((payload.tools ?? []).map(tool => tool.strict));
-				if (attempt === 1) {
-					return new Response(
-						JSON.stringify({
-							type: "error",
-							error: {
-								type: "invalid_request_error",
-								message:
-									"The compiled grammar is too large, which would cause performance issues. Simplify your tool schemas or reduce the number of strict tools.",
-							},
-							request_id: "req_test",
-						}),
-						{ status: 400, headers: { "content-type": "application/json" } },
-					);
-				}
-				return createSseResponse([
-					{
-						type: "response.output_item.added",
-						output_index: 0,
-						item: { type: "message", id: "msg_1", role: "assistant", status: "in_progress", content: [] },
-					},
-					{
-						type: "response.content_part.added",
-						item_id: "msg_1",
-						output_index: 0,
-						content_index: 0,
-						part: { type: "output_text", text: "" },
-					},
-					{
-						type: "response.output_text.delta",
-						item_id: "msg_1",
-						output_index: 0,
-						content_index: 0,
-						delta: "Recovered",
-					},
-					{
-						type: "response.output_text.done",
-						item_id: "msg_1",
-						output_index: 0,
-						content_index: 0,
-						text: "Recovered",
-					},
-					{
-						type: "response.output_item.done",
-						output_index: 0,
-						item: {
-							type: "message",
-							id: "msg_1",
-							role: "assistant",
-							status: "completed",
-							content: [{ type: "output_text", text: "Recovered" }],
-						},
-					},
-					{
-						type: "response.completed",
-						response: {
-							status: "completed",
-							usage: {
-								input_tokens: 1,
-								output_tokens: 1,
-								total_tokens: 2,
-								input_tokens_details: { cached_tokens: 0 },
-							},
-						},
-					},
-				]);
-			},
-			{ preconnect: fetch.preconnect },
-		);
-
-		const result = await streamOpenAIResponses(
-			model,
-			{
-				...testContext,
-				tools: [testTool, looseYieldTool],
-			},
-			{
-				apiKey: "test-key",
-				providerSessionState,
-				fetch: fetchMock,
-			},
-		).result();
-
-		const text = result.content
-			.filter((block): block is { type: "text"; text: string } => block.type === "text")
-			.map(block => block.text)
-			.join("");
-		expect(result.stopReason).toBe("stop");
-		// A successful strict-grammar fallback must NOT leak the original 400 onto
-		// the done message (mirrors the completions path).
-		expect(result.errorMessage).toBeUndefined();
-		expect(text).toBe("Recovered");
-		expect(strictFlags).toEqual([
-			[true, false],
-			[undefined, undefined],
-		]);
 	});
 
 	it("does not disable OpenRouter Anthropic strict tools for unrelated invalid requests", async () => {
@@ -703,7 +489,7 @@ describe("OpenAI tool strict mode", () => {
 		expect(payload.tools?.[0]?.strict).toBe(true);
 	});
 
-	it("preserves explicit strict:false on the wire for openai-responses", async () => {
+	it("keeps loose yield schemas non-strict for openai-responses", async () => {
 		const model = getBundledModel("openai", "gpt-5-mini") as Model<"openai-responses">;
 		const payload = (await captureResponsesPayload(model, {
 			...testContext,
@@ -713,78 +499,8 @@ describe("OpenAI tool strict mode", () => {
 		};
 		const tool = payload.tools?.[0];
 
-		// #4336: authors who opt out via `tool.strict === false` see the flag land
-		// on the wire so backends that distinguish it from omission behave correctly.
-		expect(tool?.strict).toBe(false);
+		expect(tool?.strict).toBeUndefined();
 		expect(getYieldDataSchema(tool?.parameters).additionalProperties).toBe(true);
-	});
-
-	it("omits explicit strict:false for openai-responses when compat disables the strict field", async () => {
-		const model = buildModel({
-			...(getBundledModel("openai", "gpt-5-mini") as Model<"openai-responses">),
-			api: "openai-responses",
-			compat: { supportsStrictMode: false } satisfies OpenAICompat,
-		} as ModelSpec<"openai-responses">);
-
-		const payload = (await captureResponsesPayload(model, {
-			...testContext,
-			tools: [looseYieldTool],
-		})) as {
-			tools?: Array<{ strict?: boolean }>;
-		};
-		// Some Responses-compatible providers reject the `strict` key entirely;
-		// disabling strict mode must keep even author-set `false` off the wire.
-		expect(payload.tools?.[0]?.strict).toBeUndefined();
-	});
-
-	it("preserves explicit strict:false for buildModel-resolved openai-responses compat (#4527)", async () => {
-		const model = buildModel({
-			id: "deepseek-chat",
-			name: "DeepSeek Chat via Responses",
-			api: "openai-responses",
-			provider: "deepseek",
-			baseUrl: "https://api.deepseek.com/v1",
-			reasoning: false,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128_000,
-			maxTokens: 8192,
-		} as ModelSpec<"openai-responses">);
-
-		const payload = (await captureResponsesPayload(model, {
-			...testContext,
-			tools: [looseYieldTool],
-		})) as {
-			tools?: Array<{ strict?: boolean }>;
-		};
-
-		expect(model.compat.supportsStrictMode).toBe(true);
-		expect(payload.tools?.[0]?.strict).toBe(false);
-	});
-
-	it("keeps strict tools enabled for provider-id-only Azure Responses models (#4527)", async () => {
-		// Bundled Azure entries carry `provider: "azure"` with an empty baseUrl,
-		// so URL-only strict detection MUST NOT drop `supportsStrictMode` — the
-		// provider-id branch keeps `strict: true` on the wire for those models.
-		const model = buildModel({
-			id: "codex-mini",
-			name: "Codex Mini via Azure",
-			api: "openai-responses",
-			provider: "azure",
-			baseUrl: "",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128_000,
-			maxTokens: 8192,
-		} as ModelSpec<"openai-responses">);
-
-		const payload = (await captureResponsesPayload(model)) as {
-			tools?: Array<{ strict?: boolean }>;
-		};
-
-		expect(model.compat.supportsStrictMode).toBe(true);
-		expect(payload.tools?.[0]?.strict).toBe(true);
 	});
 
 	it("sends strict=true for openai-responses tool schemas on GitHub Copilot", async () => {

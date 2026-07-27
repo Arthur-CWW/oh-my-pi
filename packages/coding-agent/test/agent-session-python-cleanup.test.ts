@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as pythonExecutor from "@oh-my-pi/pi-coding-agent/eval/py/executor";
@@ -7,9 +9,8 @@ import type { PythonKernel as PythonKernelInstance } from "@oh-my-pi/pi-coding-a
 import * as pythonKernel from "@oh-my-pi/pi-coding-agent/eval/py/kernel";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { createAgentSession, type ExtensionFactory, type WorkspaceTree } from "@oh-my-pi/pi-coding-agent/sdk";
-import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { Snowflake, TempDir } from "@oh-my-pi/pi-utils";
+import { Snowflake } from "@oh-my-pi/pi-utils";
 
 const OK_EXECUTION = { status: "ok", cancelled: false, timedOut: false, stdinRequested: false } as const;
 
@@ -68,21 +69,12 @@ const getModel = () => {
 };
 
 const createTempProject = () => {
-	const tempDir = TempDir.createSync(`@pi-agent-session-python-cleanup-${Snowflake.next()}-`);
-	const cwd = tempDir.join("project");
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-agent-session-python-cleanup-${Snowflake.next()}-`));
+	const cwd = path.join(tempDir, "project");
 	fs.mkdirSync(cwd, { recursive: true });
 	return { tempDir, cwd };
 };
 
-// createAgentSession opens an AuthStorage at <agentDir>/auth.db that is not
-// closed when construction fails. Point agentDir at a separate dir so the
-// auth.db handle doesn't keep the per-test project temp dir locked on Windows.
-const agentDirPool: TempDir[] = [];
-const createAgentDir = (): string => {
-	const dir = TempDir.createSync("@pi-python-cleanup-agentdir-");
-	agentDirPool.push(dir);
-	return dir.path();
-};
 const emptyWorkspaceTree = (cwd: string): WorkspaceTree => ({
 	rootPath: cwd,
 	rendered: ".",
@@ -110,14 +102,14 @@ const expectSleepNear = (sleepSpy: Mock<typeof Bun.sleep>, targetMs: number) => 
 	).toBe(true);
 };
 const createSession = async (
-	_tempDir: TempDir,
+	tempDir: string,
 	cwd: string,
 	options: { extensions?: ExtensionFactory[]; sessionManager?: SessionManager } = {},
 ) =>
 	(
 		await createAgentSession({
 			cwd,
-			agentDir: createAgentDir(),
+			agentDir: tempDir,
 			sessionManager: options.sessionManager ?? SessionManager.inMemory(cwd),
 			settings: Settings.isolated({ "python.kernelMode": "session" }),
 			model: getModel(),
@@ -134,6 +126,7 @@ const createSession = async (
 			toolNames: ["eval"],
 		})
 	).session;
+
 const createMockKernel = () => {
 	let alive = true;
 	return {
@@ -151,7 +144,7 @@ const createMockKernel = () => {
 };
 
 describe("AgentSession python cleanup", () => {
-	const tempDirs: TempDir[] = [];
+	const tempDirs: string[] = [];
 	let originalNullPrompt: string | undefined;
 
 	beforeEach(() => {
@@ -167,15 +160,9 @@ describe("AgentSession python cleanup", () => {
 		}
 		originalNullPrompt = undefined;
 		vi.restoreAllMocks();
-		AgentStorage.resetInstance();
 		await pythonExecutor.disposeAllKernelSessions();
-		await Bun.sleep(0);
-		// Best-effort cleanup: createAgentSession opens AuthStorage/AgentStorage
-		// inside agentDir that may outlive the test (dispose() doesn't close them).
-		// On Windows the leaked SQLite handles keep the dir locked; swallow EBUSY
-		// rather than failing the test — the OS temp dir reaper will clean up.
-		for (const tempDir of [...tempDirs.splice(0), ...agentDirPool.splice(0)]) {
-			await tempDir.remove().catch(() => {});
+		for (const tempDir of tempDirs.splice(0)) {
+			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
@@ -183,7 +170,7 @@ describe("AgentSession python cleanup", () => {
 		const { tempDir, cwd } = createTempProject();
 		tempDirs.push(tempDir);
 		const unrelatedKernel = createMockKernel();
-		const unrelatedCwd = tempDir.join("unrelated-before");
+		const unrelatedCwd = path.join(tempDir, "unrelated-before");
 		const throwingExtension: ExtensionFactory = () => {
 			throw new Error("Extension init failed");
 		};
@@ -202,7 +189,7 @@ describe("AgentSession python cleanup", () => {
 		await expect(
 			createAgentSession({
 				cwd,
-				agentDir: createAgentDir(),
+				agentDir: tempDir,
 				sessionManager: SessionManager.inMemory(cwd),
 				settings: Settings.isolated({ "python.kernelMode": "session" }),
 				model: getModel(),
@@ -250,7 +237,7 @@ describe("AgentSession python cleanup", () => {
 		const { tempDir, cwd } = createTempProject();
 		tempDirs.push(tempDir);
 		const unrelatedKernel = createMockKernel();
-		const unrelatedCwd = tempDir.join("unrelated-after");
+		const unrelatedCwd = path.join(tempDir, "unrelated-after");
 		vi.spyOn(pythonKernel, "checkPythonKernelAvailability").mockResolvedValue({ ok: true });
 		const startSpy = vi
 			.spyOn(pythonKernel.PythonKernel, "start")
@@ -270,7 +257,7 @@ describe("AgentSession python cleanup", () => {
 		await expect(
 			createAgentSession({
 				cwd,
-				agentDir: createAgentDir(),
+				agentDir: tempDir,
 				sessionManager: SessionManager.inMemory(cwd),
 				settings: Settings.isolated({ "python.kernelMode": "session", "memory.backend": "local" }),
 				model: getModel(),
@@ -426,7 +413,7 @@ describe("AgentSession python cleanup", () => {
 		expect(EvalTool).toBeDefined();
 		let toolExecutionSettled = false;
 		const toolExecution = EvalTool!
-			.execute("call-id", { language: "py", code: "print('tool')" }, undefined, undefined, undefined)
+			.execute("call-id", { cells: [{ language: "py", code: "print('tool')" }] }, undefined, undefined, undefined)
 			.finally(() => {
 				toolExecutionSettled = true;
 			});
@@ -652,7 +639,13 @@ describe("AgentSession python cleanup", () => {
 		expect(EvalTool).toBeDefined();
 		const disposeSession = session.dispose();
 		await expect(
-			EvalTool!.execute("call-id", { language: "py", code: "print('late')" }, undefined, undefined, undefined),
+			EvalTool!.execute(
+				"call-id",
+				{ cells: [{ language: "py", code: "print('late')" }] },
+				undefined,
+				undefined,
+				undefined,
+			),
 		).rejects.toThrow("Python execution is unavailable while session disposal is in progress");
 		await disposeSession;
 		expect(executeSpy).not.toHaveBeenCalled();
@@ -687,7 +680,7 @@ describe("AgentSession python cleanup", () => {
 		expect(EvalTool).toBeDefined();
 		const execution = EvalTool!.execute(
 			"call-id",
-			{ language: "py", code: "print('late after artifact')" },
+			{ cells: [{ language: "py", code: "print('late after artifact')" }] },
 			undefined,
 			undefined,
 			undefined,

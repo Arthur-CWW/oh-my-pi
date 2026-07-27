@@ -6,7 +6,8 @@ import type { FileEntry, SessionHeader } from "@oh-my-pi/pi-coding-agent/session
 import { findMostRecentSession, resolveResumableSession } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { getConfigRootDir, getSessionsDir, removeSyncWithRetries, Snowflake, setAgentDir } from "@oh-my-pi/pi-utils";
+import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { getConfigRootDir, getSessionsDir, Snowflake, setAgentDir } from "@oh-my-pi/pi-utils";
 
 describe("loadEntriesFromFile", () => {
 	let tempDir: string;
@@ -17,7 +18,7 @@ describe("loadEntriesFromFile", () => {
 	});
 
 	afterEach(() => {
-		removeSyncWithRetries(tempDir);
+		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
 	it("loads valid session file", async () => {
@@ -46,6 +47,29 @@ describe("loadEntriesFromFile", () => {
 	});
 });
 
+describe("SessionManager.open", () => {
+	it("reads a resumable journal once", async () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-open-"));
+		const file = path.join(tempDir, "session.jsonl");
+		fs.writeFileSync(file, '{"type":"session","id":"abc","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n');
+		class CountingStorage extends FileSessionStorage {
+			readCount = 0;
+			override async readText(filePath: string): Promise<string> {
+				this.readCount++;
+				return super.readText(filePath);
+			}
+		}
+		const storage = new CountingStorage();
+		const manager = await SessionManager.open(file, tempDir, storage);
+		try {
+			expect(storage.readCount).toBe(1);
+		} finally {
+			await manager.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("findMostRecentSession", () => {
 	let tempDir: string;
 
@@ -55,7 +79,7 @@ describe("findMostRecentSession", () => {
 	});
 
 	afterEach(() => {
-		removeSyncWithRetries(tempDir);
+		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
 	it("returns single valid session file", async () => {
@@ -99,7 +123,7 @@ describe("resolveResumableSession", () => {
 	});
 
 	afterEach(() => {
-		removeSyncWithRetries(tempDir);
+		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
 	function writeSession(fileName: string, headerCwd: string, id: string = Snowflake.next()): string {
@@ -185,7 +209,7 @@ describe("SessionManager temp cwd session dirs", () => {
 			setAgentDir(fallbackAgentDir);
 			delete process.env.PI_CODING_AGENT_DIR;
 		}
-		removeSyncWithRetries(testAgentDir);
+		fs.rmSync(testAgentDir, { recursive: true, force: true });
 	});
 
 	it("stores temp-root cwd sessions under -tmp-prefixed directories", () => {
@@ -216,6 +240,23 @@ describe("SessionManager temp cwd session dirs", () => {
 		expect(fs.existsSync(legacyDir)).toBe(false);
 		expect(path.dirname(sessionFile)).toBe(expectedDir);
 		expect(fs.existsSync(path.join(expectedDir, "carried.jsonl"))).toBe(true);
+	});
+
+	it("resolves an exact id from a nested journal in another cwd group", async () => {
+		const currentCwd = path.join(testAgentDir, "current-project");
+		const otherGroup = path.join(getSessionsDir(), "-other-project", "parent-session");
+		const id = "019f56ec-20f0-7000-84f4-ecc85568063f";
+		const journal = path.join(otherGroup, "CardQualityAudit.jsonl");
+		fs.mkdirSync(otherGroup, { recursive: true });
+		fs.writeFileSync(
+			journal,
+			`${JSON.stringify({ type: "session", version: 3, id, timestamp: "2025-01-01T00:00:00Z", cwd: "/other/project" })}\n`,
+		);
+
+		const match = await resolveResumableSession(id, currentCwd);
+
+		expect(match?.scope).toBe("global");
+		expect(match?.session.path).toBe(journal);
 	});
 });
 
@@ -251,7 +292,7 @@ describe("SessionManager legacy session migration persistence", () => {
 	});
 
 	afterEach(() => {
-		removeSyncWithRetries(tempDir);
+		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
 	it("keeps legacy migration in memory until later persisted activity rewrites the file", async () => {

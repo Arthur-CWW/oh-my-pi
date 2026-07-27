@@ -36,12 +36,6 @@ function createContext(options: {
 	};
 	const addMessageToChat = vi.fn();
 	const updatePendingMessagesDisplay = vi.fn();
-	const clearOptimisticUserMessage = vi.fn(() => {
-		ctx.optimisticUserMessageSignature = undefined;
-	});
-	const replaceOptimisticUserMessage = vi.fn(() => {
-		ctx.optimisticUserMessageSignature = undefined;
-	});
 	const ctx = {
 		isInitialized: true,
 		statusLine: { invalidate: vi.fn() },
@@ -59,20 +53,9 @@ function createContext(options: {
 						.join(""),
 		optimisticUserMessageSignature: options.optimisticSignature,
 		locallySubmittedUserSignatures: new Set<string>(options.locallySubmittedSignatures ?? []),
-		clearOptimisticUserMessage,
-		replaceOptimisticUserMessage,
 		pendingTools: new Map(),
-		viewSession: { isStreaming: false },
 	} as unknown as InteractiveModeContext;
-	return {
-		ctx,
-		editor,
-		setText,
-		addMessageToChat,
-		updatePendingMessagesDisplay,
-		clearOptimisticUserMessage,
-		replaceOptimisticUserMessage,
-	};
+	return { ctx, editor, setText, addMessageToChat, updatePendingMessagesDisplay };
 }
 
 describe("EventController message_start (user role)", () => {
@@ -222,10 +205,6 @@ describe("EventController IRC expiry", () => {
 		await controller.handleEvent({ type: "irc_message", message });
 
 		expect(chatContainer.children).toHaveLength(2);
-		// One requestRender from the IRC handler mounting the card. The blanket
-		// pre-render that `handleEvent` used to fire before every dispatch was
-		// removed in #4353 (it doubled the paint rate during streaming and did no
-		// visible work beyond what the handlers already trigger).
 		expect(requestRender).toHaveBeenCalledTimes(1);
 
 		vi.advanceTimersByTime(9_999);
@@ -244,10 +223,6 @@ describe("EventController IRC expiry", () => {
 
 		await controller.handleEvent({ type: "irc_message", message });
 		expect(chatContainer.children).toHaveLength(1);
-
-		// Render the container and commit its rows to simulate entering native scrollback
-		const lines = chatContainer.render(80);
-		chatContainer.setNativeScrollbackCommittedRows(lines.length);
 
 		// Everything above the card is finalized, so its rows may already be in
 		// native scrollback. Removing it would be an interior deletion of the

@@ -1,8 +1,10 @@
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
-import { Container, getKeybindings, Input, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
+import { Container, Input, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
+import { matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import { openPath } from "../../utils/open";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint, rawKeyHint } from "./keybinding-hints";
 
 /**
  * Login dialog component - replaces editor during OAuth login flow
@@ -45,9 +47,6 @@ export class LoginDialogComponent extends Container {
 				this.#inputRejecter = undefined;
 			}
 		};
-		this.#input.onEscape = () => {
-			this.#cancel();
-		};
 
 		// Bottom border
 		this.addChild(new DynamicBorder());
@@ -68,17 +67,9 @@ export class LoginDialogComponent extends Container {
 	}
 
 	/**
-	 * Called by the OAuth `onAuth` callback. Renders the full authorization URL
-	 * as the primary copy target — that works from any machine, including
-	 * SSH/WSL/headless sessions where the OMP-hosted `launchUrl` would resolve
-	 * against the user's local browser and fail. When `launchUrl` is present it
-	 * is offered as an additional local shortcut so narrow local terminals still
-	 * have a truncation-safe copy target (viewport clipping on a long authorize
-	 * URL silently drops trailing OAuth query parameters — e.g.
-	 * `code_challenge_method=S256`). The OSC 8 hyperlink carries the full URL
-	 * for terminals that support click-through.
+	 * Called by onAuth callback - show URL and optional instructions
 	 */
-	showAuth(url: string, instructions?: string, launchUrl?: string): void {
+	showAuth(url: string, instructions?: string): void {
 		this.#contentContainer.clear();
 		this.#contentContainer.addChild(new Spacer(1));
 		this.#contentContainer.addChild(new Text(theme.fg("accent", url), 1, 0));
@@ -86,12 +77,6 @@ export class LoginDialogComponent extends Container {
 		const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
 		const hyperlink = `\x1b]8;;${url}\x07${clickHint}\x1b]8;;\x07`;
 		this.#contentContainer.addChild(new Text(theme.fg("dim", hyperlink), 1, 0));
-
-		if (launchUrl && launchUrl !== url) {
-			this.#contentContainer.addChild(
-				new Text(theme.fg("dim", `Local shortcut (this machine only): ${launchUrl}`), 1, 0),
-			);
-		}
 
 		if (instructions) {
 			this.#contentContainer.addChild(new Spacer(1));
@@ -113,7 +98,7 @@ export class LoginDialogComponent extends Container {
 		if (!this.#contentContainer.children.includes(this.#input)) {
 			this.#contentContainer.addChild(this.#input);
 		}
-		this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel)"), 1, 0));
+		this.#contentContainer.addChild(new Text(`(${keyHint("ui.dismiss", "to cancel")})`, 1, 0));
 		this.#tui.requestRender();
 
 		const { promise, resolve, reject } = Promise.withResolvers<string>();
@@ -135,7 +120,8 @@ export class LoginDialogComponent extends Container {
 		if (!this.#contentContainer.children.includes(this.#input)) {
 			this.#contentContainer.addChild(this.#input);
 		}
-		this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel, Enter to submit)"), 1, 0));
+		const promptHint = [keyHint("ui.dismiss", "to cancel"), rawKeyHint("enter", "to submit")].join(", ");
+		this.#contentContainer.addChild(new Text(`(${promptHint})`, 1, 0));
 
 		this.#input.setValue("");
 		this.#tui.requestRender();
@@ -152,7 +138,7 @@ export class LoginDialogComponent extends Container {
 	showWaiting(message: string): void {
 		this.#contentContainer.addChild(new Spacer(1));
 		this.#contentContainer.addChild(new Text(theme.fg("dim", message), 1, 0));
-		this.#contentContainer.addChild(new Text(theme.fg("dim", "(Escape to cancel)"), 1, 0));
+		this.#contentContainer.addChild(new Text(`(${keyHint("ui.dismiss", "to cancel")})`, 1, 0));
 		this.#tui.requestRender();
 	}
 
@@ -165,9 +151,7 @@ export class LoginDialogComponent extends Container {
 	}
 
 	handleInput(data: string): void {
-		const kb = getKeybindings();
-
-		if (kb.matches(data, "tui.select.cancel")) {
+		if (matchesUiDismiss(data)) {
 			this.#cancel();
 			return;
 		}

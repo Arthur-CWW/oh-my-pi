@@ -21,7 +21,6 @@ import {
 	loadCustomTools,
 	type ToolPathWithSource,
 } from "@oh-my-pi/pi-coding-agent/extensibility/custom-tools";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 describe("loadCustomTools per-session binding (#2190 review fix)", () => {
 	let tmp: string;
@@ -48,7 +47,7 @@ describe("loadCustomTools per-session binding (#2190 review fix)", () => {
 	});
 
 	afterAll(async () => {
-		await removeWithRetries(tmp);
+		await fs.rm(tmp, { recursive: true, force: true });
 	});
 
 	it("binds each load to the cwd passed to loadCustomTools", async () => {

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it, type Mock, vi } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { HookEditorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/hook-editor";
 import { ExtensionUiController } from "@oh-my-pi/pi-coding-agent/modes/controllers/extension-ui-controller";
@@ -67,8 +67,8 @@ function createControllerContext() {
 		stop: vi.fn(),
 		terminal: { columns: 120 },
 	} as unknown as TestContext["ui"] & {
-		setFocus: Mock<any>;
-		requestRender: Mock<any>;
+		setFocus: ReturnType<typeof vi.fn>;
+		requestRender: ReturnType<typeof vi.fn>;
 	};
 	const ctx = {
 		editor,
@@ -139,41 +139,6 @@ describe("HookEditorComponent default (hook) mode", () => {
 
 		expect(onSubmit).toHaveBeenCalledTimes(1);
 		expect(onSubmit).toHaveBeenCalledWith("draft");
-		expect(onCancel).not.toHaveBeenCalled();
-	});
-	it("submits the current text on Ctrl+Q (Windows Terminal fallback for #2118)", () => {
-		const onSubmit = vi.fn();
-		const onCancel = vi.fn();
-		const component = new HookEditorComponent(createTui(), "Prompt", "line 1\nline 2", onSubmit, onCancel);
-
-		// Ctrl+Q raw byte (0x11). Windows Terminal cannot deliver a distinct
-		// Ctrl+Enter, so app.message.followUp also binds Ctrl+Q (#1903), and the
-		// hook editor must honor it for the same reason.
-		component.handleInput("\x11");
-
-		expect(onSubmit).toHaveBeenCalledTimes(1);
-		expect(onSubmit).toHaveBeenCalledWith("line 1\nline 2");
-		expect(onCancel).not.toHaveBeenCalled();
-	});
-
-	it("keeps Ctrl+Q working after Enter inserts a newline (Windows Terminal)", () => {
-		const onSubmit = vi.fn();
-		const onCancel = vi.fn();
-		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel);
-
-		component.handleInput("a");
-		component.handleInput("b");
-		// Windows Terminal sends bare `\r` for both Enter and Ctrl+Enter; the
-		// hook editor must treat `\r` as a newline and reserve Ctrl+Q for submit.
-		component.handleInput("\r");
-		component.handleInput("c");
-		component.handleInput("d");
-		expect(onSubmit).not.toHaveBeenCalled();
-
-		component.handleInput("\x11");
-
-		expect(onSubmit).toHaveBeenCalledTimes(1);
-		expect(onSubmit).toHaveBeenCalledWith("ab\ncd");
 		expect(onCancel).not.toHaveBeenCalled();
 	});
 
@@ -315,7 +280,7 @@ describe("HookEditorComponent prompt-style mode", () => {
 		expect(onSubmit).toHaveBeenCalledWith("a\nb");
 	});
 
-	it("submits on the Ctrl+Enter chord in prompt-style mode (#3353)", () => {
+	it("treats Ctrl+Enter as newline in prompt-style mode", () => {
 		const onSubmit = vi.fn();
 		const onCancel = vi.fn();
 		const component = new HookEditorComponent(createTui(), "Prompt", undefined, onSubmit, onCancel, {
@@ -323,29 +288,15 @@ describe("HookEditorComponent prompt-style mode", () => {
 		});
 
 		component.handleInput("x");
-		component.handleInput("y");
 		component.handleInput("\x1b[13;5u");
 
-		expect(onSubmit).toHaveBeenCalledTimes(1);
-		expect(onSubmit).toHaveBeenCalledWith("xy");
-		expect(onCancel).not.toHaveBeenCalled();
-	});
+		expect(onSubmit).not.toHaveBeenCalled();
 
-	it("submits on Ctrl+Q in prompt-style mode (Windows Terminal fallback, #3353)", () => {
-		const onSubmit = vi.fn();
-		const onCancel = vi.fn();
-		const component = new HookEditorComponent(createTui(), "Prompt", "draft", onSubmit, onCancel, {
-			promptStyle: true,
-		});
-
-		// Windows Terminal swallows Ctrl+Enter, so app.message.followUp also binds
-		// Ctrl+Q (#1903). The ask tool's prompt-style editor missed this chord
-		// before #3353 — users hit Ctrl+Enter expecting submit, got nothing.
-		component.handleInput("\x11");
+		component.handleInput("y");
+		component.handleInput("\r");
 
 		expect(onSubmit).toHaveBeenCalledTimes(1);
-		expect(onSubmit).toHaveBeenCalledWith("draft");
-		expect(onCancel).not.toHaveBeenCalled();
+		expect(onSubmit).toHaveBeenCalledWith("x\ny");
 	});
 
 	it("renders prompt-style editor with legacy ask chrome", () => {
@@ -356,10 +307,11 @@ describe("HookEditorComponent prompt-style mode", () => {
 		const rendered = renderText(component);
 		const lines = renderLines(component);
 
-		expect(lines[0]).toMatch(/^─+$/);
-		expect(lines.at(-1)).toMatch(/^─+$/);
+		expect(lines[0]?.trim()).toBe("");
+		expect(lines.at(-1)?.trim()).toBe("");
+		expect(rendered).not.toContain("─");
 		expect(lines[4]?.startsWith("> ")).toBe(true);
-		expect(rendered).toContain(" enter or ctrl+q submit  esc cancel");
+		expect(rendered).toContain(" enter submit  escape cancel");
 		expect(rendered).not.toContain("shift+enter newline");
 		expect(rendered).toContain("ctrl+g external editor");
 	});
@@ -402,10 +354,10 @@ describe("HookEditorComponent prompt-style mode", () => {
 		expect(onSubmit).not.toHaveBeenCalled();
 	});
 
-	it("cancels on app.interrupt in prompt-style mode even when remapped", () => {
+	it("cancels on ui.dismiss in prompt-style mode when remapped", () => {
 		setKeybindings(
 			KeybindingsManager.inMemory({
-				"app.interrupt": "ctrl+c",
+				"ui.dismiss": "ctrl+c",
 			}),
 		);
 		const onSubmit = vi.fn();
@@ -413,6 +365,12 @@ describe("HookEditorComponent prompt-style mode", () => {
 		const component = new HookEditorComponent(createTui(), "Prompt", "draft", onSubmit, onCancel, {
 			promptStyle: true,
 		});
+
+		expect(renderText(component)).toContain("ctrl+c cancel");
+		expect(renderText(component)).toContain("ctrl+g external editor");
+
+		component.handleInput("\x1b");
+		expect(onCancel).not.toHaveBeenCalled();
 
 		component.handleInput("\x03");
 

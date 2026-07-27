@@ -3,11 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
-import {
-	__rewriteLegacyExtensionSourceForTests,
-	loadLegacyPiModule,
-} from "@oh-my-pi/pi-coding-agent/extensibility/plugins/legacy-pi-compat";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { loadLegacyPiModule } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/legacy-pi-compat";
 
 // Issue #1674: legacy Pi extensions load browser-UI assets (HTML/CSS) at module
 // init via `readFileSync(join(__dirname, "ui.html"))`. The compat layer must run
@@ -20,7 +16,7 @@ const tempRoots: string[] = [];
 
 afterAll(async () => {
 	for (const dir of tempRoots) {
-		await removeWithRetries(dir);
+		await fs.rm(dir, { recursive: true, force: true });
 	}
 });
 
@@ -60,233 +56,6 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		expect(mod.html).toBe("<html>PLAN-UI</html>");
 	});
 
-	it("reloads an edited entry module without polluting fileURLToPath-derived paths", async () => {
-		const entrySource = (version: string): string =>
-			[
-				'import { readFileSync } from "node:fs";',
-				'import { fileURLToPath } from "node:url";',
-				'import * as path from "node:path";',
-				"export const entryPath = fileURLToPath(import.meta.url);",
-				"const here = path.dirname(entryPath);",
-				`export const version = ${JSON.stringify(version)};`,
-				'export const asset = readFileSync(path.join(here, "marker.txt"), "utf8");',
-				"export default function (pi) { void pi; }",
-			].join("\n");
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "mtime-reload-ext", version: "1.0.0" }),
-			"marker.txt": "asset-ok",
-			"index.ts": entrySource("v1"),
-		});
-		const entry = path.join(dir, "index.ts");
-		const expectedEntryPath = await fs.realpath(entry);
-
-		const first = (await loadLegacyPiModule(entry)) as { version: string; entryPath: string; asset: string };
-		expect(first.version).toBe("v1");
-		expect(first.entryPath).toBe(expectedEntryPath);
-		expect(first.asset).toBe("asset-ok");
-
-		const firstStat = await fs.stat(entry);
-		await fs.writeFile(entry, entrySource("v2"), "utf8");
-		const bumpedMtime = new Date(Math.ceil(firstStat.mtimeMs) + 2_000);
-		await fs.utimes(entry, bumpedMtime, bumpedMtime);
-
-		const second = (await loadLegacyPiModule(entry)) as { version: string; entryPath: string; asset: string };
-		expect(second.version).toBe("v2");
-		expect(second.entryPath).toBe(expectedEntryPath);
-		expect(second.entryPath.includes("?")).toBe(false);
-		expect(second.asset).toBe("asset-ok");
-	});
-
-	it("reloads an edited relative helper module on same-process re-import", async () => {
-		const entrySource = (version: string): string =>
-			[
-				'import { fileURLToPath } from "node:url";',
-				'import { H } from "./helper.ts";',
-				"export { H };",
-				"export const entryPath = fileURLToPath(import.meta.url);",
-				`export const entryVersion = ${JSON.stringify(version)};`,
-				"export default function (pi) { void pi; }",
-			].join("\n");
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "helper-mtime-reload-ext", version: "1.0.0" }),
-			"index.ts": entrySource("v1"),
-			"helper.ts": 'export const H = "v1";\n',
-		});
-		const entry = path.join(dir, "index.ts");
-		const helper = path.join(dir, "helper.ts");
-		const expectedEntryPath = await fs.realpath(entry);
-
-		const first = (await loadLegacyPiModule(entry)) as { entryVersion: string; H: string; entryPath: string };
-		expect(first.entryVersion).toBe("v1");
-		expect(first.H).toBe("v1");
-		expect(first.entryPath).toBe(expectedEntryPath);
-
-		const firstEntryStat = await fs.stat(entry);
-		const firstHelperStat = await fs.stat(helper);
-		await fs.writeFile(entry, entrySource("v2"), "utf8");
-		await fs.writeFile(helper, 'export const H = "v2";\n', "utf8");
-		const bumpedEntryMtime = new Date(Math.ceil(firstEntryStat.mtimeMs) + 2_000);
-		const bumpedHelperMtime = new Date(Math.ceil(firstHelperStat.mtimeMs) + 2_000);
-		await fs.utimes(entry, bumpedEntryMtime, bumpedEntryMtime);
-		await fs.utimes(helper, bumpedHelperMtime, bumpedHelperMtime);
-
-		const second = (await loadLegacyPiModule(entry)) as { entryVersion: string; H: string; entryPath: string };
-		expect(second.entryVersion).toBe("v2");
-		expect(second.H).toBe("v2");
-		expect(second.entryPath).toBe(expectedEntryPath);
-		expect(second.entryPath.includes("?")).toBe(false);
-	});
-
-	it("reloads edited children of an extension-local bare dependency", async () => {
-		const entrySource = (version: string): string =>
-			[
-				'import { depValue } from "localdep";',
-				"export { depValue };",
-				`export const entryVersion = ${JSON.stringify(version)};`,
-				"export default function (pi) { void pi; }",
-			].join("\n");
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "bare-dep-child-reload-ext", version: "1.0.0" }),
-			"node_modules/localdep/package.json": JSON.stringify({
-				name: "localdep",
-				version: "1.0.0",
-				type: "module",
-				main: "index.js",
-			}),
-			"node_modules/localdep/index.js": 'export { depValue } from "./helper.js";\n',
-			"node_modules/localdep/helper.js": 'export const depValue = "dep-v1";\n',
-			"index.ts": entrySource("v1"),
-		});
-		const entry = path.join(dir, "index.ts");
-		const helper = path.join(dir, "node_modules", "localdep", "helper.js");
-
-		const first = (await loadLegacyPiModule(entry)) as { entryVersion: string; depValue: string };
-		expect(first.entryVersion).toBe("v1");
-		expect(first.depValue).toBe("dep-v1");
-
-		const firstEntryStat = await fs.stat(entry);
-		const firstHelperStat = await fs.stat(helper);
-		await fs.writeFile(entry, entrySource("v2"), "utf8");
-		await fs.writeFile(helper, 'export const depValue = "dep-v2";\n', "utf8");
-		const bumpedEntryMtime = new Date(Math.ceil(firstEntryStat.mtimeMs) + 2_000);
-		const bumpedHelperMtime = new Date(Math.ceil(firstHelperStat.mtimeMs) + 2_000);
-		await fs.utimes(entry, bumpedEntryMtime, bumpedEntryMtime);
-		await fs.utimes(helper, bumpedHelperMtime, bumpedHelperMtime);
-
-		const second = (await loadLegacyPiModule(entry)) as { entryVersion: string; depValue: string };
-		expect(second.entryVersion).toBe("v2");
-		expect(second.depValue).toBe("dep-v2");
-	});
-
-	it("reloads edited children of an installed plugin's extension-local bare dependency", async () => {
-		const entrySource = (version: string): string =>
-			[
-				'import { depValue } from "localdep";',
-				"export { depValue };",
-				`export const entryVersion = ${JSON.stringify(version)};`,
-				"export default function (pi) { void pi; }",
-			].join("\n");
-		const dir = await writePackage({
-			"plugins/node_modules/installed-plugin/package.json": JSON.stringify({
-				name: "installed-plugin",
-				version: "1.0.0",
-			}),
-			"plugins/node_modules/installed-plugin/node_modules/localdep/package.json": JSON.stringify({
-				name: "localdep",
-				version: "1.0.0",
-				type: "module",
-				main: "index.js",
-			}),
-			"plugins/node_modules/installed-plugin/node_modules/localdep/index.js":
-				'export { depValue } from "./helper.js";\n',
-			"plugins/node_modules/installed-plugin/node_modules/localdep/helper.js": 'export const depValue = "dep-v1";\n',
-			"plugins/node_modules/installed-plugin/index.ts": entrySource("v1"),
-		});
-		const pluginRoot = path.join(dir, "plugins", "node_modules", "installed-plugin");
-		const entry = path.join(pluginRoot, "index.ts");
-		const helper = path.join(pluginRoot, "node_modules", "localdep", "helper.js");
-
-		const first = (await loadLegacyPiModule(entry)) as { entryVersion: string; depValue: string };
-		expect(first.entryVersion).toBe("v1");
-		expect(first.depValue).toBe("dep-v1");
-
-		const firstEntryStat = await fs.stat(entry);
-		const firstHelperStat = await fs.stat(helper);
-		await fs.writeFile(entry, entrySource("v2"), "utf8");
-		await fs.writeFile(helper, 'export const depValue = "dep-v2";\n', "utf8");
-		const bumpedEntryMtime = new Date(Math.ceil(firstEntryStat.mtimeMs) + 2_000);
-		const bumpedHelperMtime = new Date(Math.ceil(firstHelperStat.mtimeMs) + 2_000);
-		await fs.utimes(entry, bumpedEntryMtime, bumpedEntryMtime);
-		await fs.utimes(helper, bumpedHelperMtime, bumpedHelperMtime);
-
-		const second = (await loadLegacyPiModule(entry)) as { entryVersion: string; depValue: string };
-		expect(second.entryVersion).toBe("v2");
-		expect(second.depValue).toBe("dep-v2");
-	});
-
-	it("reloads modules added to the relative import graph after the first load", async () => {
-		const entrySource = (version: string, includeHelper: boolean): string =>
-			[
-				'import { fileURLToPath } from "node:url";',
-				includeHelper ? 'export { leafValue } from "./helper.ts";' : "",
-				"export const entryPath = fileURLToPath(import.meta.url);",
-				`export const entryVersion = ${JSON.stringify(version)};`,
-				"export default function (pi) { void pi; }",
-			]
-				.filter(Boolean)
-				.join("\n");
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "expanding-graph-reload-ext", version: "1.0.0" }),
-			"index.ts": entrySource("v1", false),
-		});
-		const entry = path.join(dir, "index.ts");
-		const helper = path.join(dir, "helper.ts");
-		const leaf = path.join(dir, "leaf.ts");
-		const expectedEntryPath = await fs.realpath(entry);
-
-		const first = (await loadLegacyPiModule(entry)) as { entryVersion: string; entryPath: string };
-		expect(first.entryVersion).toBe("v1");
-		expect(first.entryPath).toBe(expectedEntryPath);
-
-		const firstEntryStat = await fs.stat(entry);
-		const firstGraphMtime = new Date(Math.ceil(firstEntryStat.mtimeMs) + 2_000);
-		await fs.writeFile(entry, entrySource("v2", true), "utf8");
-		await fs.writeFile(helper, 'export { leafValue } from "./leaf.ts";\n', "utf8");
-		await fs.writeFile(leaf, 'export const leafValue = "leaf-v1";\n', "utf8");
-		await fs.utimes(entry, firstGraphMtime, firstGraphMtime);
-		await fs.utimes(helper, firstGraphMtime, firstGraphMtime);
-		await fs.utimes(leaf, firstGraphMtime, firstGraphMtime);
-
-		const second = (await loadLegacyPiModule(entry)) as {
-			entryVersion: string;
-			entryPath: string;
-			leafValue: string;
-		};
-		expect(second.entryVersion).toBe("v2");
-		expect(second.leafValue).toBe("leaf-v1");
-		expect(second.entryPath).toBe(expectedEntryPath);
-		expect(second.entryPath.includes("?")).toBe(false);
-
-		const secondEntryStat = await fs.stat(entry);
-		const secondLeafStat = await fs.stat(leaf);
-		await fs.writeFile(entry, entrySource("v3", true), "utf8");
-		await fs.writeFile(leaf, 'export const leafValue = "leaf-v2";\n', "utf8");
-		const bumpedEntryMtime = new Date(Math.ceil(secondEntryStat.mtimeMs) + 2_000);
-		const bumpedLeafMtime = new Date(Math.ceil(secondLeafStat.mtimeMs) + 2_000);
-		await fs.utimes(entry, bumpedEntryMtime, bumpedEntryMtime);
-		await fs.utimes(leaf, bumpedLeafMtime, bumpedLeafMtime);
-
-		const third = (await loadLegacyPiModule(entry)) as {
-			entryVersion: string;
-			entryPath: string;
-			leafValue: string;
-		};
-		expect(third.entryVersion).toBe("v3");
-		expect(third.leafValue).toBe("leaf-v2");
-		expect(third.entryPath).toBe(expectedEntryPath);
-		expect(third.entryPath.includes("?")).toBe(false);
-	});
-
 	it("resolves a .css sibling of a relatively-imported submodule", async () => {
 		const dir = await writePackage({
 			"package.json": JSON.stringify({ name: "multi-file-ext", version: "1.0.0" }),
@@ -306,22 +75,6 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		// The submodule under sub/ also runs in place, so its sibling asset
 		// resolves relative to sub/ rather than a flattened mirror root.
 		expect(mod.css).toBe(".x{color:red}");
-	});
-
-	it("leaves JSON import-attribute targets on Bun's native loader", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "json-import-ext", version: "1.0.0" }),
-			"prices.json": JSON.stringify({ input: 0.15 }),
-			"index.ts": [
-				'import prices from "./prices.json" with { type: "json" };',
-				"export const inputPrice = prices.input;",
-				"export default function (pi) { void pi; }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as { inputPrice: number };
-
-		expect(mod.inputPrice).toBe(0.15);
 	});
 
 	it("loads the extension's own node_modules deps natively while remapping legacy pi imports", async () => {
@@ -348,176 +101,6 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		// bundled Zod-backed shim.
 		expect(mod.depValue).toBe("cjs-native");
 		expect(mod.hasZod).toBe(true);
-	});
-
-	it("exposes legacy root tool factories used by pi-lean-ctx", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "legacy-tool-factory-ext", version: "1.0.0" }),
-			"index.ts": [
-				'import { Text } from "@earendil-works/pi-tui";',
-				"import {",
-				"  createBashToolDefinition,",
-				"  createFindToolDefinition,",
-				"  createGrepToolDefinition,",
-				"  createLsToolDefinition,",
-				"  createReadToolDefinition,",
-				"  DEFAULT_MAX_LINES,",
-				"  getLanguageFromPath,",
-				"  highlightCode,",
-				"  truncateHead,",
-				'} from "@earendil-works/pi-coding-agent";',
-				"const cwd = process.cwd();",
-				"const definitions = [",
-				"  createBashToolDefinition(cwd),",
-				"  createReadToolDefinition(cwd),",
-				"  createGrepToolDefinition(cwd),",
-				"  createFindToolDefinition(cwd),",
-				"  createLsToolDefinition(cwd),",
-				"];",
-				"const fakeTheme = { fg: (_color, text) => text, bold: text => text };",
-				"const fakeContext = { lastComponent: new Text('', 0, 0) };",
-				"for (const definition of definitions) {",
-				"  if (typeof definition.renderCall === 'function') definition.renderCall({ command: 'echo ok', path: '.', pattern: '*.ts' }, fakeTheme, fakeContext);",
-				"}",
-				"export const toolNames = definitions.map(definition => definition.name);",
-				"export const helperValues = {",
-				"  maxLines: DEFAULT_MAX_LINES,",
-				"  language: getLanguageFromPath('src/example.ts'),",
-				"  highlighted: highlightCode('const x = 1;', 'ts').length,",
-				"  truncated: truncateHead('a\\nb', { maxLines: 1 }).truncated,",
-				"};",
-				"export default function (pi) { for (const definition of definitions) pi.registerTool(definition); }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as {
-			toolNames: string[];
-			helperValues: { maxLines: number; language: string; highlighted: number; truncated: boolean };
-		};
-
-		expect(mod.toolNames).toEqual(["bash", "read", "grep", "find", "ls"]);
-		expect(mod.helperValues).toEqual({
-			maxLines: 3000,
-			language: "typescript",
-			highlighted: 1,
-			truncated: true,
-		});
-	});
-
-	it("honors legacy bash operations overrides", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "legacy-bash-ops-ext", version: "1.0.0" }),
-			"index.ts": [
-				'import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";',
-				"const updates = [];",
-				"let captured;",
-				"const tool = createBashToolDefinition(process.cwd(), {",
-				"  operations: {",
-				"    async exec(command, cwd, options) {",
-				"      captured = { command, cwd, timeout: options.timeout, envValue: options.env.SENTINEL };",
-				"      options.onData(Buffer.from('remote output'));",
-				"      return { exitCode: 0 };",
-				"    },",
-				"  },",
-				"  spawnHook(context) {",
-				"    return { ...context, command: 'remote:' + context.command, cwd: '/remote', env: { ...context.env, SENTINEL: 'yes' } };",
-				"  },",
-				"});",
-				"const result = await tool.execute('call-1', { command: 'whoami', timeout: 7 }, undefined, update => {",
-				"  const text = update.content.find(block => block.type === 'text')?.text;",
-				"  if (text) updates.push(text);",
-				"});",
-				"export const observed = {",
-				"  captured,",
-				"  text: result.content.find(block => block.type === 'text')?.text,",
-				"  updates,",
-				"};",
-				"export default function (pi) { pi.registerTool(tool); }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as {
-			observed: {
-				captured: { command: string; cwd: string; timeout: number; envValue: string };
-				text: string;
-				updates: string[];
-			};
-		};
-
-		expect(mod.observed.captured).toEqual({
-			command: "remote:whoami",
-			cwd: "/remote",
-			timeout: 7,
-			envValue: "yes",
-		});
-		expect(mod.observed.text).toBe("remote output");
-		expect(mod.observed.updates).toEqual(["remote output"]);
-	});
-
-	it("preserves relative paths from legacy find operations", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "legacy-find-ops-ext", version: "1.0.0" }),
-			"index.ts": [
-				'import { createFindToolDefinition } from "@earendil-works/pi-coding-agent";',
-				"const tool = createFindToolDefinition('/remote/project', {",
-				"  operations: {",
-				"    exists: () => true,",
-				"    glob: () => ['src/a.ts', '/remote/project/src/b.ts'],",
-				"  },",
-				"});",
-				"const result = await tool.execute('call-1', { pattern: '**/*.ts', path: '.' });",
-				"const text = result.content.find(block => block.type === 'text')?.text ?? '';",
-				"export const lines = text.split('\\n');",
-				"export default function (pi) { pi.registerTool(tool); }",
-			].join("\n"),
-		});
-
-		const mod = (await loadLegacyPiModule(path.join(dir, "index.ts"))) as { lines: string[] };
-
-		expect(mod.lines).toEqual(["src/a.ts", "src/b.ts"]);
-	});
-
-	it("rewrites extension bare deps to file URLs for compiled-binary loading", async () => {
-		const dir = await writePackage({
-			"package.json": JSON.stringify({ name: "compiled-dep-ext", version: "1.0.0" }),
-			"node_modules/esmdep/package.json": JSON.stringify({
-				name: "esmdep",
-				version: "1.0.0",
-				type: "module",
-				exports: { "./value": "./value.js" },
-			}),
-			"node_modules/rootdep/package.json": JSON.stringify({
-				name: "rootdep",
-				version: "1.0.0",
-				type: "module",
-				exports: "./dist/index.js",
-			}),
-			"node_modules/rootdep/dist/index.js": "export const rootValue = 2;",
-			"node_modules/esmdep/value.js": "export const value = 1;",
-			"index.ts": "",
-		});
-		const importer = path.join(dir, "index.ts");
-		const rewritten = await __rewriteLegacyExtensionSourceForTests(
-			[
-				'import * as path from "node:path";',
-				'import { value } from "esmdep/value";',
-				'import { rootValue } from "rootdep";',
-				"export const loaded = value + rootValue;",
-			].join("\n"),
-			importer,
-		);
-
-		const expectedEsmDepUrls = [
-			path.join(dir, "node_modules/esmdep/value.js"),
-			await fs.realpath(path.join(dir, "node_modules/esmdep/value.js")),
-		].map(p => url.pathToFileURL(p).href);
-		const expectedRootDepUrls = [
-			path.join(dir, "node_modules/rootdep/dist/index.js"),
-			await fs.realpath(path.join(dir, "node_modules/rootdep/dist/index.js")),
-		].map(p => url.pathToFileURL(p).href);
-		expect(expectedEsmDepUrls.some(expected => rewritten.includes(expected))).toBe(true);
-		expect(expectedRootDepUrls.some(expected => rewritten.includes(expected))).toBe(true);
-		expect(rewritten).toContain('from "node:path"');
 	});
 
 	it("remaps legacy pi-ai utils/oauth subpaths to registry OAuth exports", async () => {
@@ -582,5 +165,74 @@ describe("legacy-pi in-place module loading (issue #1674)", () => {
 		// extension's rewrite hook; its fork-scope import stays unresolved.
 		const siblingUrl = `${url.pathToFileURL(await fs.realpath(path.join(dir, "unrelated.ts"))).href}?nonce=${Date.now()}`;
 		await expect(import(siblingUrl)).rejects.toThrow(/@earendil-works\/pi-ai/);
+	});
+
+	it("resolves bare deps from an isolated-store-style symlinked package", async () => {
+		const dir = await writePackage({
+			".store/pkg@1.0.0/node_modules/effect/package.json": JSON.stringify({
+				name: "effect",
+				version: "1.0.0",
+				main: "index.js",
+			}),
+			".store/pkg@1.0.0/node_modules/effect/index.js": 'module.exports = { value: "effect-ok" };',
+			".store/pkg@1.0.0/node_modules/pkg/package.json": JSON.stringify({
+				name: "pkg",
+				version: "1.0.0",
+				main: "index.ts",
+			}),
+			".store/pkg@1.0.0/node_modules/pkg/index.ts": [
+				'import effect from "effect";',
+				"export const effectValue = effect.value;",
+				"export const metaUrl = import.meta.url;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+		});
+
+		// Symlink top-level node_modules/pkg to the store package (isolated-store layout).
+		const storePkg = path.join(dir, ".store", "pkg@1.0.0", "node_modules", "pkg");
+		const topPkg = path.join(dir, "node_modules", "pkg");
+		await fs.mkdir(path.dirname(topPkg), { recursive: true });
+		await fs.symlink(storePkg, topPkg, "dir");
+
+		const mod = (await loadLegacyPiModule(path.join(topPkg, "index.ts"))) as {
+			effectValue: string;
+			metaUrl: string;
+		};
+
+		expect(mod.effectValue).toBe("effect-ok");
+		// The module ran from its real store location, proving package identity and
+		// asset paths are anchored to the manifest, not the top-level symlink.
+		expect(mod.metaUrl).toContain(".store/pkg@1.0.0");
+	});
+
+	it("identifies the importer and package in bare dependency resolution errors", async () => {
+		// Use an empty node_modules directory so Bun stops searching ancestors;
+		// otherwise a coincidental global/workspace package could satisfy the
+		// bare specifier and the test would not exercise the error path.
+		const missingSpecifier = "__omp_test_missing_dep_019f4a14";
+		const dir = await writePackage({
+			"package.json": JSON.stringify({ name: "missing-dep-ext", version: "1.0.0" }),
+			"node_modules/.gitkeep": "",
+			"index.ts": [
+				`import { value } from "${missingSpecifier}";`,
+				"export const used = value;",
+				"export default function (pi) { void pi; }",
+			].join("\n"),
+		});
+
+		const entryPath = path.join(dir, "index.ts");
+		const entryRealPath = await fs.realpath(entryPath);
+		const packageRealPath = await fs.realpath(dir);
+		let caught: unknown;
+		try {
+			await loadLegacyPiModule(entryPath);
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(Error);
+		const message = caught instanceof Error ? caught.message : String(caught);
+		expect(message).toContain(missingSpecifier);
+		expect(message).toContain(entryRealPath);
+		expect(message).toContain(packageRealPath);
 	});
 });

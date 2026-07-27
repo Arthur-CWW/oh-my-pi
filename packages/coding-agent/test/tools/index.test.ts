@@ -31,7 +31,6 @@ function createActiveGoalState() {
 			id: "goal-1",
 			objective: "Ship the release",
 			status: "active" as const,
-			tokenBudget: 25,
 			tokensUsed: 5,
 			timeUsedSeconds: 0,
 			createdAt: 1,
@@ -75,8 +74,8 @@ describe("createTools", () => {
 		expect(names).toContain("read");
 		expect(names).toContain("edit");
 		expect(names).toContain("write");
-		expect(names).toContain("grep");
-		expect(names).toContain("glob");
+		expect(names).toContain("search");
+		expect(names).toContain("find");
 		expect(names).toContain("lsp");
 		expect(names).toContain("task");
 		expect(names).toContain("todo");
@@ -84,20 +83,6 @@ describe("createTools", () => {
 		expect(names).toContain("resolve");
 		expect(names).not.toContain("fetch");
 		expect(names).not.toContain("vim");
-	});
-
-	it("normalizes legacy explicit tool names", async () => {
-		const session = createTestSession({
-			settings: createSettingsWithOverrides({ "astGrep.enabled": false }),
-		});
-		const tools = await createTools(session, ["search", "find", "grep"]);
-		const names = tools.map(t => t.name);
-
-		expect(names.filter(name => name === "grep")).toHaveLength(1);
-		expect(names).toContain("glob");
-		expect(names).toContain("resolve");
-		expect(names).not.toContain("search");
-		expect(names).not.toContain("find");
 	});
 
 	it("includes bash and eval when both eval backends are allowed", async () => {
@@ -149,7 +134,7 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["read", "lsp", "write"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["read", "write", "resolve"]);
+		expect(names).toEqual(["read", "write", "resolve", "report_friction"]);
 	});
 
 	it("excludes lsp tool when disabled", async () => {
@@ -165,7 +150,7 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["read", "write"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["read", "write", "resolve"]);
+		expect(names).toEqual(["read", "write", "resolve", "report_friction"]);
 	});
 
 	it("lowercases requested tool subset", async () => {
@@ -173,7 +158,7 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["Read", "Write"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["read", "write", "resolve"]);
+		expect(names).toEqual(["read", "write", "resolve", "report_friction"]);
 	});
 
 	it("includes hidden tools when explicitly requested", async () => {
@@ -181,7 +166,7 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["report_finding"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["report_finding", "resolve"]);
+		expect(names).toEqual(["report_finding", "resolve", "report_friction"]);
 	});
 
 	it("includes yield tool when required", async () => {
@@ -211,10 +196,11 @@ describe("createTools", () => {
 	it("filters disabled builtin tools by settings", async () => {
 		const session = createTestSession({
 			settings: createSettingsWithOverrides({
-				"glob.enabled": false,
-				"grep.enabled": false,
+				"find.enabled": false,
+				"search.enabled": false,
 				"astGrep.enabled": false,
 				"astEdit.enabled": false,
+				"renderMermaid.enabled": false,
 				"bash.enabled": false,
 				"web_search.enabled": false,
 				"browser.enabled": false,
@@ -225,16 +211,17 @@ describe("createTools", () => {
 		const names = tools.map(t => t.name);
 
 		expect(names).not.toContain("bash");
-		expect(names).not.toContain("glob");
-		expect(names).not.toContain("grep");
+		expect(names).not.toContain("find");
+		expect(names).not.toContain("search");
 		expect(names).not.toContain("ast_grep");
 		expect(names).not.toContain("ast_edit");
+		expect(names).not.toContain("render_mermaid");
 		expect(names).not.toContain("web_search");
 		expect(names).not.toContain("browser");
 		expect(names).not.toContain("inspect_image");
 
 		const requestedTools = await createTools(session, ["bash", "read"]);
-		expect(requestedTools.map(t => t.name)).toEqual(["read", "resolve"]);
+		expect(requestedTools.map(t => t.name)).toEqual(["read", "resolve", "report_friction"]);
 	});
 
 	it("always includes resolve regardless of plan-mode setting", async () => {
@@ -249,9 +236,9 @@ describe("createTools", () => {
 		expect(defaultTools.map(t => t.name)).not.toContain("exit_plan_mode");
 
 		const requestedTools = await createTools(session, ["read"]);
-		expect(requestedTools.map(t => t.name)).toEqual(["read", "resolve"]);
+		expect(requestedTools.map(t => t.name)).toEqual(["read", "resolve", "report_friction"]);
 	});
-	it("auto-includes goal when goal mode is active", async () => {
+	it("auto-includes goal when goal mode is enabled", async () => {
 		const session = createTestSession({
 			settings: createSettingsWithOverrides({
 				"goal.enabled": true,
@@ -261,38 +248,21 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["read"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["read", "goal", "resolve"]);
+		expect(names).toEqual(["read", "goal", "resolve", "report_friction"]);
 	});
 
-	it("records active tools on the original session object", async () => {
-		const session = createTestSession();
-
-		await createTools(session, ["bash"]);
-
-		expect(session.isToolActive?.("bash")).toBe(true);
-		expect(session.isToolActive?.("read")).toBe(false);
-	});
-
-	it("renders bash guidance from the live active tool predicate", async () => {
-		const activeToolNames = new Set<string>();
+	it("exposes goal tool before goal mode is active when goal.enabled is true", async () => {
 		const session = createTestSession({
-			isToolActive: name => activeToolNames.has(name),
-			setActiveToolNames: names => {
-				activeToolNames.clear();
-				for (const name of names) {
-					activeToolNames.add(name);
-				}
-			},
+			settings: createSettingsWithOverrides({
+				"goal.enabled": true,
+			}),
+			getGoalModeState: () => undefined,
 		});
+		const defaultTools = await createTools(session);
+		const explicitTools = await createTools(session, ["goal"]);
 
-		const tools = await createTools(session, ["bash", "grep", "read", "glob"]);
-		const bash = tools.find(tool => tool.name === "bash");
-
-		expect(bash?.description).toContain("`grep` tool");
-		session.setActiveToolNames?.(["bash"]);
-		expect(bash?.description).not.toContain("`grep` tool");
-		expect(bash?.description).not.toContain("`ls` → `read`");
-		expect(bash?.description).not.toContain("`find` → the `glob` tool");
+		expect(defaultTools.map(t => t.name)).toContain("goal");
+		expect(explicitTools.map(t => t.name)).toEqual(["goal", "resolve", "report_friction"]);
 	});
 
 	it("includes search_tool_bm25 when MCP tool discovery is enabled and executable", async () => {
@@ -312,6 +282,7 @@ describe("createTools", () => {
 		expect(Object.keys(HIDDEN_TOOLS).sort()).toEqual([
 			"goal",
 			"report_finding",
+			"report_friction",
 			"report_tool_issue",
 			"resolve",
 			"yield",

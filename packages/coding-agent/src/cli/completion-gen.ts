@@ -1,20 +1,22 @@
 /**
  * Shell-completion generation (bash, zsh, fish).
  *
- * Single source of truth: the declarative `flags`/`args` descriptors carried by
- * each `Command` subclass plus the registered subcommand table. {@link buildSpec}
- * walks that metadata — the same data `renderCommandBody` renders for `--help` —
- * and {@link generateCompletion} emits a self-contained completion script. Adding
- * a flag to a command's static `flags` therefore propagates into completions with
- * no edits here.
+ * The generated script is a pure function of a {@link CompletionSpec}, which
+ * {@link buildSpec} assembles from typed, owned {@link CommandMeta}. The
+ * subcommand tree (names, descriptions, hidden state, aliases) is reflected off
+ * the live Effect command registry; the per-flag/arg detail is supplied as
+ * data. Effect's `Command.Any` does not expose its parsed flag metadata through
+ * a public API, so the completable flags — and their value sources — are
+ * declared alongside the completions command rather than introspected off the
+ * command descriptors.
  *
  * Static candidates (enum `options`, the builtin tool list) are baked into the
  * script. A small set of flags resolve dynamic candidates (the live model
  * catalog and on-disk sessions) by calling back into `<bin> __complete <kind>`
- * — see `commands/complete.ts`. The flag→source mapping below is the only manual
- * knob and is keyed by flag name so it stays stable as flags are added.
+ * — see `commands/complete.ts`. The flag→source mapping below (MODEL_FLAGS,
+ * SESSION_FLAGS, DIR_FLAGS) is the only value-classification knob and is keyed
+ * by flag name so it stays stable as flags are added.
  */
-import type { ArgDescriptor, CliConfig, CommandCtor, FlagDescriptor } from "@oh-my-pi/pi-utils/cli";
 import { BUILTIN_TOOL_NAMES } from "../tools/builtin-names";
 
 export type Shell = "bash" | "zsh" | "fish";
@@ -62,6 +64,43 @@ export interface CompletionSpec {
 	commands: CompletionCommand[];
 }
 
+/**
+ * Typed, owned description of a command's completable surface. Effect's
+ * `Command.Any` does not expose its parsed flag/argument metadata publicly, so
+ * the value-carrying flags and positionals shell completion needs are declared
+ * as data by the caller. The subcommand tree (names, descriptions, hidden
+ * state, aliases) is still reflected off the live command registry.
+ */
+export interface FlagMeta {
+	/** Long name without the leading `--`. */
+	readonly name: string;
+	/** Short character without the leading `-`. */
+	readonly char?: string;
+	readonly description?: string;
+	/** Boolean flag: consumes no value. */
+	readonly boolean?: boolean;
+	/** Flag may be repeated. */
+	readonly multiple?: boolean;
+	/** Static enum choices, if any. */
+	readonly options?: readonly string[];
+}
+
+export interface ArgMeta {
+	readonly name: string;
+	readonly description?: string;
+	/** Static enum choices, if any. */
+	readonly options?: readonly string[];
+}
+
+export interface CommandMeta {
+	readonly name: string;
+	readonly aliases?: readonly string[];
+	readonly description?: string;
+	readonly hidden?: boolean;
+	readonly flags?: readonly FlagMeta[];
+	readonly args?: readonly ArgMeta[];
+}
+
 // --- Flag/arg value classification (the single manual mapping) ----------------
 
 /** Single-value flags resolved against the live model catalog. */
@@ -71,82 +110,67 @@ const SESSION_FLAGS: Record<string, true> = { resume: true, fork: true, session:
 /** Flags whose value is a directory path. */
 const DIR_FLAGS: Record<string, true> = { "session-dir": true, "plugin-dir": true };
 
-function flagValue(name: string, desc: FlagDescriptor): ValueSource {
-	if (desc.kind === "boolean") return { kind: "flag" };
-	if (desc.options && desc.options.length > 0) return { kind: "enum", values: desc.options };
+function flagValue(name: string, meta: FlagMeta): ValueSource {
+	if (meta.boolean) return { kind: "flag" };
+	if (meta.options && meta.options.length > 0) return { kind: "enum", values: meta.options };
 	if (MODEL_FLAGS[name]) return { kind: "models", multiple: false };
 	if (name === "models") return { kind: "models", multiple: true };
 	if (SESSION_FLAGS[name]) return { kind: "sessions" };
 	if (name === "tools") return { kind: "list", values: BUILTIN_TOOL_NAMES };
 	if (DIR_FLAGS[name]) return { kind: "dir" };
-	if (desc.kind === "integer") return { kind: "value" };
 	return { kind: "file" };
 }
 
-function argValue(desc: ArgDescriptor): ValueSource {
-	if (desc.options && desc.options.length > 0) return { kind: "enum", values: desc.options };
+function argValue(meta: ArgMeta): ValueSource {
+	if (meta.options && meta.options.length > 0) return { kind: "enum", values: meta.options };
 	return { kind: "file" };
 }
 
-function buildFlags(Cmd: CommandCtor): CompletionFlag[] {
-	const out: CompletionFlag[] = [];
-	const flags = Cmd.flags ?? {};
-	for (const name in flags) {
-		const desc = flags[name];
-		out.push({
-			name,
-			char: desc.char,
-			description: desc.description ?? "",
-			value: flagValue(name, desc),
-			repeatable: Boolean(desc.multiple),
-		});
-	}
-	return out;
+function buildFlags(metas: readonly FlagMeta[]): CompletionFlag[] {
+	return metas.map(meta => ({
+		name: meta.name,
+		char: meta.char,
+		description: meta.description ?? "",
+		value: flagValue(meta.name, meta),
+		repeatable: Boolean(meta.multiple),
+	}));
 }
 
-function buildArgs(Cmd: CommandCtor): CompletionArg[] {
-	const out: CompletionArg[] = [];
-	const args = Cmd.args ?? {};
-	for (const name in args) {
-		const desc = args[name];
-		out.push({ name, description: desc.description ?? "", value: argValue(desc) });
-	}
-	return out;
+function buildArgs(metas: readonly ArgMeta[]): CompletionArg[] {
+	return metas.map(meta => ({ name: meta.name, description: meta.description ?? "", value: argValue(meta) }));
 }
 
 /**
- * Build a {@link CompletionSpec} from loaded command classes.
+ * Build a {@link CompletionSpec} from owned {@link CommandMeta}.
  *
- * @param rootName  Entry name of the default command (its flags become top-level
- *                  flags; it is excluded from the subcommand list).
- * @param aliasMap  Canonical-name → aliases (merged from the registration table
- *                  and the command class's static `aliases`).
+ * @param bin       Executable name embedded in the generated script.
+ * @param commands  Per-command completion metadata: the subcommand tree is
+ *                  reflected off the live registry, the flag/arg detail supplied
+ *                  as data.
+ * @param rootName  Name of the default command whose flags become the top-level
+ *                  flags; it is excluded from the subcommand list.
  */
-export function buildSpec(
-	config: CliConfig,
-	rootName: string,
-	aliasMap: Map<string, readonly string[]>,
-): CompletionSpec {
-	const commands: CompletionCommand[] = [];
+export function buildSpec(bin: string, commands: readonly CommandMeta[], rootName: string): CompletionSpec {
+	const subcommands: CompletionCommand[] = [];
 	let root: CompletionSpec["root"] = { flags: [], args: [] };
-	for (const [name, Cmd] of config.commands) {
-		const flags = buildFlags(Cmd);
-		const args = buildArgs(Cmd);
-		if (name === rootName) {
+	for (const meta of commands) {
+		const flags = buildFlags(meta.flags ?? []);
+		const args = buildArgs(meta.args ?? []);
+		if (meta.name === rootName) {
 			root = { flags, args };
 			continue;
 		}
-		if (Cmd.hidden) continue;
-		commands.push({
-			name,
-			aliases: aliasMap.get(name) ?? [],
-			description: Cmd.description ?? "",
+		if (meta.hidden) continue;
+		subcommands.push({
+			name: meta.name,
+			aliases: meta.aliases ?? [],
+			description: meta.description ?? "",
 			flags,
 			args,
 		});
 	}
-	commands.sort((a, b) => a.name.localeCompare(b.name));
-	return { bin: config.bin, root, commands };
+	subcommands.sort((a, b) => a.name.localeCompare(b.name));
+	return { bin, root, commands: subcommands };
 }
 
 // --- Shared helpers -----------------------------------------------------------

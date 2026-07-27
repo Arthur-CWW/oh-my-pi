@@ -16,7 +16,6 @@ import type { AgentDefinition, TaskParams } from "@oh-my-pi/pi-coding-agent/task
 import type { IsolationHandle, WorktreeBaseline } from "@oh-my-pi/pi-coding-agent/task/worktree";
 import * as worktreeModule from "@oh-my-pi/pi-coding-agent/task/worktree";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 import "@oh-my-pi/pi-coding-agent/tools/yield";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 
@@ -263,7 +262,7 @@ describe("subagent LSP availability", () => {
 			expect(getOptions()?.cwd).toBe("/tmp/isolated-subagent");
 			expect(sessionManager?.getCwd?.()).toBe("/tmp/isolated-subagent");
 		} finally {
-			await removeWithRetries(tempDir);
+			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
 
@@ -283,7 +282,7 @@ describe("subagent LSP availability", () => {
 
 		const toolNames = getOptions()?.toolNames;
 		expect(getOptions()?.enableLsp).toBe(true);
-		expect(toolNames).toEqual(["read", "grep", "glob", "lsp", "web_search", "ast_grep", "report_finding", "irc"]);
+		expect(toolNames).toEqual(["read", "search", "find", "lsp", "web_search", "ast_grep", "report_finding", "irc"]);
 		expect(toolNames).not.toContain("bash");
 		expect(toolNames).not.toContain("memory_edit");
 		expect(toolNames).not.toContain("retain");

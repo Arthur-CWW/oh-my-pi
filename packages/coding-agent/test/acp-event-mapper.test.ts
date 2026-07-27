@@ -3,16 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
 import type { AgentSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
-import { type } from "arktype";
-
-const arkSessionNotification = type({
-	sessionId: "string",
-	update: {
-		sessionUpdate:
-			"'agent_thought_chunk' | 'agent_message_chunk' | 'tool_call' | 'tool_call_update' | 'plan' | 'plan_update' | 'available_commands_update' | 'current_mode_update' | 'config_option_update' | 'session_info_update' | 'usage_update'",
-	},
-});
-
+import { zSessionNotification } from "@agentclientprotocol/sdk/dist/schema/zod.gen.js";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { AcpAgent } from "@oh-my-pi/pi-coding-agent/modes/acp/acp-agent";
@@ -52,7 +43,7 @@ function getChunkMessageId(event: { update: object }): string | undefined {
 
 function expectAcpNotifications(updates: SessionNotification[]): void {
 	for (const update of updates) {
-		expectAcpStructure(arkSessionNotification, update);
+		expectAcpStructure(zSessionNotification, update);
 	}
 }
 
@@ -247,7 +238,7 @@ describe("ACP event mapper", () => {
 				type: "tool_execution_start",
 				toolCallId: "tc-eval-start",
 				toolName: "eval",
-				args: { language: "js", title: "sum", code: "return 1 + 1;" },
+				args: { cells: [{ language: "js", title: "sum", code: "return 1 + 1;" }] },
 				intent: "sum",
 			} as AgentSessionEvent,
 			"session-1",
@@ -267,7 +258,7 @@ describe("ACP event mapper", () => {
 		expect(update.title).toBe("[js] sum\nreturn 1 + 1;");
 		expect(update.kind).toBe("execute");
 		expect(update.status).toBe("pending");
-		expect(update.rawInput).toEqual({ language: "js", title: "sum", code: "return 1 + 1;" });
+		expect(update.rawInput).toEqual({ cells: [{ language: "js", title: "sum", code: "return 1 + 1;" }] });
 		expect(update.content).toContainEqual({
 			type: "content",
 			content: { type: "text", text: "[js] sum\nreturn 1 + 1;" },
@@ -305,7 +296,7 @@ describe("ACP event mapper", () => {
 				type: "tool_execution_start",
 				toolCallId: "tc-eval-long-source",
 				toolName: "eval",
-				args: { language: "js", code: source },
+				args: { cells: [{ language: "js", code: source }] },
 			} as AgentSessionEvent,
 			"session-1",
 		);
@@ -390,53 +381,6 @@ describe("ACP event mapper", () => {
 			{ type: "diff", path: "single.ts", oldText: "before\n", newText: "after\n" },
 		]);
 		expect(update.locations).toEqual([{ path: "single.ts" }]);
-	});
-
-	it("resolves live image blob refs for ACP content without expanding rawOutput", () => {
-		const blobRef = "blob:sha256:77467fcfe2bbdc034e0eabb4778c9d7de521c0d7c3e0d0a62566468e4d7da3a5";
-		const resolvedImageData = "resolved-webp-base64";
-		const events: AgentSessionEvent[] = [
-			{
-				type: "tool_execution_update",
-				toolCallId: "tc-image-update",
-				toolName: "generate_image",
-				args: {},
-				partialResult: {
-					content: [{ type: "image", data: blobRef, mimeType: "image/webp" }],
-					details: { images: [{ data: blobRef, mimeType: "image/webp" }] },
-				},
-			} as AgentSessionEvent,
-			{
-				type: "tool_execution_end",
-				toolCallId: "tc-image-end",
-				toolName: "generate_image",
-				isError: false,
-				result: {
-					content: [{ type: "text", text: "Generated image saved." }],
-					details: { images: [{ data: blobRef, mimeType: "image/webp" }] },
-				},
-			} as AgentSessionEvent,
-		];
-
-		for (const event of events) {
-			const updates = mapAgentSessionEventToAcpSessionUpdates(event, "session-1", {
-				resolveImageData: data => (data === blobRef ? resolvedImageData : data),
-			});
-			const update = updates[0]!.update as {
-				content?: Array<{
-					type: string;
-					content?: { type: string; data?: string; mimeType?: string; text?: string };
-				}>;
-				rawOutput?: unknown;
-			};
-			const images = update.content?.filter(item => item.type === "content" && item.content?.type === "image") ?? [];
-
-			expect(images).toEqual([
-				{ type: "content", content: { type: "image", data: resolvedImageData, mimeType: "image/webp" } },
-			]);
-			expect(JSON.stringify(update.content)).not.toContain("blob:sha256:");
-			expect(JSON.stringify(update.rawOutput)).toContain(blobRef);
-		}
 	});
 
 	it("emits locations on tool_execution_update from args", () => {
@@ -851,7 +795,7 @@ describe("ACP event mapper", () => {
 			status: "completed",
 		});
 
-		expectAcpStructure(arkSessionNotification, { sessionId: "session-1", update });
+		expectAcpStructure(zSessionNotification, { sessionId: "session-1", update });
 		expect(update).toMatchObject({
 			sessionUpdate: "tool_call",
 			toolCallId: "toolu_replay_1",
@@ -873,7 +817,7 @@ describe("ACP event mapper", () => {
 			status: "completed",
 		});
 
-		expectAcpStructure(arkSessionNotification, { sessionId: "session-1", update });
+		expectAcpStructure(zSessionNotification, { sessionId: "session-1", update });
 		expect(update).toMatchObject({
 			sessionUpdate: "tool_call",
 			toolCallId: "toolu_replay_read",
@@ -895,7 +839,7 @@ describe("ACP event mapper", () => {
 			status: "completed",
 		});
 
-		expectAcpStructure(arkSessionNotification, { sessionId: "session-1", update });
+		expectAcpStructure(zSessionNotification, { sessionId: "session-1", update });
 		expect(update).toMatchObject({
 			sessionUpdate: "tool_call",
 			toolCallId: "toolu_replay_bad",
@@ -918,7 +862,7 @@ describe("ACP event mapper", () => {
 		});
 
 		expect(replayArgs.args).toBe(rawArgs);
-		expectAcpStructure(arkSessionNotification, { sessionId: "session-1", update });
+		expectAcpStructure(zSessionNotification, { sessionId: "session-1", update });
 		expect(update).toMatchObject({
 			title: "$ bun test",
 			status: "completed",
@@ -1002,11 +946,101 @@ describe("ACP event mapper", () => {
 			"session-1",
 		);
 
-		expectAcpStructure(arkSessionNotification, notification);
-		expectAcpStructureRejects(arkSessionNotification, {
+		expectAcpStructure(zSessionNotification, notification);
+		expectAcpStructureRejects(zSessionNotification, {
 			...notification,
 			update: { ...notification!.update, sessionUpdate: "tool_call_updates" },
 		});
-		expectAcpStructureRejects(arkSessionNotification, { ...notification, sessionId: 42 });
+		expectAcpStructureRejects(zSessionNotification, { ...notification, sessionId: 42 });
+	});
+
+	it("buffers split empty thinking separators until they can be omitted", () => {
+		const assistantMessage = {
+			...makeAssistantMessage(""),
+			content: [{ type: "thinking" as const, thinking: "## Plan\n<!-- " }],
+		};
+		const progress = { textEmitted: false, thoughtEmitted: false };
+		const options = {
+			getMessageProgress: (message: unknown) => (message === assistantMessage ? progress : undefined),
+		};
+
+		const opening = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "message_update",
+				message: assistantMessage,
+				assistantMessageEvent: {
+					type: "thinking_delta",
+					delta: "## Plan\n<!-- ",
+					partial: assistantMessage,
+					contentIndex: 0,
+				},
+			} as AgentSessionEvent,
+			"session-1",
+			options,
+		);
+		assistantMessage.content[0]!.thinking = "## Plan\n<!-- -->\n## Next";
+		const closing = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "message_update",
+				message: assistantMessage,
+				assistantMessageEvent: {
+					type: "thinking_delta",
+					delta: "-->\n## Next",
+					partial: assistantMessage,
+					contentIndex: 0,
+				},
+			} as AgentSessionEvent,
+			"session-1",
+			options,
+		);
+
+		const chunks = [...opening, ...closing].map(
+			update => (update.update as { content: { text: string } }).content.text,
+		);
+		expect(chunks).toEqual(["## Plan", "\n\n## Next"]);
+		expect(chunks.join("")).toBe("## Plan\n\n## Next");
+	});
+
+	it("flushes an incomplete separator at thinking end", () => {
+		const assistantMessage = {
+			...makeAssistantMessage(""),
+			content: [{ type: "thinking" as const, thinking: "Plan<!--" }],
+		};
+		const progress = { textEmitted: false, thoughtEmitted: false };
+		const options = {
+			getMessageProgress: (message: unknown) => (message === assistantMessage ? progress : undefined),
+		};
+		const delta = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "message_update",
+				message: assistantMessage,
+				assistantMessageEvent: {
+					type: "thinking_delta",
+					delta: "Plan<!--",
+					partial: assistantMessage,
+					contentIndex: 0,
+				},
+			} as AgentSessionEvent,
+			"session-1",
+			options,
+		);
+		const end = mapAgentSessionEventToAcpSessionUpdates(
+			{
+				type: "message_update",
+				message: assistantMessage,
+				assistantMessageEvent: {
+					type: "thinking_end",
+					content: "Plan<!--",
+					partial: assistantMessage,
+					contentIndex: 0,
+				},
+			} as AgentSessionEvent,
+			"session-1",
+			options,
+		);
+
+		const chunks = [...delta, ...end].map(update => (update.update as { content: { text: string } }).content.text);
+		expect(chunks).toEqual(["Plan", "<!--"]);
+		expect(chunks.join("")).toBe("Plan<!--");
 	});
 });

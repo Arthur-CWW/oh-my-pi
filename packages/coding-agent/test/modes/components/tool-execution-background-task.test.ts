@@ -102,14 +102,12 @@ describe("ToolExecutionComponent detached task freeze", () => {
 
 	it("does not drive redraws while live and keeps progress bytes static", () => {
 		vi.useFakeTimers();
-		const { component, requestRender, requestComponentRender } = makeComponent(() => true);
+		const { component, requestRender } = makeComponent(() => true);
 
 		component.updateResult(asyncSnapshot("scouting the auth flow"), true);
 		requestRender.mockClear();
-		requestComponentRender.mockClear();
 		vi.advanceTimersByTime(500);
 		expect(requestRender).not.toHaveBeenCalled();
-		expect(requestComponentRender).not.toHaveBeenCalled();
 
 		vi.spyOn(Date, "now").mockReturnValue(1_000);
 		const frameA = component.render(100).join("\n");
@@ -122,7 +120,7 @@ describe("ToolExecutionComponent detached task freeze", () => {
 	it("drops partial snapshots after the freeze but still applies the final result", () => {
 		vi.useFakeTimers();
 		let live = true;
-		const { component } = makeComponent(() => live);
+		const { component, requestComponentRender } = makeComponent(() => live);
 
 		component.updateResult(asyncSnapshot("scouting the auth flow"), true);
 		live = false;
@@ -130,6 +128,7 @@ describe("ToolExecutionComponent detached task freeze", () => {
 
 		// Frozen: later progress snapshots must not repaint commit-eligible rows.
 		component.updateResult(asyncSnapshot("a much newer description"), true);
+		expect(requestComponentRender).toHaveBeenCalledTimes(1);
 		const frozen = stripVTControlCharacters(component.render(100).join("\n"));
 		expect(frozen).toContain("scouting the auth flow");
 		expect(frozen).not.toContain("a much newer description");

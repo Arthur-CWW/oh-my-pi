@@ -1,217 +1,41 @@
-import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { fetchCodexModels } from "@oh-my-pi/pi-catalog/discovery/codex";
-import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
-import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
-import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import { fetchCodexModels } from "../src/discovery/codex";
 
-describe("Codex model discovery", () => {
-	it("marks discovered models for provider-native V2 compaction", async () => {
-		let capturedHeaders: Headers | undefined;
-		const fetchFn: typeof fetch = Object.assign(
-			async (_input: string | URL | Request, init?: RequestInit) => {
-				capturedHeaders = new Headers(init?.headers);
-				return new Response(
-					JSON.stringify({
-						models: [
-							{
-								slug: "gpt-5.5",
-								display_name: "GPT-5.5",
-								context_window: 272_000,
-								default_reasoning_level: "high",
-								supported_reasoning_levels: ["low", "high", "xhigh"],
-								input_modalities: ["text", "image"],
-								supported_in_api: true,
-							},
-						],
-					}),
-					{ headers: { etag: "models-v1" } },
-				);
-			},
-			{ preconnect() {} },
-		);
+describe("Codex discovery", () => {
+	it("preserves ordered exact effort presets and live model capabilities", async () => {
 		const result = await fetchCodexModels({
 			accessToken: "test-token",
-			baseUrl: "https://codex.example/backend-api",
+			baseUrl: "https://api.example.com",
 			clientVersion: "0.99.0",
-			fetchFn,
+			fetchFn: async () => new Response(JSON.stringify({ models: [{
+				slug: "gpt-live", display_name: "Live", description: "Catalog description", context_window: 500_000,
+				default_reasoning_level: "ultra", supported_reasoning_levels: ["none", "low", "medium", "high", "xhigh", "max", "ultra", "custom"].map(effort => ({ effort, description: `${effort} description` })),
+				visibility: "hide", supported_in_api: true, priority: 3, shell_type: "unified_exec", additional_speed_tiers: ["fast"], service_tiers: [{ id: "custom-tier", name: "Custom", description: "Tier description" }], default_service_tier: "custom-tier",
+				availability_nux: { message: "Available" }, upgrade: { model: "gpt-next", migration_markdown: "Upgrade" }, base_instructions: "Instructions", include_skills_usage_instructions: true, supports_reasoning_summaries: true, default_reasoning_summary: "detailed", support_verbosity: true, default_verbosity: "high", apply_patch_tool_type: "freeform", web_search_tool_type: "text_and_image", truncation_policy: { mode: "tokens", limit: 10_000 }, supports_parallel_tool_calls: true, supports_image_detail_original: true, max_context_window: 600_000, auto_compact_token_limit: 400_000, comp_hash: "hash", effective_context_window_percent: 90, experimental_supported_tools: ["tool"], input_modalities: ["text"], supports_search_tool: true, use_responses_lite: true, auto_review_model_override: "gpt-review", tool_mode: "code_mode", multi_agent_version: "v1",
+			}] }), { status: 200, headers: { "Content-Type": "application/json", ETag: "catalog-tag" } }),
 		});
 
-		expect(capturedHeaders?.get("version")).toBe("0.99.0");
-		expect(result?.etag).toBe("models-v1");
+		const model = result?.models[0];
+		expect(result?.etag).toBe("catalog-tag");
+		expect(model?.thinking).toEqual({ mode: "effort", efforts: ["none", "low", "medium", "high", "xhigh", "max", "ultra", "custom"], presets: ["none", "low", "medium", "high", "xhigh", "max", "ultra", "custom"].map(effort => ({ effort, description: `${effort} description` })), defaultLevel: "ultra" });
+		expect(model?.hidden).toBe(true);
+		expect(model?.codex).toMatchObject({ description: "Catalog description", defaultReasoningLevel: "ultra", visibility: "hide", supportedInApi: true, shellType: "unified_exec", additionalSpeedTiers: ["fast"], serviceTiers: [{ id: "custom-tier", name: "Custom", description: "Tier description" }], defaultServiceTier: "custom-tier", availabilityNuxMessage: "Available", upgrade: { model: "gpt-next", migrationMarkdown: "Upgrade" }, baseInstructions: "Instructions", includeSkillsUsageInstructions: true, supportsReasoningSummaries: true, defaultReasoningSummary: "detailed", supportsVerbosity: true, defaultVerbosity: "high", applyPatchToolType: "freeform", webSearchToolType: "text_and_image", maxContextWindow: 600_000, autoCompactTokenLimit: 400_000, compactionHash: "hash", effectiveContextWindowPercent: 90, experimentalSupportedTools: ["tool"], supportsSearchTool: true, useResponsesLite: true, autoReviewModelOverride: "gpt-review", toolMode: "code_mode", multiAgentVersion: "v1", truncationPolicy: { mode: "tokens", limit: 10_000 }, supportsParallelToolCalls: true, supportsImageDetailOriginal: true, contextWindowSource: "endpoint", maxTokensSource: "fallback", costSource: "fallback" });
+		expect([model?.contextWindow, model?.maxTokens]).toEqual([500_000, 128_000]);
+	});
+
+	it("uses explicit fallbacks only when endpoint limits are absent", async () => {
+		const result = await fetchCodexModels({ accessToken: "test-token", baseUrl: "https://api.example.com", clientVersion: "0.99.0", fetchFn: async () => new Response(JSON.stringify({ models: [{ slug: "fallback", supported_reasoning_levels: [{ effort: "custom" }] }] }), { status: 200 }) });
+		expect(result?.models[0]).toMatchObject({ contextWindow: 272_000, maxTokens: 128_000, codex: { contextWindowSource: "fallback", maxTokensSource: "fallback", costSource: "fallback" } });
+	});
+
+	it("keeps hidden models resolvable while excluding API-ineligible models", async () => {
+		const result = await fetchCodexModels({ accessToken: "test-token", baseUrl: "https://api.example.com", clientVersion: "0.99.0", fetchFn: async () => new Response(JSON.stringify({ models: [{ slug: "hidden", visibility: "hide", supported_in_api: true }, { slug: "ineligible", supported_in_api: false }] }), { status: 200 }) });
 		expect(result?.models).toHaveLength(1);
-		expect(result?.models[0]).toMatchObject({
-			id: "gpt-5.5",
-			provider: "openai-codex",
-			api: "openai-codex-responses",
-			remoteCompaction: {
-				enabled: true,
-				api: "openai-codex-responses",
-				v2StreamingEnabled: true,
-			},
-		});
+		expect(result?.models[0]).toMatchObject({ id: "hidden", hidden: true });
 	});
 
-	it("carries use_responses_lite and prefer_websockets onto the model spec", async () => {
-		const fetchFn: typeof fetch = Object.assign(
-			async () =>
-				new Response(
-					JSON.stringify({
-						models: [
-							{
-								slug: "gpt-5.6-terra",
-								display_name: "GPT-5.6-Terra",
-								context_window: 372_000,
-								default_reasoning_level: "medium",
-								supported_reasoning_levels: ["low", "medium", "high"],
-								input_modalities: ["text", "image"],
-								supported_in_api: true,
-								prefer_websockets: true,
-								use_responses_lite: true,
-							},
-							{
-								slug: "gpt-5.5",
-								display_name: "GPT-5.5",
-								context_window: 272_000,
-								default_reasoning_level: "high",
-								supported_reasoning_levels: ["low", "high"],
-								input_modalities: ["text"],
-								supported_in_api: true,
-							},
-						],
-					}),
-				),
-			{ preconnect() {} },
-		);
-		const result = await fetchCodexModels({
-			accessToken: "test-token",
-			baseUrl: "https://codex.example/backend-api",
-			clientVersion: "0.99.0",
-			fetchFn,
-		});
-
-		const terra = result?.models.find(model => model.id === "gpt-5.6-terra");
-		expect(terra).toMatchObject({ preferWebsockets: true, useResponsesLite: true });
-		const legacy = result?.models.find(model => model.id === "gpt-5.5");
-		expect(legacy?.useResponsesLite).toBeUndefined();
-	});
-
-	it("ignores pre-V2 Codex discovery cache rows", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-codex-v7-cache-"));
-		const dbPath = path.join(tempDir, "models.db");
-		const cachedModel: ModelSpec<"openai-codex-responses"> = {
-			id: "gpt-5.5",
-			name: "GPT-5.5",
-			api: "openai-codex-responses",
-			provider: "openai-codex",
-			baseUrl: "https://chatgpt.com/backend-api/codex",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 272_000,
-			maxTokens: 128_000,
-		};
-		const refreshedModel: ModelSpec<"openai-codex-responses"> = {
-			...cachedModel,
-			remoteCompaction: {
-				enabled: true,
-				api: "openai-codex-responses",
-				v2StreamingEnabled: true,
-			},
-		};
-		try {
-			writeModelCache(
-				"openai-codex",
-				Date.now(),
-				[buildModel(cachedModel)],
-				true,
-				"merge-v3:authoritative:merge-v3:empty",
-				dbPath,
-			);
-			const db = new Database(dbPath);
-			try {
-				db.run("UPDATE model_cache SET version = 7 WHERE provider_id = ?", ["openai-codex"]);
-			} finally {
-				db.close();
-			}
-
-			let fetched = false;
-			const result = await resolveProviderModels<"openai-codex-responses">({
-				providerId: "openai-codex",
-				staticModels: [],
-				dynamicModelsAuthoritative: true,
-				cacheDbPath: dbPath,
-				fetchDynamicModels: async () => {
-					fetched = true;
-					return [refreshedModel];
-				},
-			});
-
-			expect(fetched).toBe(true);
-			expect(result.models.find(model => model.id === "gpt-5.5")?.remoteCompaction).toEqual(
-				refreshedModel.remoteCompaction,
-			);
-		} finally {
-			await fs.rm(tempDir, { recursive: true, force: true });
-		}
-	});
-
-	it("does not silently promote legacy v2 Codex cache rows to the current schema", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-codex-v2-cache-"));
-		const dbPath = path.join(tempDir, "models.db");
-		try {
-			// Seed a v2 row directly, mirroring the shape written by very old
-			// installs before schema versioning stabilized. The migration must NOT
-			// resurrect it as the current version — that would keep the pre-V2
-			// compaction metadata alive across cache-schema bumps.
-			const seed = new Database(dbPath, { create: true });
-			try {
-				seed.run(`
-					CREATE TABLE model_cache (
-						provider_id TEXT PRIMARY KEY,
-						version INTEGER NOT NULL,
-						updated_at INTEGER NOT NULL,
-						authoritative INTEGER NOT NULL DEFAULT 0,
-						static_fingerprint TEXT NOT NULL DEFAULT '',
-						models TEXT NOT NULL
-					)
-				`);
-				seed.run(
-					"INSERT INTO model_cache (provider_id, version, updated_at, authoritative, static_fingerprint, models) VALUES (?, 2, ?, 1, '', '[]')",
-					["openai-codex", Date.now()],
-				);
-			} finally {
-				seed.close();
-			}
-
-			let fetched = false;
-			await resolveProviderModels<"openai-codex-responses">({
-				providerId: "openai-codex",
-				staticModels: [],
-				dynamicModelsAuthoritative: true,
-				cacheDbPath: dbPath,
-				fetchDynamicModels: async () => {
-					fetched = true;
-					return [];
-				},
-			});
-			expect(fetched).toBe(true);
-
-			const inspect = new Database(dbPath, { readonly: true });
-			try {
-				const row = inspect
-					.query<{ version: number }, [string]>("SELECT version FROM model_cache WHERE provider_id = ?")
-					.get("openai-codex");
-				expect(row?.version).not.toBe(2);
-			} finally {
-				inspect.close();
-			}
-		} finally {
-			await fs.rm(tempDir, { recursive: true, force: true });
-		}
+	it("projects Ultra orchestration separately from reasoning effort", async () => {
+		const result = await fetchCodexModels({ accessToken: "test-token", baseUrl: "https://api.example.com", clientVersion: "0.99.0", fetchFn: async () => new Response(JSON.stringify({ models: [{ slug: "sol", supported_in_api: true, multi_agent_version: "v2", supported_reasoning_levels: [{ effort: "max", description: "Maximum" }] }] }), { status: 200 }) });
+		expect(result?.models[0]).toMatchObject({ thinking: { efforts: ["max"] }, codex: { multiAgentVersion: "v2", supportsUltraOrchestration: true } });
 	});
 });

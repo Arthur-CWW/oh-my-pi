@@ -5,7 +5,6 @@ import * as path from "node:path";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createTools, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ConflictHistory } from "@oh-my-pi/pi-coding-agent/tools/conflict-detect";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 function createTestSession(cwd: string, overrides: Partial<ToolSession> = {}): ToolSession {
 	return {
@@ -83,7 +82,7 @@ describe("read surfaces conflicts as a warning footer", () => {
 	});
 
 	afterEach(async () => {
-		await removeWithRetries(tempDir);
+		await fs.rm(tempDir, { recursive: true, force: true });
 	});
 
 	it("returns file content and appends a conflict warning with id 1", async () => {
@@ -103,7 +102,7 @@ describe("read surfaces conflicts as a warning footer", () => {
 		expect(text).toContain("⚠ 1 unresolved conflict detected");
 		expect(text).toContain("- ours = HEAD");
 		expect(text).toContain("- theirs = feature/x");
-		expect(text).toContain("──── #1  L2-6 ────");
+		expect(text).toContain("Conflict #1  L2-6");
 		expect(text).toContain("<<< ours");
 		expect(text).toContain(">>> theirs");
 		expect(text).toContain("NOTICE: Inspect a block by reading `conflict://<N>`");
@@ -137,8 +136,8 @@ describe("read surfaces conflicts as a warning footer", () => {
 
 		const result = await read.execute("read-two", { path: "two-blocks.ts" });
 		const text = getText(result);
-		expect(text).toContain("──── #1  L1-5 ────");
-		expect(text).toContain("──── #2  L7-11 ────");
+		expect(text).toContain("Conflict #1  L1-5");
+		expect(text).toContain("Conflict #2  L7-11");
 		expect(session.conflictHistory?.get(1)?.oursLines).toEqual(["a-ours"]);
 		expect(session.conflictHistory?.get(2)?.oursLines).toEqual(["b-ours"]);
 	});
@@ -309,7 +308,7 @@ describe("write resolves conflicts via conflict://N", () => {
 	});
 
 	afterEach(async () => {
-		await removeWithRetries(tempDir);
+		await fs.rm(tempDir, { recursive: true, force: true });
 	});
 
 	it("splices the registered region with the supplied content", async () => {
@@ -507,7 +506,9 @@ describe("write resolves conflicts via conflict://N", () => {
 	it("strips hashline display prefixes from replacement content when hashline mode is active", async () => {
 		const filePath = path.join(tempDir, "hashed.ts");
 		await Bun.write(filePath, TWO_WAY);
-		const session = createTestSession(tempDir);
+		const session = createTestSession(tempDir, {
+			settings: Settings.isolated({ readHashLines: true }),
+		});
 		const read = await getTool(session, "read");
 		const write = await getTool(session, "write");
 

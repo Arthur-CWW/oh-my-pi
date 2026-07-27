@@ -17,6 +17,7 @@ import { settings } from "../config/settings";
 import type { Theme } from "../modes/theme/theme";
 import { Hasher } from "../tui/utils";
 import { formatDimensionNote, type ResizedImage } from "../utils/image-resize";
+import { sanitizeDiagnosticDisplayText } from "./tool-detail-render";
 
 export { Ellipsis } from "@oh-my-pi/pi-natives";
 export { replaceTabs, truncateToWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
@@ -74,8 +75,6 @@ export const TRUNCATE_LENGTHS = {
 	LINE: 110,
 	/** Very short (task previews, badges) */
 	SHORT: 40,
-	/** Idle recap status line (~40-word LLM reply) */
-	RECAP: 280,
 } as const;
 
 /** Keybinding action that toggles tool-output expansion. */
@@ -99,17 +98,6 @@ export function expandKeyHint(): string {
 export function getPreviewLines(text: string, maxLines: number, maxLineLen: number, ellipsis?: Ellipsis): string[] {
 	const lines = text.split("\n").filter(l => l.trim());
 	return lines.slice(0, maxLines).map(l => truncateToWidth(l.trim(), maxLineLen, ellipsis));
-}
-
-/**
- * Collapse a possibly multi-line string into a single line, then truncate it to
- * `maxWidth` display cells. {@link truncateToWidth} alone caps width but
- * newlines are zero-width, so multi-line content (markdown briefs, tool args,
- * provider errors) would otherwise spill a single status row across several
- * visual lines. Whitespace runs collapse to one space, so tabs are handled too.
- */
-export function previewLine(text: string, maxWidth: number, ellipsis?: Ellipsis): string {
-	return truncateToWidth(text.replace(/\s+/g, " ").trim(), maxWidth, ellipsis);
 }
 
 // =============================================================================
@@ -222,21 +210,19 @@ export function previewWindowRows(): number {
  * (ctrl+o) uncaps it.
  *
  * `prefix` (raw, e.g. a dim tree gutter) is prepended to the marker line so
- * nested previews stay aligned. `expandHint: false` drops the "ctrl+o: Expand"
- * suffix for callers that cap even inside the expanded view (task recent
- * output), where the hint would point the wrong way.
+ * nested previews stay aligned.
  */
 export function capPreviewLines(
 	lines: string[],
 	theme: Theme,
-	options: { max?: number; expanded?: boolean; prefix?: string; expandHint?: boolean } = {},
+	options: { max?: number; expanded?: boolean; prefix?: string } = {},
 ): string[] {
 	if (options.expanded) return lines;
 	const max = options.max ?? previewWindowRows();
 	if (lines.length <= max) return lines;
 	const visible = max <= 1 ? [] : lines.slice(lines.length - (max - 1));
 	const hidden = lines.length - visible.length;
-	const hint = options.expandHint === false ? "" : formatExpandHint(theme, false, true);
+	const hint = formatExpandHint(theme, false, true);
 	const marker = `… ${hidden} earlier ${pluralize("line", hidden)}${hint ? ` ${hint}` : ""}`;
 	return [`${options.prefix ?? ""}${theme.fg("dim", marker)}`, ...visible];
 }
@@ -317,10 +303,6 @@ interface ParsedDiagnostic {
 	code?: string;
 }
 
-function sanitizeDiagnosticDisplayText(text: string): string {
-	return replaceTabs(text);
-}
-
 function getSeverityRank(severity: ParsedDiagnostic["severity"]): number {
 	switch (severity) {
 		case "error":
@@ -397,51 +379,13 @@ export function formatDiagnostics(
 	const totalParsedDiags = files.reduce((sum, [, diags]) => sum + diags.length, 0);
 	const totalDiags = totalParsedDiags + unparsed.length;
 
-	// Helper to check if this is the very last item in the tree
-	const isTreeEnd = (fileIdx: number, diagIdx: number | null, unparsedIdx: number | null): boolean => {
-		const willShowMore = totalDiags > diagsShown + 1;
-		if (willShowMore) return false;
-
-		if (unparsedIdx !== null) {
-			return unparsedIdx === unparsed.length - 1;
-		}
-		if (diagIdx !== null) {
-			const isLastDiagInFile = diagIdx === files[fileIdx][1].length - 1;
-			const isLastFile = fileIdx === files.length - 1;
-			return isLastDiagInFile && isLastFile && unparsed.length === 0;
-		}
-		// File node - never the tree end if it has diagnostics
-		return false;
-	};
-
 	for (let fi = 0; fi < files.length && diagsShown < maxDiags; fi++) {
 		const [filePath, diagnostics] = files[fi];
-		// File is "last" only if no more files AND no unparsed AND we'll show all diags AND no "... X more"
-		const remainingDiagsInFile = diagnostics.length;
-		const remainingDiagsAfter = files.slice(fi + 1).reduce((sum, [, d]) => sum + d.length, 0) + unparsed.length;
-		const willShowAllRemaining = diagsShown + remainingDiagsInFile + remainingDiagsAfter <= maxDiags;
-		const isLastFileNode = fi === files.length - 1 && unparsed.length === 0 && willShowAllRemaining;
-		const fileBranch = isLastFileNode ? theme.tree.last : theme.tree.branch;
-
 		const fileIcon = theme.fg("muted", getLangIcon(filePath));
-		output += `\n ${theme.fg("dim", fileBranch)} ${fileIcon} ${theme.fg("accent", filePath)}`;
+		output += `\n    ${fileIcon} ${theme.fg("accent", filePath)}`;
 
 		for (let di = 0; di < diagnostics.length && diagsShown < maxDiags; di++) {
 			const d = diagnostics[di];
-			const isLastDiagInFile = di === diagnostics.length - 1;
-			// This is the last visible diag in file if it's actually last OR we're about to hit the limit
-			const atDisplayLimit = diagsShown + 1 >= maxDiags;
-			const isLastVisibleInFile = isLastDiagInFile || atDisplayLimit;
-			// Check if this is the last visible item in the entire tree
-			const isVeryLast = isTreeEnd(fi, di, null);
-			const diagBranch = isLastFileNode
-				? isLastVisibleInFile || isVeryLast
-					? `  ${theme.tree.last}`
-					: `  ${theme.tree.branch}`
-				: isLastVisibleInFile || isVeryLast
-					? `${theme.tree.vertical} ${theme.tree.last}`
-					: `${theme.tree.vertical} ${theme.tree.branch}`;
-
 			const sevIcon =
 				d.severity === "error"
 					? theme.styledSymbol("status.error", "error")
@@ -452,23 +396,21 @@ export function formatDiagnostics(
 			const codeTag = d.code ? theme.fg("dim", ` (${d.code})`) : "";
 			const msgColor = d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "toolOutput";
 
-			output += `\n ${theme.fg("dim", diagBranch)} ${sevIcon}${location} ${theme.fg(msgColor, d.message)}${codeTag}`;
+			output += `\n      ${sevIcon}${location} ${theme.fg(msgColor, d.message)}${codeTag}`;
 			diagsShown++;
 		}
 	}
 
 	for (let ui = 0; ui < unparsed.length && diagsShown < maxDiags; ui++) {
 		const msg = unparsed[ui];
-		const isVeryLast = isTreeEnd(-1, null, ui);
-		const branch = isVeryLast ? theme.tree.last : theme.tree.branch;
 		const color = msg.includes("[error]") ? "error" : msg.includes("[warning]") ? "warning" : "dim";
-		output += `\n ${theme.fg("dim", branch)} ${theme.fg(color, msg)}`;
+		output += `\n    ${theme.fg(color, msg)}`;
 		diagsShown++;
 	}
 
 	if (totalDiags > diagsShown) {
 		const remaining = totalDiags - diagsShown;
-		output += `\n ${theme.fg("dim", theme.tree.last)} ${theme.fg(
+		output += `\n    ${theme.fg(
 			"muted",
 			`… ${remaining} more`,
 		)} ${formatExpandHint(theme)}`;
@@ -669,16 +611,10 @@ export function truncateDiffByHunk(
 // Path Utilities
 // =============================================================================
 
-export function shortenPath(filePath: unknown, homeDir?: string): string {
-	if (typeof filePath !== "string") {
-		return "";
-	}
+export function shortenPath(filePath: string, homeDir?: string): string {
 	const home = homeDir ?? os.homedir();
 	if (home && filePath.startsWith(home)) {
-		const suffix = filePath.slice(home.length);
-		if (suffix === "" || suffix.startsWith(path.posix.sep) || suffix.startsWith(path.win32.sep)) {
-			return `~${suffix.replaceAll(path.win32.sep, path.posix.sep)}`;
-		}
+		return `~${filePath.slice(home.length)}`;
 	}
 	return filePath;
 }
@@ -715,9 +651,6 @@ export function formatScreenshot(opts: {
 	} else {
 		lines.push(`Format: ${opts.resized.mimeType} (${(opts.resized.buffer.length / 1024).toFixed(2)} KB)`);
 		lines.push(`Dimensions: ${opts.resized.width}x${opts.resized.height}`);
-	}
-	if (opts.resized.decodeFailed) {
-		lines.push("Resize: image decoder failed; using original image bytes");
 	}
 	const dimensionNote = formatDimensionNote(opts.resized);
 	if (dimensionNote) {
@@ -774,18 +707,20 @@ export function capParseErrors(
 /**
  * Standard width+expand keyed render cache used by every search-style tool
  * renderer. `compute` re-runs only when the cache key changes; the returned
- * Component is the canonical `{ render, invalidate }` pair.
+ * Component is the canonical `{ render, invalidate }` pair. `cacheVersion`
+ * covers mutable view-local state that must invalidate a block on the next
+ * render without requiring an explicit tree walk.
  */
 export function createCachedComponent(
 	getExpanded: () => boolean,
 	compute: (width: number, expanded: boolean) => string[],
-	options: { paddingX?: number } = {},
+	options: { paddingX?: number; cacheVersion?: () => number } = {},
 ): Component {
 	let cached: { key: bigint; lines: string[] } | undefined;
 	return {
 		render(width: number): readonly string[] {
 			const expanded = getExpanded();
-			const key = new Hasher().bool(expanded).u32(width).digest();
+			const key = new Hasher().bool(expanded).u32(width).u32(options.cacheVersion?.() ?? 0).digest();
 			if (cached?.key === key) return cached.lines;
 			const paddingX = Math.max(0, options.paddingX ?? 0);
 			const innerWidth = Math.max(1, width - paddingX * 2);

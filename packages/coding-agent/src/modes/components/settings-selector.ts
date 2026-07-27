@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Effort } from "@oh-my-pi/pi-ai";
+import type { ReasoningEffort } from "@oh-my-pi/pi-ai";
 import {
 	type Component,
 	Container,
@@ -10,9 +10,7 @@ import {
 	type ImageBudget,
 	Input,
 	matchesKey,
-	replaceTabs,
-	routeSelectListMouse,
-	routeSgrMouseInput,
+	parseSgrMouse,
 	type SelectItem,
 	SelectList,
 	type SettingItem,
@@ -26,14 +24,7 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import type { ShapeTarget } from "@oh-my-pi/snapcompact";
-import {
-	getDefault,
-	getType,
-	normalizeProviderMaxInFlightRequests,
-	type SettingPath,
-	settings,
-	validateProviderMaxInFlightRequests,
-} from "../../config/settings";
+import { getDefault, type SettingPath, settings } from "../../config/settings";
 import type {
 	SettingTab,
 	StatusLinePreset,
@@ -44,8 +35,10 @@ import { SETTING_TABS, TAB_METADATA } from "../../config/settings-schema";
 import { getCurrentThemeName, getSelectListTheme, getSettingsListTheme, theme } from "../../modes/theme/theme";
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "../../thinking";
 import { getTabBarTheme } from "../shared";
+import { matchesSelectCancel, matchesUiDismiss } from "../utils/keybinding-matchers";
 import { bottomBorder, divider, row, topBorder } from "./overlay-box";
-import { handleInputOrEscape, PluginSettingsComponent } from "./plugin-settings";
+import { handleInputOrDismiss, PluginSettingsComponent } from "./plugin-settings";
+import { keyHint } from "./keybinding-hints";
 import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
 import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { getPreset } from "./status-line/presets";
@@ -59,7 +52,6 @@ import { getPreset } from "./status-line/presets";
  */
 class TextInputSubmenu extends Container {
 	#input: Input;
-	#error: Text;
 
 	constructor(
 		label: string,
@@ -81,23 +73,16 @@ class TextInputSubmenu extends Container {
 		if (currentValue) {
 			this.#input.setValue(currentValue);
 		}
-		this.#error = new Text("", 0, 0);
 		this.#input.onSubmit = value => {
-			try {
-				this.onSubmit(value); // empty string clears the setting
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				this.#error.setText(theme.fg("error", truncateToWidth(replaceTabs(message).replace(/[\r\n]+/g, " "), 100)));
-			}
+			this.onSubmit(value); // empty string clears the setting
 		};
 		this.addChild(this.#input);
 		this.addChild(new Spacer(1));
-		this.addChild(this.#error);
-		this.addChild(new Text(theme.fg("dim", "  Enter to save · Esc to cancel · Clear field to unset"), 0, 0));
+		this.addChild(new Text(`  ${keyHint("ui.dismiss", "cancel")} · Clear field to unset · Enter to save`, 0, 0));
 	}
 
 	handleInput(data: string): void {
-		handleInputOrEscape(data, this.#input, this.onCancel);
+		handleInputOrDismiss(data, this.#input, this.onCancel);
 	}
 }
 
@@ -106,6 +91,7 @@ class SelectSubmenu extends Container {
 	#previewText: Text | null = null;
 	#previewUpdateRequestId: number = 0;
 	#selectListLineOffset = 0;
+	#selectListLineCount = 0;
 
 	constructor(
 		title: string,
@@ -113,7 +99,7 @@ class SelectSubmenu extends Container {
 		options: ReadonlyArray<SelectItem>,
 		currentValue: string,
 		onSelect: (value: string) => void,
-		onCancel: () => void,
+		private readonly onCancel: () => void,
 		onSelectionChange?: (value: string) => void | Promise<void>,
 		private readonly getPreview?: () => string,
 		footer?: Component,
@@ -153,8 +139,6 @@ class SelectSubmenu extends Container {
 			onSelect(item.value);
 		};
 
-		this.#selectList.onCancel = onCancel;
-
 		if (onSelectionChange) {
 			this.#selectList.onSelectionChange = item => {
 				const requestId = ++this.#previewUpdateRequestId;
@@ -177,7 +161,7 @@ class SelectSubmenu extends Container {
 
 		// Hint
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to select · Esc to go back"), 0, 0));
+		this.addChild(new Text(`  Enter to select · ${keyHint("ui.dismiss", "go back")}`, 0, 0));
 
 		// Footer (e.g. the snapcompact shape preview) below the interactive rows,
 		// so the list never shifts while browsing.
@@ -203,6 +187,7 @@ class SelectSubmenu extends Container {
 			const childLines = child.render(Math.max(1, width));
 			if (child === this.#selectList) {
 				this.#selectListLineOffset = lines.length;
+				this.#selectListLineCount = childLines.length;
 			}
 			lines.push(...childLines);
 		}
@@ -211,118 +196,29 @@ class SelectSubmenu extends Container {
 
 	/** Mouse routed from the host: wheel steps, hover lights, click confirms. */
 	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
-		routeSelectListMouse(this.#selectList, event, line - this.#selectListLineOffset);
-	}
-
-	handleInput(data: string): void {
-		this.#selectList.handleInput(data);
-	}
-}
-
-class ProviderLimitsSubmenu extends Container {
-	#selectList: SelectList | undefined;
-
-	constructor(
-		private readonly providers: readonly string[],
-		private readonly onChange: (value: Record<string, number>) => void,
-		private readonly onCancel: () => void,
-		private readonly requestRender?: () => void,
-	) {
-		super();
-		this.#showProviderList();
-	}
-
-	#providerIds(): string[] {
-		const limits = normalizeProviderMaxInFlightRequests(settings.get("providers.maxInFlightRequests"));
-		return [...new Set([...this.providers, ...Object.keys(limits)])].sort((a, b) => a.localeCompare(b));
-	}
-
-	#showProviderList(): void {
-		this.clear();
-		this.addChild(new Text(theme.bold(theme.fg("accent", "Max In-Flight Requests")), 0, 0));
-		this.addChild(new Spacer(1));
-		this.addChild(
-			new Text(
-				theme.fg(
-					"muted",
-					"Select a provider, enter a positive number to cap concurrent LLM requests, or clear it for unlimited.",
-				),
-				0,
-				0,
-			),
-		);
-		this.addChild(new Spacer(1));
-
-		const limits = normalizeProviderMaxInFlightRequests(settings.get("providers.maxInFlightRequests"));
-		const providerItems = this.#providerIds().map((provider): SelectItem => {
-			const limit = limits[provider];
-			return {
-				value: provider,
-				label: provider,
-				description: limit === undefined ? "Unlimited" : `Limit: ${limit}`,
-			};
-		});
-		const clearItem: SelectItem[] =
-			Object.keys(limits).length === 0
-				? []
-				: [{ value: "__clear_all", label: "Clear all limits", description: "Make every provider unlimited" }];
-		const items = [...providerItems, ...clearItem];
-		this.#selectList = new SelectList(items, Math.min(Math.max(items.length, 1), 12), getSelectListTheme());
-		this.#selectList.onSelect = item => {
-			if (item.value === "__clear_all") {
-				settings.set("providers.maxInFlightRequests", {});
-				this.onChange({});
-				this.#showProviderList();
-				this.requestRender?.();
-				return;
-			}
-			this.#showProviderEditor(item.value);
-		};
-		this.#selectList.onCancel = this.onCancel;
-		this.addChild(this.#selectList);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to edit provider · Esc to go back"), 0, 0));
-	}
-
-	#showProviderEditor(provider: string): void {
-		const limits = normalizeProviderMaxInFlightRequests(settings.get("providers.maxInFlightRequests"));
-		this.clear();
-		this.#selectList = undefined;
-		this.addChild(
-			new TextInputSubmenu(
-				`Max In-Flight Requests: ${provider}`,
-				"Enter a positive number. Decimals round down. Clear the field to make this provider unlimited.",
-				limits[provider]?.toString() ?? "",
-				value => {
-					const next = { ...limits };
-					const trimmed = value.trim();
-					if (trimmed === "") {
-						delete next[provider];
-					} else {
-						const limit = Number(trimmed);
-						if (!Number.isFinite(limit) || limit <= 0) throw new Error("Limit must be a positive number.");
-						next[provider] = Math.max(1, Math.floor(limit));
-					}
-					const normalized = validateProviderMaxInFlightRequests(next);
-					settings.set("providers.maxInFlightRequests", normalized);
-					this.onChange(normalized);
-					this.#showProviderList();
-					this.requestRender?.();
-				},
-				() => {
-					this.#showProviderList();
-					this.requestRender?.();
-				},
-			),
-		);
-	}
-
-	handleInput(data: string): void {
-		if (this.#selectList) {
-			this.#selectList.handleInput(data);
+		if (event.wheel !== null) {
+			this.#selectList.handleWheel(event.wheel);
 			return;
 		}
-		this.children[0]?.handleInput?.(data);
+		const listLine = line - this.#selectListLineOffset;
+		const within = listLine >= 0 && listLine < this.#selectListLineCount;
+		const index = within ? this.#selectList.hitTest(listLine) : undefined;
+		if (event.motion) {
+			this.#selectList.setHoverIndex(index ?? null);
+			return;
+		}
+		if (event.leftClick && index !== undefined) {
+			this.#selectList.clickItem(index);
+		}
+	}
+
+	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.onCancel();
+			return;
+		}
+		if (matchesSelectCancel(data)) return;
+		this.#selectList.handleInput(data);
 	}
 }
 
@@ -361,14 +257,12 @@ function getSettingsTabs(): Tab[] {
  * Some settings (like thinking level) are managed by the session, not Settings.
  */
 export interface SettingsRuntimeContext {
-	/** Available thinking levels (from session) */
-	availableThinkingLevels: Effort[];
+	/** Exact model-supported thinking efforts (from session). */
+	availableThinkingLevels: ReasoningEffort[];
 	/** Current thinking level (from session) */
 	thinkingLevel: ThinkingLevel | undefined;
 	/** Available themes */
 	availableThemes: string[];
-	/** Provider/source ids shown in /model. */
-	providers: string[];
 	/** Working directory for plugins tab */
 	cwd: string;
 	/** Active model (api + id); resolves what the snapcompact `auto` shape maps to. */
@@ -387,7 +281,6 @@ export interface StatusLinePreviewSettings {
 	separator?: StatusLineSeparatorStyle;
 	sessionAccent?: boolean;
 	transparent?: boolean;
-	compactThinkingLevel?: boolean;
 }
 
 export interface SettingsCallbacks {
@@ -482,16 +375,16 @@ export class SettingsSelectorComponent implements Component {
 
 	#footerHintText(): string {
 		if (this.#searchList) {
-			return "Enter to change · Tab to jump tabs · Esc to exit search";
+			return `Enter to change · Tab to jump tabs · ${keyHint("ui.dismiss", "exit search")}`;
 		}
 		if (this.#currentTabId === "plugins") {
-			return "Tab to switch tabs · Esc to close";
+			return `Tab to switch tabs · ${keyHint("ui.dismiss", "close")}`;
 		}
 		if (this.#currentList?.sectionFocused) {
-			return "↑/↓ to jump sections · Tab/Enter to settings · ←/→ to switch tabs · Esc to close";
+			return `↑/↓ to jump sections · Tab/Enter to settings · ←/→ to switch tabs · ${keyHint("ui.dismiss", "close")}`;
 		}
 		const nav = this.#hasSectionJump ? "Tab to jump sections · ←/→ to switch tabs" : "Tab to switch tabs";
-		return `Enter/Space to change · ${nav} · Type to search · Esc to close`;
+		return `Enter/Space to change · ${nav} · Type to search · ${keyHint("ui.dismiss", "close")}`;
 	}
 
 	/** Single-line search banner: accent icon, editable query with live cursor, right-aligned match count. */
@@ -570,14 +463,12 @@ export class SettingsSelectorComponent implements Component {
 	 * activates it (toggle / open submenu).
 	 */
 	#handleMouse(data: string): boolean {
-		return routeSgrMouseInput(data, event => this.#routeMouseEvent(event));
-	}
+		const event = parseSgrMouse(data);
+		if (!event) return false;
 
-	#routeMouseEvent(event: SgrMouseEvent): boolean {
 		const list = this.#searchList ?? this.#currentList;
-		// row() insets content by the border column plus a space.
-		const contentColInset = 2;
-		const innerCol = event.col - contentColInset;
+		// row() insets content by two columns (border + space).
+		const innerCol = event.col - 2;
 		const contentLine = event.row - this.#contentRowStart;
 
 		// An open submenu owns the pointer: wheel, hover, and clicks route into
@@ -587,16 +478,14 @@ export class SettingsSelectorComponent implements Component {
 			return true;
 		}
 
+		if (event.wheel !== null) {
+			list?.handleWheel(event.wheel);
+			return true;
+		}
+
 		const tabLine = event.row - this.#tabRowStart;
 		const overTabs = tabLine >= 0 && tabLine < this.#tabRowCount;
 		const overContent = contentLine >= 0 && contentLine < this.#contentRowCount;
-
-		if (event.wheel !== null) {
-			if (overContent) {
-				list?.handleWheelAt(event.wheel, contentLine, innerCol);
-			}
-			return true;
-		}
 
 		if (event.motion) {
 			const hovered = overTabs ? this.#tabBar.tabAt(tabLine, innerCol) : undefined;
@@ -817,7 +706,7 @@ export class SettingsSelectorComponent implements Component {
 					id: def.path,
 					label: def.label,
 					description: def.description,
-					currentValue: String(currentValue ?? ""),
+					currentValue: currentValue as string,
 					values: [...def.values],
 					changed,
 				};
@@ -837,18 +726,8 @@ export class SettingsSelectorComponent implements Component {
 					id: def.path,
 					label: def.label,
 					description: def.description,
-					currentValue: this.#formatTextInputValue(def.path, currentValue),
+					currentValue: (currentValue as string) ?? "",
 					submenu: (cv, done) => this.#createTextInput(def, cv, done),
-					changed,
-				};
-
-			case "providerLimits":
-				return {
-					id: def.path,
-					label: def.label,
-					description: def.description,
-					currentValue: this.#formatProviderLimitsValue(currentValue),
-					submenu: (_cv, done) => this.#createProviderLimitsInput(done),
 					changed,
 				};
 		}
@@ -980,7 +859,7 @@ export class SettingsSelectorComponent implements Component {
 	 */
 	#createTextInput(
 		def: SettingDef & { type: "text" },
-		_currentValue: string,
+		currentValue: string,
 		done: (value?: string) => void,
 	): Container {
 		this.#textInputActive = true;
@@ -991,72 +870,28 @@ export class SettingsSelectorComponent implements Component {
 		return new TextInputSubmenu(
 			def.label,
 			def.description,
-			this.#formatTextInputEditValue(def.path, settings.get(def.path)),
+			currentValue,
 			value => {
 				// Empty string clears the setting; undefined-typed string settings
 				// store "" which the browser.ts expandPath ignores (no-op fallback).
 				this.#setSettingValue(def.path, value);
-				this.callbacks.onChange(def.path, settings.get(def.path));
-				wrappedDone(this.#formatTextInputValue(def.path, settings.get(def.path)));
+				this.callbacks.onChange(def.path, value);
+				wrappedDone(value);
 			},
 			() => wrappedDone(),
 		);
-	}
-
-	#createProviderLimitsInput(done: (value?: string) => void): Container {
-		return new ProviderLimitsSubmenu(
-			this.context.providers,
-			value => {
-				this.callbacks.onChange("providers.maxInFlightRequests", value);
-				done(this.#formatProviderLimitsValue(value));
-			},
-			() => done(),
-			this.context.requestRender,
-		);
-	}
-
-	#formatProviderLimitsValue(value: unknown): string {
-		const limits = normalizeProviderMaxInFlightRequests(value);
-		const entries = Object.entries(limits).sort(([a], [b]) => a.localeCompare(b));
-		if (entries.length === 0) return "Unlimited";
-		return entries.map(([provider, limit]) => `${provider}: ${limit}`).join(", ");
-	}
-
-	#formatTextInputValue(path: SettingPath, value: unknown): string {
-		if (path === "providers.maxInFlightRequests") return this.#formatProviderLimitsValue(value);
-		return this.#formatTextInputEditValue(path, value);
-	}
-
-	#formatTextInputEditValue(_path: SettingPath, value: unknown): string {
-		if (value === undefined || value === null) return "";
-		if (typeof value === "object") return JSON.stringify(value);
-		return String(value);
 	}
 
 	/**
 	 * Set a setting value, handling type conversion.
 	 */
 	#setSettingValue(path: SettingPath, value: string): void {
+		// Handle number conversions
 		const currentValue = settings.get(path);
-		const schemaType = getType(path);
 		if (path === "compaction.thresholdPercent" && value === "default") {
 			settings.set(path, -1 as never);
 		} else if (path === "compaction.thresholdTokens" && value === "default") {
 			settings.set(path, -1 as never);
-		} else if (schemaType === "record") {
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(value || "{}");
-			} catch {
-				throw new Error(`Invalid record JSON for ${path}`);
-			}
-			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-				throw new Error(`Invalid record JSON for ${path}`);
-			}
-			if (path === "providers.maxInFlightRequests") {
-				parsed = validateProviderMaxInFlightRequests(parsed);
-			}
-			settings.set(path, parsed as never);
 		} else if (typeof currentValue === "number") {
 			settings.set(path, Number(value) as never);
 		} else if (typeof currentValue === "boolean") {
@@ -1180,14 +1015,30 @@ export class SettingsSelectorComponent implements Component {
 			return;
 		}
 
+		const activeList = this.#searchList ?? this.#currentList;
+		if (matchesUiDismiss(data)) {
+			if (activeList?.hasOpenSubmenu()) {
+				activeList.handleInput(data);
+			} else if (this.#searchList) {
+				this.#endSearch(true);
+			} else if (this.#currentList?.sectionFocused) {
+				this.#currentList.toggleSectionFocus();
+			} else if (this.#pluginComponent) {
+				this.#pluginComponent.handleInput(data);
+			} else {
+				this.callbacks.onCancel();
+			}
+			return;
+		}
+		// Generic selector cancellation must not bypass a disabled/remapped ui.dismiss.
+		if (matchesSelectCancel(data)) return;
+
 		// Text-input submenus take every byte: arrow keys must reach the
 		// cursor and Tab must not switch tabs.
 		if (this.#textInputActive) {
 			(this.#searchList ?? this.#currentList)?.handleInput(data);
 			return;
 		}
-
-		const activeList = this.#searchList ?? this.#currentList;
 
 		// An open submenu owns input entirely — Tab/arrows/typing belong to it.
 		if (activeList?.hasOpenSubmenu()) {
@@ -1234,11 +1085,6 @@ export class SettingsSelectorComponent implements Component {
 
 	#handleSearchModeInput(data: string, list: SettingsList): void {
 		const kb = getKeybindings();
-		if (kb.matches(data, "tui.select.cancel")) {
-			// Exit search, landing on the tab of the selected result.
-			this.#endSearch(true);
-			return;
-		}
 		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
 			// Jump between tabs that have matches (muted tabs are skipped).
 			this.#tabBar.handleInput(data);

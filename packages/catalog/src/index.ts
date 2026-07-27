@@ -12,6 +12,5 @@ export * from "./types";
 export * from "./utils";
 export * from "./variant-collapse";
 export * from "./wire/codex";
-export * from "./wire/coreweave";
 export * from "./wire/gemini-headers";
 export * from "./wire/github-copilot";

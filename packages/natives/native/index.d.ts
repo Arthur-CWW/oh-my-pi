@@ -116,39 +116,24 @@ export declare class Shell {
    * Returns `Ok(())` even when no commands are running.
    */
   abort(): Promise<void>
-  /**
-   * Count live background jobs (`&`/`nohup` children still running) on this
-   * session. Completed jobs are reaped first. The host uses this to retain a
-   * per-call shell whose background processes are still running instead of
-   * dropping it (which would SIGKILL them via kill-on-drop).
-   */
-  liveBackgroundJobCount(): Promise<number>
 }
 
 /**
- * Install the bounded Tokio runtime napi-rs adopts for async exports and the
- * bounded Rayon global pool used by native parallel iterators.
+ * Install the bounded Tokio runtime napi-rs adopts for async exports.
  *
  * The JS loader calls this exactly once, synchronously, right *after* `dlopen`
- * returns and *before* any async native or parallel iterator runs — never from
- * `#[module_init]`. Building a multi-thread runtime eagerly spawns worker
- * threads, and doing that during module init (while the dynamic-loader lock is
- * held) deadlocks on some hosts: a fresh worker blocks acquiring the loader
- * lock that the init thread still owns. napi-rs only materializes its runtime
- * on the first async call (`RT` is a `LazyLock`) and
- * `create_custom_tokio_runtime` merely records the runtime in a `OnceLock`, so
- * installing it post-load is still honored.
- *
- * Without the Tokio override napi builds its own default (one worker per CPU,
- * spawned eagerly), which aborts the process (`os error 1455`) on a
- * memory-constrained Windows host before any JS error can surface;
- * [`create_windows_napi_tokio_runtime`] pre-flights the spawn instead. Rayon
- * has the same one-thread-per-core lazy default, so [`configure_rayon_pool`]
- * installs a probed global pool before `count_tokens` or vendored `sort` can
- * trigger it across a N-API nounwind boundary. If no worker thread is
- * spawnable, patched Rayon callsites stay sequential rather than registering a
- * current-thread-only global pool that cannot steal work from later native
- * calls. Idempotent.
+ * returns and *before* any async native runs — never from `#[module_init]`.
+ * Building a multi-thread runtime eagerly spawns worker threads, and doing
+ * that during module init (while the dynamic-loader lock is held) deadlocks on
+ * some hosts: a fresh worker blocks acquiring the loader lock that the init
+ * thread still owns. napi-rs only materializes its runtime on the first async
+ * call (`RT` is a `LazyLock`) and `create_custom_tokio_runtime` merely records
+ * the runtime in a `OnceLock`, so installing it post-load is still honored.
+ * Without it napi builds its own default (one worker per CPU, spawned eagerly)
+ * which aborts the process (`os error 1455`) on a memory-constrained Windows
+ * host before any JS error can surface; [`create_windows_napi_tokio_runtime`]
+ * pre-flights the spawn instead. If no runtime can be built we leave napi-rs
+ * to its default. Idempotent.
  */
 export declare function __ompInstallTokioRuntime(): void
 
@@ -170,7 +155,7 @@ export declare function __ompInstallTokioRuntime(): void
  * `packages/natives/native/index.js` (which derives the name from
  * `package.json#version`).
  */
-export declare function __piNativesV16_4_2(): void
+export declare function __piNativesV16_0_1(): void
 
 /**
  * Apply conservative pre-execution rewrites to a bash command.
@@ -486,9 +471,9 @@ export declare function copyToClipboard(text: string): void
  * Count tokens in `input`.
  *
  * `input` may be a single string or an array of strings; an array returns
- * the sum across all elements (encoded in parallel via rayon when the global
- * pool is available). Always returns a single token total — use this for any
- * aggregate budget question without paying a per-element napi crossing.
+ * the sum across all elements (encoded in parallel via rayon). Always
+ * returns a single token total — use this for any aggregate budget question
+ * without paying a per-element napi crossing.
  *
  * Uses ordinary encoding (no special-token handling), which is the right
  * choice for measuring user/model content rather than wire-protocol tokens.
@@ -618,7 +603,7 @@ export interface FuzzyFindOptions {
   hidden?: boolean
   /** Respect .gitignore (default: true). */
   gitignore?: boolean
-  /** Enable walker scan caching (default: false). */
+  /** Enable shared filesystem scan cache (default: false). */
   cache?: boolean
   /** Maximum number of matches to return (default: 100). */
   maxResults?: number
@@ -653,9 +638,9 @@ export declare function getWorkProfile(lastSeconds: number): WorkProfile
  * Resolves the search root, scans entries, applies glob and optional file-type
  * filters, and optionally streams each accepted match through `on_match`.
  *
- * When `sortByMtime` is enabled, the walker ranks matches by mtime before the
- * native layer applies final symlink-aware file-type filtering and callback
- * emission.
+ * If `sortByMtime` is enabled with a finite `maxResults`, uncached scans keep
+ * only the current top results while traversing instead of collecting the full
+ * tree.
  *
  * # Errors
  * Returns an error when the search path cannot be resolved, the path is not a
@@ -670,7 +655,10 @@ export interface GlobMatch {
   path: string
   /** Resolved filesystem type for the match. */
   fileType: FileType
-  /** Modification time in milliseconds since Unix epoch. */
+  /**
+   * Modification time in milliseconds since Unix epoch (from
+   * `symlink_metadata`).
+   */
   mtime?: number
   /** File size in bytes for regular files. */
   size?: number
@@ -695,7 +683,7 @@ export interface GlobOptions {
   maxResults?: number
   /** Respect .gitignore files (default: true). */
   gitignore?: boolean
-  /** Enable walker scan caching (default: false). */
+  /** Enable shared filesystem scan cache (default: false). */
   cache?: boolean
   /** Sort results by mtime (most recent first) before applying limit. */
   sortByMtime?: boolean
@@ -766,6 +754,8 @@ export interface GrepOptions {
   hidden?: boolean
   /** Respect .gitignore files (default: true). */
   gitignore?: boolean
+  /** Enable shared filesystem scan cache (default: false). */
+  cache?: boolean
   /** Maximum number of matches to return. */
   maxCount?: number
   /** Skip first N matches. */
@@ -895,13 +885,13 @@ export interface HtmlToMarkdownOptions {
 }
 
 /**
- * Invalidate the walker scan cache.
+ * Invalidate the filesystem scan cache.
  *
  * When called with a path, removes entries for roots containing that path.
  * When called without a path, clears the entire cache.
  *
- * Intended to be called after agent file mutations: write, edit, rename, or
- * delete.
+ * Intended to be called after agent file mutations (write, edit, rename,
+ * delete).
  */
 export declare function invalidateFsScanCache(path?: string | undefined | null): void
 
@@ -1314,26 +1304,24 @@ export interface PtyStartOptions {
 export declare function readImageFromClipboard(): Promise<ClipboardImage | undefined | null>
 
 /**
- * Render one snapcompact frame on a libuv worker: print pre-normalized text
- * onto a `size`-wide bitmap and encode it as PNG.
+ * Render one snapcompact frame: print pre-normalized text onto a
+ * `size`-wide bitmap and encode it as PNG.
  *
  * The bitmap height hugs the rows the text actually occupies
  * (`usedRows * lineRepeat * cellHeight`), so a partially filled frame never
  * pays for blank padding rows. The glyph grid holds `floor(size/cellWidth) *
- * floor(size/cellHeight/lineRepeat)` characters; input beyond that is ignored.
- * Native-cell bitmap-font shapes encode as indexed PNG; stretched bitmap-font
- * shapes (target cell != font cell) encode as RGB. TrueType shapes encode RGB
- * directly from grayscale coverage.
- * `stretch: false` pins bitmap fonts to the indexed path, printing
- * natural-size glyphs on the requested cell box; `columns: 2` flows
- * pre-wrapped newline-separated lines down two newspaper columns.
- * `U+000E`/`U+000F` in `text` toggle dim-gray ink spans without occupying a
- * cell.
- * Returns a promise for the PNG encoded as base64, created as a one-byte
- * (Latin-1) JS string straight from native code — no `Uint8Array` hop or
- * JS-side re-encode.
+ * floor(size/cellHeight/lineRepeat)` characters; input beyond that is ignored
+ * (the caller chunks text to capacity). Native-cell shapes encode as 4-bit
+ * indexed PNG; stretched shapes (target cell != font cell) encode as RGB.
+ * `stretch: false` pins the indexed path, printing natural-size glyphs on the
+ * requested cell box; `columns: 2` flows pre-wrapped newline-separated lines
+ * down two newspaper columns. `U+000E`/`U+000F` in `text` toggle dim-gray ink
+ * spans without occupying a cell.
+ * Returns the PNG encoded as base64, created as a one-byte (Latin-1) JS
+ * string straight from native code — no `Uint8Array` hop or JS-side
+ * re-encode.
  */
-export declare function renderSnapcompactPng(text: string, options: SnapcompactRenderOptions): Promise<string>
+export declare function renderSnapcompactPng(text: string, options: SnapcompactRenderOptions): string
 
 /**
  * Search content for a pattern (one-shot, compiles pattern each time).
@@ -1383,8 +1371,6 @@ export interface SearchResult {
   /** Error message, if any. */
   error?: string
 }
-
-export declare function setHangulCompatJamoWidthOverride(value: number): void
 
 /** Options for executing a shell command via brush-core. */
 export interface ShellExecuteOptions {
@@ -1445,8 +1431,6 @@ export interface ShellRunResult {
    * minimized text shown to the agent. `None` when nothing was rewritten.
    */
   minimized?: MinimizerResult
-  /** Shell working directory after command completion. */
-  workingDir?: string
 }
 
 /**
@@ -1477,8 +1461,8 @@ export interface SnapcompactRenderOptions {
    */
   size: number
   /**
-   * Bundled font: `"5x8"`, `"6x12"`, `"8x13"` (X.org BDF), `"8x8"`
-   * (unscii-8), or `"silver"` (embedded TrueType). Default `"5x8"`.
+   * Bundled font: `"5x8"`, `"6x12"`, `"8x13"` (X.org BDF) or `"8x8"`
+   * (unscii-8). Default `"5x8"`.
    */
   font?: string
   /**
@@ -1512,15 +1496,6 @@ export interface SnapcompactRenderOptions {
    */
   columns?: number
 }
-
-/**
- * Return the subset of `chars` that the named snapcompact font can render.
- *
- * The TypeScript normalizer uses this to keep Unicode text intact only when
- * the selected native font has a glyph for it; renderer control codes are
- * considered renderable because they are interpreted outside font lookup.
- */
-export declare function snapcompactSupportedChars(font: string, chars: string): string
 
 export declare function summarizeCode(options: SummaryOptions): SummaryResult
 

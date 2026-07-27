@@ -9,7 +9,6 @@ import { SetupWizardComponent } from "./wizard-overlay";
 
 export type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
 
-export { runStartupSplash } from "./startup-splash";
 export { CURRENT_SETUP_VERSION };
 
 export const ALL_SCENES = [

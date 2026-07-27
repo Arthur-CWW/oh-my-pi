@@ -22,7 +22,6 @@ import { writethroughNoop } from "@oh-my-pi/pi-coding-agent/lsp";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import type { ReadToolDetails } from "@oh-my-pi/pi-coding-agent/tools/read";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 const HASHLINE_HEADER_LINE = /^\[([^#\r\n]+)#([0-9A-F]{4})\]$/m;
 const COLUMN_CAP = 64;
@@ -93,7 +92,7 @@ describe("read tool column truncation vs hashline snapshot", () => {
 	});
 
 	afterEach(async () => {
-		await removeWithRetries(tmpDir);
+		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
 	it("snapshot keeps untruncated content for a full-file read with long lines", async () => {

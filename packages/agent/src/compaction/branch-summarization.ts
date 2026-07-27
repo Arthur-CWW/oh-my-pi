@@ -5,7 +5,7 @@
  * a summary of the branch being left so context isn't lost.
  */
 
-import type { Api, ApiKey, AssistantMessage, Context, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
+import { type ApiKey, contextHasVideo, type Model, supportsNativeVideoInput } from "@oh-my-pi/pi-ai";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
@@ -22,14 +22,14 @@ import {
 import branchSummaryPrompt from "./prompts/branch-summary.md" with { type: "text" };
 import branchSummaryPreamble from "./prompts/branch-summary-preamble.md" with { type: "text" };
 import {
+	buildSummaryContent,
 	computeFileLists,
 	createFileOps,
 	extractFileOpsFromMessage,
 	type FileOperations,
-	SUMMARIZATION_SYSTEM_PROMPT,
-	serializeConversation,
+	serializeConversationWithVideos,
 	stripReadSelector,
-	truncateToolResultForSummary,
+	SUMMARIZATION_SYSTEM_PROMPT,
 	upsertFileOperations,
 } from "./utils";
 
@@ -89,17 +89,6 @@ export interface GenerateBranchSummaryOptions {
 	 * wrapped in an OTEL chat span tagged with `pi.gen_ai.oneshot.kind = "branch_summary"`.
 	 */
 	telemetry?: AgentTelemetry;
-	/**
-	 * Optional completion transport override (same contract as
-	 * {@link SummaryOptions.completeImpl}). Lets the host route the branch
-	 * summary HTTP request through its provider-concurrency limiter instead
-	 * of the default `completeSimple` transport.
-	 */
-	completeImpl?: <TApi extends Api>(
-		model: Model<TApi>,
-		ctx: Context,
-		options: SimpleStreamOptions,
-	) => Promise<AssistantMessage>;
 }
 
 // ============================================================================
@@ -169,12 +158,8 @@ export function collectEntriesForBranchSummary(
 function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
 	switch (entry.type) {
 		case "message":
-			// Useless non-error tool results are dropped by serializeConversation()
-			// downstream. Skip them here so a large useless payload can't eat the
-			// branch-summary token budget and starve older useful entries.
-			if (entry.message.role === "toolResult" && entry.message.useless === true && entry.message.isError !== true) {
-				return undefined;
-			}
+			// Skip tool results - context is in assistant's tool call
+			if (entry.message.role === "toolResult") return undefined;
 			return entry.message;
 
 		case "custom_message":
@@ -205,19 +190,6 @@ function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
 		case "mode_change":
 			return undefined;
 	}
-}
-
-function estimateBranchSummaryTokens(message: AgentMessage): number {
-	if (message.role !== "toolResult") return estimateTokens(message);
-	const text = message.content
-		.filter((c): c is { type: "text"; text: string } => c.type === "text")
-		.map(c => c.text)
-		.join("");
-	if (!text) return 0;
-	return estimateTokens({
-		...message,
-		content: [{ type: "text", text: truncateToolResultForSummary(text) }],
-	});
 }
 
 /**
@@ -265,7 +237,7 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 		// Extract file ops from assistant messages (tool calls)
 		extractFileOpsFromMessage(message, fileOps);
 
-		const tokens = estimateBranchSummaryTokens(message);
+		const tokens = estimateTokens(message);
 
 		// Check budget before adding
 		if (tokenBudget > 0 && totalTokens + tokens > tokenBudget) {
@@ -317,19 +289,24 @@ export async function generateBranchSummary(
 		return { summary: "No content to summarize" };
 	}
 
-	// Transform to LLM-compatible messages, then serialize to text
-	// Serialization prevents the model from treating it as a conversation to continue
+	// Transform to LLM-compatible messages, then serialize while retaining
+	// chronological video blocks for the native summary request.
 	const llmMessages = (options.convertToLlm ?? defaultConvertToLlm)(messages);
-	const conversationText = serializeConversation(llmMessages, preferredDialect(model.id));
+	if (contextHasVideo({ messages: llmMessages }) && !supportsNativeVideoInput(model)) {
+		return {
+			error: `Branch summarization requires native video input, but ${model.provider}/${model.id} is not video-capable. Select the configured vision model.`,
+		};
+	}
+	const conversation = serializeConversationWithVideos(llmMessages, preferredDialect(model.id));
 
 	// Build prompt
 	const instructions = customInstructions || BRANCH_SUMMARY_PROMPT;
-	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${instructions}`;
+	const promptText = `<conversation>\n${conversation.text}\n</conversation>\n\n${instructions}`;
 
 	const summarizationMessages = [
 		{
 			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
+			content: buildSummaryContent(promptText, conversation.videos),
 			timestamp: Date.now(),
 		},
 	];
@@ -339,7 +316,7 @@ export async function generateBranchSummary(
 		model,
 		{ systemPrompt: [SUMMARIZATION_SYSTEM_PROMPT], messages: summarizationMessages },
 		{ apiKey, signal, maxTokens: 2048, metadata },
-		{ telemetry: options.telemetry, oneshotKind: "branch_summary", completeImpl: options.completeImpl },
+		{ telemetry: options.telemetry, oneshotKind: "branch_summary" },
 	);
 
 	// Check if aborted or errored

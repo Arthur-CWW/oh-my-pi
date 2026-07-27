@@ -10,7 +10,6 @@ import {
 	getFileSnapshotStore,
 } from "@oh-my-pi/pi-coding-agent/edit";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 beforeAll(async () => {
 	resetSettingsForTest();
@@ -22,7 +21,7 @@ async function withTempDir(fn: (tempDir: string) => Promise<void>): Promise<void
 	try {
 		await fn(tempDir);
 	} finally {
-		await removeWithRetries(tempDir);
+		await fs.rm(tempDir, { recursive: true, force: true });
 	}
 }
 
@@ -63,7 +62,6 @@ async function seedFile(
 }
 
 const TS_SOURCE = "function x() {\n  if (y) {\n  }\n}\n";
-const ELISP_SOURCE = ["(ert-deftest ogent-zen-test ()", '  "Doc."', "  (should t))", ""].join("\n");
 
 describe("SWAP.BLK — native tree-sitter resolution end-to-end", () => {
 	it("resolves the inner `if` block (line 2) and replaces its full span", async () => {
@@ -99,43 +97,6 @@ describe("SWAP.BLK — native tree-sitter resolution end-to-end", () => {
 			await executeHashlineSingle(executeOptions(tempDir, input, session));
 
 			expect(await Bun.file(filePath).text()).toBe("function x() {\n}\n");
-		});
-	});
-
-	it("inserts after an Emacs Lisp top-level macro-style form", async () => {
-		await withTempDir(async tempDir => {
-			const session = makeSession(tempDir);
-			const { filePath, header } = await seedFile(tempDir, session, "ogent-zen-tests.el", ELISP_SOURCE);
-			const input = `${header}\nINS.BLK.POST 1:\n+\n+(ert-deftest ogent-zen-second-test ()\n+  (should-not nil))`;
-
-			const result = await executeHashlineSingle(executeOptions(tempDir, input, session));
-			const text = result.content.map(part => (part.type === "text" ? part.text : "")).join("\n");
-
-			expect(await Bun.file(filePath).text()).toBe(
-				[
-					"(ert-deftest ogent-zen-test ()",
-					'  "Doc."',
-					"  (should t))",
-					"",
-					"(ert-deftest ogent-zen-second-test ()",
-					"  (should-not nil))",
-					"",
-				].join("\n"),
-			);
-			expect(text).toContain("INS.BLK.POST 1 → resolved lines 1-3 (3 lines); body lands after line 3");
-		});
-	});
-	it("inserts after an extensionless .emacs top-level form", async () => {
-		await withTempDir(async tempDir => {
-			const session = makeSession(tempDir);
-			const { filePath, header } = await seedFile(tempDir, session, ".emacs", ELISP_SOURCE);
-			const input = `${header}\nINS.BLK.POST 1:\n+\n+(message "loaded")`;
-
-			await executeHashlineSingle(executeOptions(tempDir, input, session));
-
-			expect(await Bun.file(filePath).text()).toBe(
-				["(ert-deftest ogent-zen-test ()", '  "Doc."', "  (should t))", "", '(message "loaded")', ""].join("\n"),
-			);
 		});
 	});
 
@@ -207,77 +168,6 @@ describe("SWAP.BLK — native tree-sitter resolution end-to-end", () => {
 				/could not resolve a syntactic block/,
 			);
 			expect(await Bun.file(filePath).text()).toBe(source);
-		});
-	});
-});
-
-const MD_PLAN = [
-	"# Plan",
-	"intro",
-	"",
-	"## Context",
-	"why this matters",
-	"more context",
-	"",
-	"### Detail",
-	"deep note",
-	"",
-	"## Approach",
-	"step one",
-	"",
-].join("\n");
-
-describe("block ops on markdown headings — whole-section resolution end-to-end", () => {
-	it("DEL.BLK at a `## H2` deletes the entire section, including nested subsections", async () => {
-		await withTempDir(async tempDir => {
-			const session = makeSession(tempDir);
-			// Line 4 is `## Context`; its section runs through `### Detail` and
-			// the trailing blank, up to `## Approach`.
-			const { filePath, header } = await seedFile(tempDir, session, "plan.md", MD_PLAN);
-			const input = `${header}\nDEL.BLK 4`;
-
-			const result = await executeHashlineSingle(executeOptions(tempDir, input, session));
-			const text = result.content.map(part => (part.type === "text" ? part.text : "")).join("\n");
-
-			expect(await Bun.file(filePath).text()).toBe(
-				["# Plan", "intro", "", "## Approach", "step one", ""].join("\n"),
-			);
-			expect(text).toContain("DEL.BLK 4 → resolved lines 4-10 (7 lines)");
-		});
-	});
-
-	it("INS.BLK.POST at a `## H2` lands after the whole section, past nested subsections", async () => {
-		await withTempDir(async tempDir => {
-			const session = makeSession(tempDir);
-			const { filePath, header } = await seedFile(tempDir, session, "plan.md", MD_PLAN);
-			const input = `${header}\nINS.BLK.POST 4:\n+## Verification\n+run the suite\n+`;
-
-			const result = await executeHashlineSingle(executeOptions(tempDir, input, session));
-			const text = result.content.map(part => (part.type === "text" ? part.text : "")).join("\n");
-
-			// The new section is inserted after the `## Context` section (line
-			// 10), before `## Approach` — not inside it after `### Detail`.
-			expect(await Bun.file(filePath).text()).toBe(
-				[
-					"# Plan",
-					"intro",
-					"",
-					"## Context",
-					"why this matters",
-					"more context",
-					"",
-					"### Detail",
-					"deep note",
-					"",
-					"## Verification",
-					"run the suite",
-					"",
-					"## Approach",
-					"step one",
-					"",
-				].join("\n"),
-			);
-			expect(text).toContain("INS.BLK.POST 4 → resolved lines 4-10 (7 lines); body lands after line 10");
 		});
 	});
 });

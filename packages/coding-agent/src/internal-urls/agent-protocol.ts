@@ -14,7 +14,10 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isEnoent } from "@oh-my-pi/pi-utils";
+import { AgentRegistry } from "../registry/agent-registry";
+import { formatIdPreview } from "./id-preview";
 import { applyQuery, pathToQuery } from "./json-query";
+import { listArchivedChildHistories } from "./history-protocol";
 import { artifactsDirsFromRegistry } from "./registry-helpers";
 import type { InternalResource, InternalUrl, ProtocolHandler, UrlCompletion } from "./types";
 
@@ -43,11 +46,12 @@ export class AgentProtocolHandler implements ProtocolHandler {
 			throw new Error("agent:// URL cannot combine path extraction with ?q=");
 		}
 
+		const registry = AgentRegistry.global();
+		const refs = registry.list();
+		const knownRef = registry.get(outputId);
+
 		const dirs = artifactsDirsFromRegistry();
 
-		if (dirs.length === 0) {
-			throw new Error("No session - agent outputs unavailable");
-		}
 
 		let foundPath: string | undefined;
 		let anyDirExists = false;
@@ -79,13 +83,34 @@ export class AgentProtocolHandler implements ProtocolHandler {
 			}
 		}
 
-		if (!anyDirExists) {
-			throw new Error("No artifacts directory found");
-		}
-
 		if (!foundPath) {
-			const availableStr = availableIds.size > 0 ? [...availableIds].join(", ") : "none";
-			throw new Error(`Not found: ${outputId}\nAvailable: ${availableStr}`);
+			const archives = await listArchivedChildHistories(refs);
+			const archive = archives.find(candidate => candidate.id === outputId);
+			if (knownRef) {
+				throw new Error(
+					[
+						`Agent output unavailable: ${outputId}`,
+						`Status: ${knownRef.status}`,
+						`Final output is not finalized or is unavailable at agent://${outputId}.`,
+						`Read the transcript at history://${outputId}.`,
+					].join("\n"),
+				);
+			}
+			if (archive) {
+				throw new Error(
+					[
+						`Agent output unavailable: ${outputId}`,
+						`Status: archived (${archive.reason})`,
+						`No final output is available at agent://${outputId}.`,
+						`Read the archived transcript at history://${outputId}.`,
+					].join("\n"),
+				);
+			}
+			const knownIds = [...refs.map(ref => ref.id), ...archives.map(candidate => candidate.id)];
+			const artifactsNote = anyDirExists ? "" : "\nNo artifacts directory is currently available.";
+			throw new Error(
+				`Not found: ${outputId}\nAvailable finalized outputs: ${formatIdPreview(availableIds)}\nKnown agents: ${formatIdPreview(knownIds)}${artifactsNote}\nList all agents with history://`,
+			);
 		}
 
 		const rawContent = await Bun.file(foundPath).text();

@@ -4,14 +4,28 @@ import { getKeybindings, type KeyId, matchesKey } from "@oh-my-pi/pi-tui";
  * Match the coding-agent interrupt key.
  *
  * Interactive mode installs a keybinding manager that exposes `app.interrupt`
- * globally, but some isolated component tests still run with only TUI
- * keybindings registered. In that case, fall back to raw Escape matching.
+ * globally. Isolated components may install a TUI-only registry without that
+ * action, so fall back to the coding-agent's mandatory Ctrl+Q interrupt.
  */
 export function matchesAppInterrupt(data: string): boolean {
 	const keybindings = getKeybindings();
-	const interruptKeys = keybindings.getKeys("app.interrupt");
-	if (interruptKeys.length > 0) {
+	if (keybindings.getDefinition("app.interrupt") !== undefined) {
 		return keybindings.matches(data, "app.interrupt");
+	}
+	return matchesKey(data, "ctrl+q");
+}
+
+/**
+ * Match the coding-agent UI dismissal key.
+ *
+ * Isolated components may install a TUI-only keybinding registry without
+ * `ui.dismiss`. Fall back to raw Escape only when the action is absent so an
+ * explicitly empty binding remains disabled.
+ */
+export function matchesUiDismiss(data: string): boolean {
+	const keybindings = getKeybindings();
+	if (keybindings.getDefinition("ui.dismiss") !== undefined) {
+		return keybindings.matches(data, "ui.dismiss");
 	}
 	return matchesKey(data, "escape") || matchesKey(data, "esc");
 }
@@ -41,6 +55,40 @@ export function matchesSelectPageDown(data: string): boolean {
 	return getKeybindings().matches(data, "tui.select.pageDown");
 }
 
+/** Match contextual Vim navigation. Consumers must call these only outside text entry. */
+function matchesContextualNavigation(
+	data: string,
+	action: Parameters<ReturnType<typeof getKeybindings>["getKeys"]>[0],
+	fallback: KeyId,
+): boolean {
+	const keybindings = getKeybindings();
+	return keybindings.getKeys(action).length > 0 ? keybindings.matches(data, action) : matchesKey(data, fallback);
+}
+
+export function matchesNavigationDown(data: string): boolean {
+	return matchesContextualNavigation(data, "app.navigation.down", "j");
+}
+
+export function matchesNavigationUp(data: string): boolean {
+	return matchesContextualNavigation(data, "app.navigation.up", "k");
+}
+
+export function matchesNavigationPageDown(data: string): boolean {
+	return matchesContextualNavigation(data, "app.navigation.pageDown", "ctrl+d");
+}
+
+export function matchesNavigationPageUp(data: string): boolean {
+	return matchesContextualNavigation(data, "app.navigation.pageUp", "ctrl+u");
+}
+
+export function matchesNavigationTop(data: string): boolean {
+	return matchesContextualNavigation(data, "app.navigation.top", "g");
+}
+
+export function matchesNavigationBottom(data: string): boolean {
+	return matchesContextualNavigation(data, "app.navigation.bottom", "shift+g");
+}
+
 export function matchesAppExternalEditor(data: string): boolean {
 	const keybindings = getKeybindings();
 	const externalEditorKeys = keybindings.getKeys("app.editor.external");
@@ -48,39 +96,4 @@ export function matchesAppExternalEditor(data: string): boolean {
 		return keybindings.matches(data, "app.editor.external");
 	}
 	return matchesKey(data, "ctrl+g");
-}
-
-function matchesEffectiveKey(data: string, key: KeyId): boolean {
-	if ((key === "ctrl+enter" || key === "ctrl+return") && data.charCodeAt(0) === 10 && data.length > 1) {
-		return true;
-	}
-	return matchesKey(data, key);
-}
-
-function matchesEffectiveKeys(data: string, keys: readonly KeyId[]): boolean {
-	for (const key of keys) {
-		if (matchesEffectiveKey(data, key)) return true;
-	}
-	return false;
-}
-
-/**
- * Match the "submit multi-line text input" keybinding (`app.message.followUp`).
- *
- * Used by forms where plain Enter inserts a newline and a modified-Enter chord
- * submits — the main editor's follow-up handler, the agent dashboard's new-agent
- * description, and the hook editor's hook-style mode. The keybinding defaults to
- * `["ctrl+q", "ctrl+enter"]` so Windows Terminal (which can't deliver a distinct
- * Ctrl+Enter event; #1903) still has a working chord without user remapping.
- *
- * Also recognizes modifier-tagged LF as Ctrl+Enter only when Ctrl+Enter is an
- * effective follow-up binding.
- */
-export function matchesAppFollowUp(data: string): boolean {
-	const keybindings = getKeybindings();
-	const keys = keybindings.getKeys("app.message.followUp");
-	if (keys.length > 0) {
-		return matchesEffectiveKeys(data, keys);
-	}
-	return matchesEffectiveKeys(data, ["ctrl+enter", "ctrl+q"]);
 }

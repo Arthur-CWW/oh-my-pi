@@ -2,14 +2,16 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:
 import { stripVTControlCharacters } from "node:util";
 import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
 import { CopySelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/copy-selector";
-import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { CopyTarget } from "@oh-my-pi/pi-coding-agent/modes/utils/copy-targets";
 import { setKeybindings } from "@oh-my-pi/pi-tui";
 
 const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const ENTER = "\n";
-const CANCEL = "\x07"; // ctrl+g, remapped to tui.select.cancel below
+const ESCAPE = "\x1b";
+const INTERRUPT = "\x11"; // ctrl+q
+const DISMISS_CTRL_G = "\x07";
 
 let darkTheme = await getThemeByName("dark");
 
@@ -67,7 +69,7 @@ describe("CopySelectorComponent", () => {
 
 	beforeEach(() => {
 		setThemeInstance(darkTheme!);
-		setKeybindings(KeybindingsManager.inMemory({ "tui.select.cancel": "ctrl+g" }));
+		setKeybindings(KeybindingsManager.inMemory());
 	});
 
 	afterEach(() => {
@@ -75,18 +77,21 @@ describe("CopySelectorComponent", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("renders an outlined tree with code blocks nested under their message", () => {
+	it("renders a frameless tree with code blocks nested under their message", () => {
 		const out = render(new CopySelectorComponent(makeRoots(), { onPick: vi.fn(), onCancel: vi.fn() }));
-		expect(out).toContain(theme.boxRound.topLeft);
-		expect(out).toContain("│");
+		// No enclosing frame corners/sides or tree-branch glyphs.
+		expect(out).not.toMatch(/[┌┐└┘╭╮╰╯├┤┬┴┼│]/);
 		expect(out).toContain("Copy to clipboard");
 		// Messages and their nested blocks are all visible (always expanded),
-		// connected with /tree-style branch glyphs.
+		// nested under their message via indentation.
 		expect(out).toContain("Newest message");
 		expect(out).toContain("Block 1");
 		expect(out).toContain("Block 2");
 		expect(out).toContain("Older message");
-		expect(out).toMatch(/[├└]/);
+		// Code blocks render indented beneath their parent message.
+		const blockLine = out.split("\n").find(line => line.includes("Block 1"));
+		expect(blockLine).toBeDefined();
+		expect(blockLine).toMatch(/^\s{3,}/);
 	});
 
 	it("copies the message node itself on Enter", () => {
@@ -124,25 +129,31 @@ describe("CopySelectorComponent", () => {
 		expect(render(component)).toContain("beta()");
 	});
 
-	it("drops cached preview content when invalidated", () => {
-		const roots = makeRoots();
-		const component = new CopySelectorComponent(roots, { onPick: vi.fn(), onCancel: vi.fn() });
-
-		expect(render(component)).toContain("newest-preview-text");
-
-		roots[0]!.preview = "updated-preview-text";
-		component.invalidate();
-
-		expect(render(component)).toContain("updated-preview-text");
-		expect(render(component)).not.toContain("newest-preview-text");
-	});
-
-	it("quits on the cancel key", () => {
+	it("keeps the preview open on Ctrl+Q and dismisses on Escape when only app.interrupt is remapped", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "app.interrupt": "ctrl+q" }));
 		const onCancel = vi.fn();
 		const component = new CopySelectorComponent(makeRoots(), { onPick: vi.fn(), onCancel });
 
-		component.handleInput(CANCEL);
+		expect(render(component)).toContain("newest-preview-text");
+		component.handleInput(INTERRUPT);
+		expect(onCancel).not.toHaveBeenCalled();
+		expect(render(component)).toContain("newest-preview-text");
 
+		component.handleInput(ESCAPE);
+		expect(onCancel).toHaveBeenCalledTimes(1);
+	});
+
+	it("dismisses on remapped ui.dismiss and renders its live hint", () => {
+		setKeybindings(KeybindingsManager.inMemory({ "ui.dismiss": "ctrl+g" }));
+		const onCancel = vi.fn();
+		const component = new CopySelectorComponent(makeRoots(), { onPick: vi.fn(), onCancel });
+
+		expect(render(component)).toContain("ctrl+g quit");
+
+		component.handleInput(ESCAPE);
+		expect(onCancel).not.toHaveBeenCalled();
+
+		component.handleInput(DISMISS_CTRL_G);
 		expect(onCancel).toHaveBeenCalledTimes(1);
 	});
 });

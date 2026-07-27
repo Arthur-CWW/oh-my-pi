@@ -108,8 +108,7 @@ Malformed `package.json` JSON is a hard failure at read time; malformed manifest
    - `[a,b]`: validates each feature exists in manifest features map
    - `[]`: empty feature list
    - bare spec: `null` (use defaults policy later in loader)
-7. Validate declared extension entries (`#validateInstalledExtensions`): each manifest `extensions` entry must resolve on disk and import to a factory function. On failure, roll back the install — restore the previous `plugins/package.json`, remove the freshly installed package, and restore any prior version from a backup taken before `bun install` — then abort.
-8. Upsert lockfile runtime state: `{ version, enabledFeatures, enabled: true }`.
+7. Upsert lockfile runtime state: `{ version, enabledFeatures, enabled: true }`.
 
 ### Update semantics
 
@@ -221,9 +220,9 @@ No cross-process locking or merge strategy exists; concurrent writers can overwr
 
 Active manager path enforces package-name validation:
 
-- npm specs: a package-name regex (`VALID_PACKAGE_NAME`) for scoped/unscoped specs, optionally with version.
-- npm shell-metacharacter denylist: `;`, `&`, `|`, backtick, `$`, `(`, `)`, `{`, `}`, `[`, `]`, `<`, `>`, `\` — applied after `parsePluginSpec` strips the feature brackets, so a normal `pkg[feat]` spec never reaches it.
-- git specs: `validateGitSpec` rejects only the shared `SHELL_METACHARS` set (`;`, `&`, `|`, backtick, `$`, `(`, `)`, `{`, `}`, `<`, `>`, `\`, newline, CR, tab) instead of the npm regex, so `:`, `/`, `#`, `+`, `.`, `-`, `_`, `~`, `@` are permitted.
+- npm specs: regex for scoped/unscoped package specs (optionally with version)
+- shell metacharacter denylist: `;`, `&`, `|`, backtick, `$`, `(`, `)`, `{`, `}`, `<`, `>`, `\`, newline, CR, tab (`[`/`]` are allowed for feature brackets)
+- git specs: `validateGitSpec` (permits `:`, `/`, `#`, `+`, `.`, `-`, `_`) instead of the npm regex
 
 This limits command-injection risk when invoking `bun install/uninstall`.
 
@@ -249,8 +248,7 @@ The plugin manager is not transactional.
 | Operation stage                                          | Failure behavior           | Rollback                                                                      |
 | -------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------- |
 | `bun install` fails                                      | install aborts with stderr | N/A (no state writes yet)                                                     |
-| Install succeeds, then feature validation fails          | command fails              | No uninstall rollback; dependency may remain in `node_modules`/`package.json` |
-| Install succeeds, then extension validation fails        | command fails              | Rolls back: restores `package.json`, removes installed package, restores prior version from backup |
+| Install succeeds, then manifest/feature validation fails | command fails              | No uninstall rollback; dependency may remain in `node_modules`/`package.json` |
 | Install succeeds, then lockfile write fails              | command fails              | No rollback of installed package                                              |
 | `bun uninstall` succeeds, lockfile write fails           | command fails              | Package removed, stale runtime state may remain                               |
 | `link` removes old target then symlink creation fails    | command fails              | No restoration of previous link/dir                                           |
@@ -268,7 +266,7 @@ Operationally, `doctor --fix` can repair some drift (`bun install`, orphaned con
 
 ## Mode differences and precedence
 
-- `--dry-run` (install): returns a synthetic install result with no `bun install`, no network, and no lockfile/runtime-state writes (it still ensures the plugins `package.json` skeleton exists).
+- `--dry-run` (install): returns synthetic install result, no filesystem/network/state writes.
 - `--json`: output formatting only, no behavior change.
 - Project overrides always take precedence over global lockfile for feature/settings view.
 - Effective enablement is `runtimeEnabled && !projectDisabled`.

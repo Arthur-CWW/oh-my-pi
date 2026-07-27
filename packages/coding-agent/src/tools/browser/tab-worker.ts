@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { postmortem, Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
+import { Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
 import type { HTMLElement } from "linkedom";
 import type {
 	Browser,
@@ -23,12 +23,6 @@ import { resolveToCwd } from "../path-utils";
 import { formatScreenshot } from "../render-utils";
 import { ToolAbortError, ToolError, throwIfAborted } from "../tool-errors";
 import {
-	type AriaSnapshotOptions,
-	captureAriaSnapshot,
-	parseAriaRefSelector,
-	resolveAriaRefHandle,
-} from "./aria/aria-snapshot";
-import {
 	applyStealthPatches,
 	applyViewport,
 	BROWSER_PROTOCOL_TIMEOUT_MS,
@@ -36,7 +30,6 @@ import {
 	loadPuppeteerInWorker,
 } from "./launch";
 import { extractReadableFromHtml, type ReadableFormat } from "./readable";
-import { markHandled, waitForBrowserRun } from "./run-cancellation";
 import type {
 	Observation,
 	ObservationEntry,
@@ -83,85 +76,17 @@ const INTERACTIVE_AX_ROLES = new Set([
 
 const LEGACY_SELECTOR_PREFIXES = ["p-aria/", "p-text/", "p-xpath/", "p-pierce/"] as const;
 
-const SELECTOR_HANDLER_PREFIXES = [
-	"aria/",
-	"text/",
-	"xpath/",
-	"pierce/",
-	"aria-ref=",
-	"aria-ref/",
-	"ariaref/",
-	"p-",
-] as const;
-
-/**
- * Playwright-only selector engines/pseudos puppeteer cannot parse. Without this guard a
- * `tab.click(":has-text(...)")` would wait the full action timeout and fail opaquely;
- * fail fast instead with a pointer to the puppeteer-native alternative. Skipped for
- * explicit query-handler prefixes (`text/`, `aria/`, …) whose payload is literal text.
- */
-const PLAYWRIGHT_ONLY_SELECTOR_RE =
-	/:has-text\(|:text\(|:text-is\(|:text-matches\(|:visible\b|:hidden\b|:nth-match\(|:near\(|:above\(|:below\(|:right-of\(|:left-of\(/;
-
 type DialogPolicy = "accept" | "dismiss";
 type DragTarget = string | { readonly x: number; readonly y: number };
 type ActionabilityResult = { ok: true; x: number; y: number } | { ok: false; reason: string };
 
 /**
- * Per-op fail-fast ceilings for `tab.*` helpers. All are kept strictly under the cell
- * budget (`timeoutMs - OP_DEADLINE_SLACK_MS`) so a stalled helper rejects with a named,
- * attributable error that leaves recovery budget — never the opaque whole-cell
- * "Browser code execution timed out" path that consumed the entire run.
- *
- * - `QUICK_OP_TIMEOUT_MS`: page-coupled reads that should resolve fast (`observe`,
- *   `screenshot`, `extract`, `ariaSnapshot`).
- * - `ACTION_OP_TIMEOUT_MS`: interactive point actions (`click`, `fill`, `type`, …) and
- *   the default for wait helpers when no explicit `{ timeout }` is given.
- *
- * `goto` and `evaluate` stay uncapped (`Number.POSITIVE_INFINITY`): navigation and user
- * code legitimately use the full cell budget.
+ * Per-op ceiling for puppeteer-internal helpers that should resolve quickly
+ * (`observe`, `screenshot`, `extract`). Kept below the default 30s cell budget so a
+ * single stalled helper fails fast with a named error and leaves budget for the rest
+ * of the cell. Effective cap is `min(cellBudget, QUICK_OP_TIMEOUT_MS)`.
  */
 const QUICK_OP_TIMEOUT_MS = 20_000;
-const ACTION_OP_TIMEOUT_MS = 15_000;
-/** Headroom subtracted from the cell budget so a per-op deadline fires before it. */
-const OP_DEADLINE_SLACK_MS = 1_000;
-
-export interface OpTimeouts {
-	/** Largest per-op deadline allowed — strictly below the cell budget. */
-	budgetBound: number;
-	/** Ceiling for quick page reads. */
-	quickOpMs: number;
-	/** Ceiling for interactive actions + default for waits. */
-	actionOpMs: number;
-}
-
-/** Resolve the per-op fail-fast ceilings for a given cell budget. */
-export function resolveOpTimeouts(cellTimeoutMs: number): OpTimeouts {
-	const budgetBound = Math.max(1, cellTimeoutMs - OP_DEADLINE_SLACK_MS);
-	return {
-		budgetBound,
-		quickOpMs: Math.min(budgetBound, QUICK_OP_TIMEOUT_MS),
-		actionOpMs: Math.min(budgetBound, ACTION_OP_TIMEOUT_MS),
-	};
-}
-
-/**
- * Effective timeout for a wait helper (`waitFor*`). A positive explicit `{ timeout }` is
- * honored but clamped to the cell budget so it still fails fast + named; raising the tool
- * `timeout` raises that cap, so a longer budget stays meaningful. No `{ timeout }` → the
- * action ceiling. Puppeteer's `{ timeout: 0 }` / `Infinity` ("disable") maps to the largest
- * bounded wait (`budgetBound`) — the harness never permits an unbounded wait. Garbage input
- * (negative, `NaN`) falls back to the action ceiling rather than the longest wait.
- */
-export function resolveWaitTimeout(cellTimeoutMs: number, explicit?: number): number {
-	const { budgetBound, actionOpMs } = resolveOpTimeouts(cellTimeoutMs);
-	if (explicit === undefined) return actionOpMs;
-	// Puppeteer "disable" sentinels — still bounded by the budget here.
-	if (explicit === 0 || explicit === Number.POSITIVE_INFINITY) return budgetBound;
-	// Positive finite → honored + clamped. Negative/NaN garbage → default, not the longest wait.
-	if (Number.isFinite(explicit) && explicit > 0) return Math.min(explicit, budgetBound);
-	return actionOpMs;
-}
 
 interface ScreenshotOptions {
 	selector?: string;
@@ -181,7 +106,6 @@ interface TabApi {
 		opts?: { waitUntil?: "load" | "domcontentloaded" | "networkidle0" | "networkidle2" },
 	): Promise<void>;
 	observe(opts?: { includeAll?: boolean; viewportOnly?: boolean }): Promise<Observation>;
-	ariaSnapshot(selector?: string, opts?: AriaSnapshotOptions): Promise<string>;
 	screenshot(opts?: ScreenshotOptions): Promise<ScreenshotResult>;
 	extract(format?: ReadableFormat): Promise<string>;
 	click(selector: string): Promise<void>;
@@ -190,7 +114,7 @@ interface TabApi {
 	press(key: KeyInput, opts?: { selector?: string }): Promise<void>;
 	scroll(deltaX: number, deltaY: number): Promise<void>;
 	drag(from: DragTarget, to: DragTarget): Promise<void>;
-	waitFor(selector: string, opts?: { timeout?: number }): Promise<ElementHandle>;
+	waitFor(selector: string): Promise<ElementHandle>;
 	evaluate<TResult, TArgs extends unknown[]>(
 		fn: string | ((...args: TArgs) => TResult | Promise<TResult>),
 		...args: TArgs
@@ -203,29 +127,11 @@ interface TabApi {
 		pattern: string | RegExp | ((response: HTTPResponse) => boolean | Promise<boolean>),
 		opts?: { timeout?: number },
 	): Promise<HTTPResponse>;
-	waitForSelector(
-		selector: string,
-		opts?: { timeout?: number; visible?: boolean; hidden?: boolean },
-	): Promise<ElementHandle | null>;
-	waitForNavigation(opts?: {
-		waitUntil?: "load" | "domcontentloaded" | "networkidle0" | "networkidle2";
-		timeout?: number;
-	}): Promise<HTTPResponse | null>;
 	id(n: number): Promise<ElementHandle>;
-	ref(id: string): Promise<ElementHandle>;
 }
 
-export function normalizeSelector(selector: string): string {
+function normalizeSelector(selector: string): string {
 	if (!selector) return selector;
-	if (
-		!SELECTOR_HANDLER_PREFIXES.some(prefix => selector.startsWith(prefix)) &&
-		PLAYWRIGHT_ONLY_SELECTOR_RE.test(selector)
-	) {
-		throw new ToolError(
-			`Playwright-only selector ${JSON.stringify(selector)} is not supported by the browser tool. ` +
-				`Use a puppeteer text selector ("text/Allow all"), an aria selector ("aria/Name"), CSS, or "xpath/...".`,
-		);
-	}
 	if (selector.startsWith("p-") && !LEGACY_SELECTOR_PREFIXES.some(prefix => selector.startsWith(prefix))) {
 		throw new ToolError(
 			`Unsupported selector prefix. Use CSS or puppeteer query handlers (aria/, text/, xpath/, pierce/). Got: ${selector}`,
@@ -482,13 +388,13 @@ async function clickQueryHandlerText(
 			const target = await resolveActionableQueryHandlerClickTarget(handles);
 			if (!target) {
 				lastReason = handles.length ? "no-visible-candidate" : "no-matches";
-				await untilAborted(clickSignal, () => Bun.sleep(100));
+				await Bun.sleep(100);
 				continue;
 			}
 			const actionability = await isClickActionable(target);
 			if (!actionability.ok) {
 				lastReason = actionability.reason;
-				await untilAborted(clickSignal, () => Bun.sleep(100));
+				await Bun.sleep(100);
 				continue;
 			}
 			try {
@@ -496,7 +402,7 @@ async function clickQueryHandlerText(
 				return;
 			} catch (err) {
 				lastReason = err instanceof Error ? err.message : String(err);
-				await untilAborted(clickSignal, () => Bun.sleep(100));
+				await Bun.sleep(100);
 			}
 		} finally {
 			await Promise.all(handles.map(async handle => handle.dispose().catch(() => undefined)));
@@ -516,7 +422,6 @@ export interface InflightOp {
 interface ActiveRun {
 	id: string;
 	ac: AbortController;
-	signal: AbortSignal;
 	displays: RunResultOk["displays"];
 	screenshots: ScreenshotResult[];
 	pendingTools: Map<string, { resolve(value: unknown): void; reject(error: Error): void }>;
@@ -593,12 +498,7 @@ export class WorkerCore {
 				await this.#run(msg);
 				return;
 			case "abort":
-				if (this.#active?.id === msg.id) {
-					const reason = msg.expectedCleanup
-						? postmortem.markExpectedCleanupError(new ToolAbortError())
-						: new ToolAbortError();
-					this.#active.ac.abort(reason);
-				}
+				if (this.#active?.id === msg.id) this.#active.ac.abort(new ToolAbortError());
 				return;
 			case "tool-reply":
 				this.#deliverToolReply(msg.id, msg.reply);
@@ -704,14 +604,12 @@ export class WorkerCore {
 		}
 		const timeoutSignal = AbortSignal.timeout(msg.timeoutMs);
 		const ac = new AbortController();
-		const runAc = new AbortController();
-		const signal = AbortSignal.any([timeoutSignal, ac.signal, runAc.signal]);
+		const signal = AbortSignal.any([timeoutSignal, ac.signal]);
 		const displays: RunResultOk["displays"] = [];
 		const screenshots: ScreenshotResult[] = [];
 		const active: ActiveRun = {
 			id: msg.id,
 			ac,
-			signal,
 			displays,
 			screenshots,
 			pendingTools: new Map(),
@@ -733,14 +631,10 @@ export class WorkerCore {
 				assert: (cond: unknown, text?: string): void => {
 					if (!cond) throw new ToolError(text ?? "Assertion failed");
 				},
-				wait: (ms: number): Promise<void> => waitForBrowserRun(ms, signal),
+				wait: (ms: number): Promise<void> => Bun.sleep(ms),
 			});
 			const { promise: cancelRejection, reject: rejectCancel } = Promise.withResolvers<never>();
 			const onCancel = (): void => {
-				const abortError =
-					signal.reason instanceof ToolAbortError
-						? signal.reason
-						: new ToolAbortError(undefined, { cause: signal.reason });
 				if (timeoutSignal.aborted) {
 					const stalled = describeInflight(active.inflight);
 					rejectCancel(
@@ -749,14 +643,11 @@ export class WorkerCore {
 						),
 					);
 				} else {
-					rejectCancel(abortError);
+					rejectCancel(new ToolAbortError());
 				}
 				// Cancel in-flight tool calls so user code's awaited proxies reject promptly.
-				const toolAbort = timeoutSignal.aborted
-					? postmortem.markExpectedCleanupError(new ToolAbortError(undefined, { cause: timeoutSignal.reason }))
-					: abortError;
 				for (const pending of active.pendingTools.values()) {
-					pending.reject(toolAbort);
+					pending.reject(new ToolAbortError());
 				}
 				active.pendingTools.clear();
 			};
@@ -783,7 +674,6 @@ export class WorkerCore {
 			this.#transport.send({ type: "result", id: msg.id, ok: false, error: errorPayload(error) });
 		} finally {
 			if (this.#active?.id === msg.id) this.#active = null;
-			runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
 		}
 	}
 
@@ -800,18 +690,11 @@ export class WorkerCore {
 		const active = this.#active;
 		if (!active) return null;
 		return {
-			onText: chunk => {
-				throwIfAborted(active.signal);
-				this.#log("debug", chunk.replace(/\n$/, ""));
-			},
-			onDisplay: output => {
-				throwIfAborted(active.signal);
-				this.#pushDisplay(active.displays, output);
-			},
-			callTool: (name, args) => {
-				throwIfAborted(active.signal);
-				return this.#callTool(active, name, args);
-			},
+			// console.* output stays on the supervisor log channel — matches pre-runtime behavior
+			// where browser cells didn't surface `console.log` to the model.
+			onText: chunk => this.#log("debug", chunk.replace(/\n$/, "")),
+			onDisplay: output => this.#pushDisplay(active.displays, output),
+			callTool: (name, args) => this.#callTool(active, name, args),
 		};
 	}
 
@@ -824,7 +707,7 @@ export class WorkerCore {
 			displays.push({ type: "text", text: safeJsonStringify(output.data) });
 			return;
 		}
-		// status — surface as compact JSON so helper side effects (read/write/env) appear in
+		// status — surface as compact JSON so helper side effects (read/write/tree) appear in
 		// the cell result alongside explicit display() output.
 		displays.push({ type: "text", text: safeJsonStringify(output.event) });
 	}
@@ -870,15 +753,8 @@ export class WorkerCore {
 		try {
 			return await fn(opSignal);
 		} catch (err) {
-			// Fail fast with a named, attributable error instead of the opaque whole-cell timeout:
-			// our per-op deadline fired, or puppeteer's own (equal) timeout fired first — having
-			// already torn down the CDP action via the op signal, so no work is left dangling.
-			// Cell-budget aborts and uncapped helpers (goto/evaluate) keep their native errors.
-			if (
-				capped &&
-				!cellSignal.aborted &&
-				(opTimeout?.aborted || (err instanceof Error && err.name === "TimeoutError"))
-			) {
+			// Per-op deadline fired (not the cell budget, not an explicit abort) → named, actionable error.
+			if (opTimeout?.aborted && !cellSignal.aborted) {
 				throw new ToolError(`${label} timed out after ${perOpTimeoutMs}ms`);
 			}
 			throw err;
@@ -897,11 +773,10 @@ export class WorkerCore {
 		active: ActiveRun,
 	): TabApi {
 		const page = this.#requirePage();
-		const { quickOpMs, actionOpMs } = resolveOpTimeouts(timeoutMs);
-		const waitMs = (explicit?: number): number => resolveWaitTimeout(timeoutMs, explicit);
+		const quickOpMs = Math.min(timeoutMs, QUICK_OP_TIMEOUT_MS);
 		const INF = Number.POSITIVE_INFINITY;
 		const op = <T>(label: string, perOpMs: number, fn: (sig: AbortSignal) => Promise<T>): Promise<T> =>
-			markHandled(this.#runOp(active, label, signal, perOpMs, fn));
+			this.#runOp(active, label, signal, perOpMs, fn);
 		return {
 			name,
 			page,
@@ -917,28 +792,6 @@ export class WorkerCore {
 					);
 				}),
 			observe: opts => op("tab.observe()", quickOpMs, sig => this.#collectObservation({ ...opts, signal: sig })),
-			ariaSnapshot: (selector, opts) =>
-				op(
-					selector ? `tab.ariaSnapshot(${JSON.stringify(selector)})` : "tab.ariaSnapshot()",
-					quickOpMs,
-					async sig => {
-						let root: ElementHandle | null = null;
-						if (selector) {
-							root = (await untilAborted(sig, () =>
-								page.$(normalizeSelector(selector)),
-							)) as ElementHandle | null;
-							if (!root)
-								throw new ToolError(
-									`tab.ariaSnapshot: selector ${JSON.stringify(selector)} matched no element`,
-								);
-						}
-						try {
-							return await untilAborted(sig, () => captureAriaSnapshot(page, root, opts));
-						} finally {
-							await root?.dispose().catch(() => undefined);
-						}
-					},
-				),
 			screenshot: opts =>
 				op(describeScreenshot(opts), quickOpMs, sig =>
 					this.#captureScreenshot(session, displays, screenshots, sig, opts),
@@ -961,88 +814,44 @@ export class WorkerCore {
 					return content;
 				}),
 			click: selector =>
-				op(`tab.click(${JSON.stringify(selector)})`, actionOpMs, async sig => {
-					if (parseAriaRefSelector(selector) !== null) {
-						const handle = await this.#resolveAriaRef(selector);
-						try {
-							await untilAborted(sig, () => handle.click());
-						} finally {
-							await handle.dispose().catch(() => undefined);
-						}
-						return;
-					}
+				op(`tab.click(${JSON.stringify(selector)})`, INF, async sig => {
 					const resolved = normalizeSelector(selector);
-					if (resolved.startsWith("text/")) await clickQueryHandlerText(page, resolved, actionOpMs, sig);
-					else await untilAborted(sig, () => page.locator(resolved).setTimeout(actionOpMs).click({ signal: sig }));
+					if (resolved.startsWith("text/")) await clickQueryHandlerText(page, resolved, timeoutMs, sig);
+					else await untilAborted(sig, () => page.locator(resolved).setTimeout(timeoutMs).click());
 				}),
 			type: (selector, text) =>
-				op(`tab.type(${JSON.stringify(selector)})`, actionOpMs, async sig => {
-					const handle = await this.#resolveActionHandle(selector, actionOpMs, sig);
+				op(`tab.type(${JSON.stringify(selector)})`, INF, async sig => {
+					const handle = (await untilAborted(sig, () =>
+						page.locator(normalizeSelector(selector)).setTimeout(timeoutMs).waitHandle(),
+					)) as ElementHandle;
 					try {
 						await untilAborted(sig, () => handle.type(text, { delay: 0 }));
 					} finally {
-						await handle.dispose().catch(() => undefined);
+						await handle.dispose();
 					}
 				}),
 			fill: (selector, value) =>
-				op(`tab.fill(${JSON.stringify(selector)})`, actionOpMs, async sig => {
-					if (parseAriaRefSelector(selector) !== null) {
-						const handle = await this.#resolveAriaRef(selector);
-						try {
-							await untilAborted(sig, () =>
-								handle.evaluate(el => {
-									const node = el as unknown as { value?: string; focus?: () => void };
-									node.focus?.();
-									if ("value" in node) node.value = "";
-								}),
-							);
-							await untilAborted(sig, () => handle.type(value, { delay: 0 }));
-						} finally {
-							await handle.dispose().catch(() => undefined);
-						}
-						return;
-					}
-					await untilAborted(sig, () =>
-						page.locator(normalizeSelector(selector)).setTimeout(actionOpMs).fill(value, { signal: sig }),
-					);
-				}),
+				op(`tab.fill(${JSON.stringify(selector)})`, INF, sig =>
+					untilAborted(sig, () => page.locator(normalizeSelector(selector)).setTimeout(timeoutMs).fill(value)),
+				),
 			press: (key, opts) =>
-				op(`tab.press(${JSON.stringify(key)})`, actionOpMs, async sig => {
+				op(`tab.press(${JSON.stringify(key)})`, INF, async sig => {
 					const selector = opts?.selector;
 					if (selector) await untilAborted(sig, () => page.focus(normalizeSelector(selector)));
 					await untilAborted(sig, () => page.keyboard.press(key));
 				}),
 			scroll: (deltaX, deltaY) =>
-				op("tab.scroll()", actionOpMs, sig => untilAborted(sig, () => page.mouse.wheel({ deltaX, deltaY }))),
-			drag: (from, to) => op("tab.drag()", actionOpMs, sig => this.#drag(from, to, sig)),
-			waitFor: (selector, opts) => {
-				const w = waitMs(opts?.timeout);
-				return op(`tab.waitFor(${JSON.stringify(selector)})`, w, sig =>
-					this.#resolveActionHandle(selector, w, sig),
-				);
-			},
-			waitForSelector: (selector, opts) => {
-				const w = waitMs(opts?.timeout);
-				return op(`tab.waitForSelector(${JSON.stringify(selector)})`, w, async sig => {
-					if (parseAriaRefSelector(selector) !== null) return this.#resolveAriaRef(selector);
-					return (await untilAborted(sig, () =>
-						page.waitForSelector(normalizeSelector(selector), {
-							timeout: w,
-							visible: opts?.visible,
-							hidden: opts?.hidden,
-							signal: sig,
-						}),
-					)) as ElementHandle | null;
-				});
-			},
-			waitForNavigation: opts => {
-				const w = waitMs(opts?.timeout);
-				return op("tab.waitForNavigation()", w, sig =>
-					untilAborted(sig, () =>
-						page.waitForNavigation({ waitUntil: opts?.waitUntil ?? "load", timeout: w, signal: sig }),
-					),
-				);
-			},
+				op("tab.scroll()", INF, sig => untilAborted(sig, () => page.mouse.wheel({ deltaX, deltaY }))),
+			drag: (from, to) => op("tab.drag()", INF, sig => this.#drag(from, to, sig)),
+			waitFor: selector =>
+				op(
+					`tab.waitFor(${JSON.stringify(selector)})`,
+					INF,
+					async sig =>
+						(await untilAborted(sig, () =>
+							page.locator(normalizeSelector(selector)).setTimeout(timeoutMs).waitHandle(),
+						)) as ElementHandle,
+				),
 			evaluate: (fn, ...args) =>
 				op("tab.evaluate()", INF, sig =>
 					untilAborted(sig, () =>
@@ -1052,8 +861,10 @@ export class WorkerCore {
 					),
 				) as never,
 			scrollIntoView: selector =>
-				op(`tab.scrollIntoView(${JSON.stringify(selector)})`, actionOpMs, async sig => {
-					const handle = await this.#resolveActionHandle(selector, actionOpMs, sig);
+				op(`tab.scrollIntoView(${JSON.stringify(selector)})`, INF, async sig => {
+					const handle = (await untilAborted(sig, () =>
+						page.locator(normalizeSelector(selector)).setTimeout(timeoutMs).waitHandle(),
+					)) as ElementHandle;
 					try {
 						await untilAborted(sig, () =>
 							handle.evaluate(el => {
@@ -1068,23 +879,16 @@ export class WorkerCore {
 					}
 				}),
 			select: (selector, ...values) =>
-				op(`tab.select(${JSON.stringify(selector)})`, actionOpMs, sig =>
-					this.#select(selector, values, actionOpMs, sig),
-				),
+				op(`tab.select(${JSON.stringify(selector)})`, INF, sig => this.#select(selector, values, timeoutMs, sig)),
 			uploadFile: (selector, ...filePaths) =>
-				op(`tab.uploadFile(${JSON.stringify(selector)})`, actionOpMs, sig =>
-					this.#uploadFile(selector, filePaths, actionOpMs, sig, session),
+				op(`tab.uploadFile(${JSON.stringify(selector)})`, INF, sig =>
+					this.#uploadFile(selector, filePaths, timeoutMs, sig, session),
 				),
-			waitForUrl: (pattern, opts) => {
-				const w = waitMs(opts?.timeout);
-				return op("tab.waitForUrl()", w, sig => this.#waitForUrl(pattern, w, sig));
-			},
-			waitForResponse: (pattern, opts) => {
-				const w = waitMs(opts?.timeout);
-				return op("tab.waitForResponse()", w, sig => this.#waitForResponse(pattern, w, sig));
-			},
+			waitForUrl: (pattern, opts) =>
+				op("tab.waitForUrl()", INF, sig => this.#waitForUrl(pattern, opts?.timeout ?? timeoutMs, sig)),
+			waitForResponse: (pattern, opts) =>
+				op("tab.waitForResponse()", INF, sig => this.#waitForResponse(pattern, opts?.timeout ?? timeoutMs, sig)),
 			id: id => this.#resolveCachedHandle(id),
-			ref: id => this.#resolveAriaRef(id),
 		};
 	}
 
@@ -1269,7 +1073,7 @@ export class WorkerCore {
 	async #select(selector: string, values: string[], timeoutMs: number, signal: AbortSignal): Promise<string[]> {
 		const page = this.#requirePage();
 		const handle = (await untilAborted(signal, () =>
-			page.locator(normalizeSelector(selector)).setTimeout(timeoutMs).waitHandle({ signal }),
+			page.locator(normalizeSelector(selector)).setTimeout(timeoutMs).waitHandle(),
 		)) as ElementHandle;
 		try {
 			return (await untilAborted(signal, () =>
@@ -1315,7 +1119,7 @@ export class WorkerCore {
 		if (!filePaths.length) throw new ToolError("tab.uploadFile() requires at least one file path");
 		const page = this.#requirePage();
 		const handle = (await untilAborted(signal, () =>
-			page.locator(normalizeSelector(selector)).setTimeout(timeoutMs).waitHandle({ signal }),
+			page.locator(normalizeSelector(selector)).setTimeout(timeoutMs).waitHandle(),
 		)) as ElementHandle;
 		try {
 			const absolute = filePaths.map(filePath => resolveToCwd(filePath, session.cwd));
@@ -1344,7 +1148,7 @@ export class WorkerCore {
 					const url = (globalThis as unknown as { location: { href: string } }).location.href;
 					return isRe ? new RegExp(m, fl).test(url) : url.includes(m);
 				},
-				{ timeout, polling: 200, signal },
+				{ timeout, polling: 200 },
 				matcher,
 				isRegex,
 				flags,
@@ -1365,7 +1169,7 @@ export class WorkerCore {
 				: pattern instanceof RegExp
 					? response => pattern.test(response.url())
 					: response => response.url().includes(pattern);
-		return (await untilAborted(signal, () => page.waitForResponse(predicate, { timeout, signal }))) as HTTPResponse;
+		return (await untilAborted(signal, () => page.waitForResponse(predicate, { timeout }))) as HTTPResponse;
 	}
 
 	async #resolveCachedHandle(id: number): Promise<ElementHandle> {
@@ -1383,29 +1187,6 @@ export class WorkerCore {
 			throw new ToolError(`Element id ${id} is stale. Run tab.observe() again.`);
 		}
 		return handle;
-	}
-
-	async #resolveAriaRef(id: string): Promise<ElementHandle> {
-		const ref = parseAriaRefSelector(id) ?? id.trim();
-		const handle = await resolveAriaRefHandle(this.#requirePage(), ref);
-		if (!handle) {
-			throw new ToolError(
-				`Unknown ARIA ref ${JSON.stringify(ref)}. Run tab.ariaSnapshot() to refresh refs (they renumber each snapshot).`,
-			);
-		}
-		return handle;
-	}
-
-	/**
-	 * Resolve a selector to an ElementHandle for handle-based actions. An
-	 * `aria-ref=eN` selector resolves against the latest ariaSnapshot's refs
-	 * (main world); anything else goes through the normal locator wait.
-	 */
-	async #resolveActionHandle(selector: string, timeoutMs: number, sig: AbortSignal): Promise<ElementHandle> {
-		if (parseAriaRefSelector(selector) !== null) return this.#resolveAriaRef(selector);
-		return (await untilAborted(sig, () =>
-			this.#requirePage().locator(normalizeSelector(selector)).setTimeout(timeoutMs).waitHandle({ signal: sig }),
-		)) as ElementHandle;
 	}
 	#clearElementCache(): void {
 		if (this.#elementCache.size === 0) {

@@ -6,7 +6,6 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ToolChoiceQueue } from "@oh-my-pi/pi-coding-agent/session/tool-choice-queue";
 import { createTools, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { resolveToCwd } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 function createTestSession(cwd: string, overrides: Partial<ToolSession> = {}): ToolSession {
 	return {
@@ -39,7 +38,7 @@ describe("tool path root alias", () => {
 	});
 
 	afterEach(async () => {
-		await removeWithRetries(tempDir);
+		await fs.rm(tempDir, { recursive: true, force: true });
 	});
 
 	it("resolves a bare slash to the session cwd", () => {
@@ -65,13 +64,13 @@ describe("tool path root alias", () => {
 
 	it("searches from cwd when path is slash", async () => {
 		const tools = await createTools(createTestSession(tempDir));
-		const tool = tools.find(entry => entry.name === "grep");
+		const tool = tools.find(entry => entry.name === "search");
 		expect(tool).toBeDefined();
 		if (!tool) throw new Error("Missing search tool");
 
 		const result = await tool.execute("search-root-alias", {
 			pattern: "root-alias-needle",
-			path: "/",
+			paths: ["/"],
 		});
 		const details = result.details as { scopePath?: string } | undefined;
 
@@ -95,12 +94,12 @@ describe("tool path root alias", () => {
 
 	it("finds from cwd when pattern is slash", async () => {
 		const tools = await createTools(createTestSession(tempDir));
-		const tool = tools.find(entry => entry.name === "glob");
+		const tool = tools.find(entry => entry.name === "find");
 		expect(tool).toBeDefined();
 		if (!tool) throw new Error("Missing find tool");
 
 		const result = await tool.execute("find-root-alias", {
-			path: "/",
+			paths: ["/"],
 		});
 		const details = result.details as { scopePath?: string } | undefined;
 		const text = getText(result);
@@ -118,7 +117,7 @@ describe("tool path root alias", () => {
 
 		const result = await tool.execute("ast-grep-root-alias", {
 			pat: "rootAliasSymbol",
-			path: "/**/*.ts",
+			paths: ["/**/*.ts"],
 		});
 		const details = result.details as { scopePath?: string } | undefined;
 
@@ -149,7 +148,8 @@ describe("tool path root alias", () => {
 		expect(details?.scopePath).toBe(".");
 		expect(details?.totalReplacements).toBe(1);
 
-		const invoker = queue.peekPendingInvoker()!;
+		queue.nextToolChoice();
+		const invoker = queue.peekInFlightInvoker()!;
 		expect(invoker).toBeDefined();
 		await invoker({ action: "apply", reason: "apply root alias rewrite" });
 

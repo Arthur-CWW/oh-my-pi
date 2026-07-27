@@ -14,7 +14,6 @@ import type {
 } from "@oh-my-pi/pi-coding-agent/dap/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { DebugTool } from "@oh-my-pi/pi-coding-agent/tools/debug";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 const TEST_ADAPTER: DapResolvedAdapter = {
 	name: "lldb-dap",
@@ -63,7 +62,6 @@ class FakeDapClient {
 	readonly #exited = Promise.withResolvers<void>();
 	readonly #handlers = new Map<string, Set<DapEventHandler>>();
 	#alive = true;
-	requests: Array<{ command: string; args: unknown }> = [];
 
 	constructor(
 		readonly adapter: DapResolvedAdapter,
@@ -75,7 +73,6 @@ class FakeDapClient {
 			attachErrorDelayMs?: number;
 			configurationDoneError?: string;
 			rejectStopWaiters?: boolean;
-			stopAfterLaunch?: boolean;
 		},
 	) {
 		this.proc = {
@@ -98,8 +95,7 @@ class FakeDapClient {
 		return { supportsConfigurationDoneRequest: true };
 	}
 
-	async sendRequest(command: string, args?: unknown): Promise<unknown> {
-		this.requests.push({ command, args });
+	async sendRequest(command: string): Promise<unknown> {
 		if (command === "launch" && this.options.launchError) {
 			if (this.options.launchErrorDelayMs) await Bun.sleep(this.options.launchErrorDelayMs);
 			throw new Error(this.options.launchError);
@@ -110,9 +106,6 @@ class FakeDapClient {
 		}
 		if (command === "configurationDone" && this.options.configurationDoneError) {
 			throw new Error(this.options.configurationDoneError);
-		}
-		if (command === "launch" && this.options.stopAfterLaunch) {
-			queueMicrotask(() => this.#emit("stopped", { reason: "entry", threadId: 1 }));
 		}
 		return {};
 	}
@@ -165,21 +158,6 @@ afterEach(() => {
 });
 
 describe("DAP launch failure handling", () => {
-	it("preserves adapter launchDefaults args when launch omits args", async () => {
-		const adapter: DapResolvedAdapter = {
-			...TEST_ADAPTER,
-			launchDefaults: { request: "launch", args: ["--configured"], stopOnEntry: true },
-		};
-		const manager = new DapSessionManager();
-		const fake = new FakeDapClient(adapter, process.cwd(), { stopAfterLaunch: true });
-		spyOn(DapClient, "spawn").mockResolvedValue(fake as unknown as DapClient);
-
-		await manager.launch({ adapter, program: "/bin/echo", cwd: process.cwd() }, undefined, 10);
-
-		const launch = fake.requests.find(request => request.command === "launch");
-		expect(launch?.args).toMatchObject({ args: ["--configured"], program: "/bin/echo" });
-	});
-
 	it("surfaces the launch failure when configurationDone also fails", async () => {
 		const manager = new DapSessionManager();
 		const fake = new FakeDapClient(TEST_ADAPTER, process.cwd(), {
@@ -361,138 +339,14 @@ describe("DAP launch failure handling", () => {
 			expect(client.isAlive()).toBe(true);
 		} finally {
 			await client?.dispose();
-			await removeWithRetries(cwd);
-		}
-	});
-
-	it("times out promptly and does not emit an unhandled rejection when the stdin flush is wedged", async () => {
-		const procExited = Promise.withResolvers<number>();
-		const proc = {
-			exited: procExited.promise,
-			exitCode: null,
-			stdin: { write: () => 0, flush: () => undefined },
-			stdout: new ReadableStream<Uint8Array>(),
-			stderr: new ReadableStream<Uint8Array>(),
-			peekStderr: () => "",
-			kill: () => {
-				procExited.resolve(-1);
-				return true;
-			},
-		} as unknown as DapClientState["proc"];
-		// flush() returns a promise that never resolves — models an adapter whose
-		// stdin has stopped draining (the failure mode in issue #4233).
-		const writeSink = {
-			write: (_data: string | Uint8Array) => 0,
-			flush: () => new Promise<number>(() => {}),
-		};
-		const readable = new ReadableStream<Uint8Array>();
-		const client = new DapClient(TEST_ADAPTER, process.cwd(), proc, { readable, writeSink });
-
-		const unhandled: unknown[] = [];
-		const onUnhandled = (reason: unknown) => unhandled.push(reason);
-		process.on("unhandledRejection", onUnhandled);
-
-		try {
-			const start = Date.now();
-			await expect(client.sendRequest("initialize", {}, undefined, 50)).rejects.toThrow(/timed out/i);
-			// Must respect the caller's timeoutMs, not the internal 30 s write cap.
-			expect(Date.now() - start).toBeLessThan(500);
-			// Let any queued unhandled-rejection microtask fire.
-			await Bun.sleep(50);
-			expect(unhandled).toEqual([]);
-		} finally {
-			process.off("unhandledRejection", onUnhandled);
-			// Let writeMessage's exit-guard resolve so no promise leaks past the test.
-			await client.dispose();
-			await Bun.sleep(20);
-		}
-	});
-
-	it("kills the detached adapter process when the Unix socket never appears (Linux)", async () => {
-		if (process.platform !== "linux") return;
-		const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-unix-leak-"));
-		try {
-			const adapterPath = path.join(cwd, "wedged-unix-adapter.mjs");
-			const pidFilePath = path.join(cwd, "adapter.pid");
-			// Adapter records its pid and stays alive without ever creating the
-			// socket, forcing #spawnSocketUnix's readiness wait to time out.
-			await fs.writeFile(
-				adapterPath,
-				`await Bun.write(${JSON.stringify(pidFilePath)}, String(process.pid));\nawait Bun.sleep(60_000);\n`,
-			);
-			const adapter: DapResolvedAdapter = {
-				...TEST_ADAPTER,
-				name: "wedged-unix-adapter",
-				command: process.execPath,
-				args: [adapterPath],
-				resolvedCommand: process.execPath,
-				connectMode: "socket",
-			};
-			await expect(DapClient.spawn({ adapter, cwd, socketReadyTimeoutMs: 300 })).rejects.toThrow(/Socket not ready/);
-			// Wait for the kill signal to propagate to the detached adapter.
-			await Bun.sleep(500);
-			const adapterPid = Number(await Bun.file(pidFilePath).text());
-			expect(Number.isFinite(adapterPid)).toBe(true);
-			let alive = true;
-			try {
-				process.kill(adapterPid, 0);
-			} catch {
-				alive = false;
-			}
-			expect(alive).toBe(false);
-		} finally {
-			await removeWithRetries(cwd);
-		}
-	});
-
-	it("kills the detached adapter process when it never dials back on the TCP client-addr path", async () => {
-		const originalPlatform = process.platform;
-		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
-		try {
-			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-tcp-leak-"));
-			try {
-				const adapterPath = path.join(cwd, "wedged-tcp-adapter.mjs");
-				const pidFilePath = path.join(cwd, "adapter.pid");
-				await fs.writeFile(
-					adapterPath,
-					`await Bun.write(${JSON.stringify(pidFilePath)}, String(process.pid));\nawait Bun.sleep(60_000);\n`,
-				);
-				const adapter: DapResolvedAdapter = {
-					...TEST_ADAPTER,
-					name: "wedged-tcp-adapter",
-					command: process.execPath,
-					args: [adapterPath],
-					resolvedCommand: process.execPath,
-					connectMode: "socket",
-				};
-				await expect(DapClient.spawn({ adapter, cwd, socketReadyTimeoutMs: 300 })).rejects.toThrow(
-					/did not connect within/,
-				);
-				await Bun.sleep(500);
-				const adapterPid = Number(await Bun.file(pidFilePath).text());
-				expect(Number.isFinite(adapterPid)).toBe(true);
-				let alive = true;
-				try {
-					process.kill(adapterPid, 0);
-				} catch {
-					alive = false;
-				}
-				expect(alive).toBe(false);
-			} finally {
-				await removeWithRetries(cwd);
-			}
-		} finally {
-			Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+			await fs.rm(cwd, { recursive: true, force: true });
 		}
 	});
 });
 
 describe("DebugTool launch validation", () => {
 	it("rejects directory programs when the selected adapter cannot debug a directory", async () => {
-		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue({
-			kind: "adapter",
-			adapter: TEST_ADAPTER,
-		});
+		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue(TEST_ADAPTER);
 		try {
 			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-program-"));
 			try {
@@ -510,7 +364,7 @@ describe("DebugTool launch validation", () => {
 					/launch program resolves to a directory.*python/,
 				);
 			} finally {
-				await removeWithRetries(cwd);
+				await fs.rm(cwd, { recursive: true, force: true });
 			}
 		} finally {
 			launchSpy.mockRestore();
@@ -526,10 +380,7 @@ describe("DebugTool launch validation", () => {
 			launchDefaults: { request: "launch", mode: "debug", stopOnEntry: true },
 			acceptsDirectoryProgram: true,
 		};
-		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue({
-			kind: "adapter",
-			adapter: dlvAdapter,
-		});
+		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue(dlvAdapter);
 		const sessionLaunchSpy = spyOn(dapModule.dapSessionManager, "launch").mockImplementation(async opts => {
 			throw Object.assign(new Error("captured launch"), { capturedOptions: opts });
 		});
@@ -556,7 +407,7 @@ describe("DebugTool launch validation", () => {
 				expect(opts.extraLaunchArguments).toEqual({ mode: "debug" });
 				expect(opts.program).toBe(path.join(cwd, "cmd"));
 			} finally {
-				await removeWithRetries(cwd);
+				await fs.rm(cwd, { recursive: true, force: true });
 			}
 		} finally {
 			sessionLaunchSpy.mockRestore();
@@ -593,7 +444,7 @@ describe("DebugTool launch validation", () => {
 				expect(opts.adapter.name).toBe("dlv");
 				expect(opts.extraLaunchArguments).toEqual({ mode: "debug" });
 			} finally {
-				await removeWithRetries(cwd);
+				await fs.rm(cwd, { recursive: true, force: true });
 			}
 		} finally {
 			sessionLaunchSpy.mockRestore();
@@ -609,10 +460,7 @@ describe("DebugTool launch validation", () => {
 			launchDefaults: { request: "launch", mode: "debug", stopOnEntry: true },
 			acceptsDirectoryProgram: true,
 		};
-		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue({
-			kind: "adapter",
-			adapter: dlvAdapter,
-		});
+		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue(dlvAdapter);
 		const sessionLaunchSpy = spyOn(dapModule.dapSessionManager, "launch").mockImplementation(async opts => {
 			throw Object.assign(new Error("captured launch"), { capturedOptions: opts });
 		});
@@ -635,7 +483,7 @@ describe("DebugTool launch validation", () => {
 				const [opts] = sessionLaunchSpy.mock.calls[0]!;
 				expect(opts.extraLaunchArguments).toEqual({ mode: "exec" });
 			} finally {
-				await removeWithRetries(cwd);
+				await fs.rm(cwd, { recursive: true, force: true });
 			}
 		} finally {
 			sessionLaunchSpy.mockRestore();
@@ -644,11 +492,7 @@ describe("DebugTool launch validation", () => {
 	});
 
 	it("throws targeted 'python not found in PATH' when adapter:'debugpy' is unresolvable for launch", async () => {
-		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue({
-			kind: "unavailable",
-			adapterName: "debugpy",
-			command: "python",
-		});
+		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue(null);
 		try {
 			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-debugpy-"));
 			try {
@@ -666,7 +510,7 @@ describe("DebugTool launch validation", () => {
 					tool.execute("call", { action: "launch", program: "main.py", adapter: "debugpy" }),
 				).rejects.toThrow(/debugpy.*python not found in PATH/);
 			} finally {
-				await removeWithRetries(cwd);
+				await fs.rm(cwd, { recursive: true, force: true });
 			}
 		} finally {
 			launchSpy.mockRestore();
@@ -691,92 +535,7 @@ describe("DebugTool launch validation", () => {
 					/debugpy.*python not found in PATH/,
 				);
 			} finally {
-				await removeWithRetries(cwd);
-			}
-		} finally {
-			attachSpy.mockRestore();
-		}
-	});
-
-	it("shows the Delve install command when the canonical dlv adapter is unavailable", async () => {
-		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue({
-			kind: "unavailable",
-			adapterName: "dlv",
-			command: "dlv",
-		});
-		try {
-			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-dlv-hint-"));
-			try {
-				await fs.writeFile(path.join(cwd, "main.go"), "package main\n\nfunc main() {}\n");
-				const session: ToolSession = {
-					cwd,
-					hasUI: false,
-					getSessionFile: () => null,
-					getSessionSpawns: () => "*",
-					settings: Settings.isolated({ "debug.enabled": true }),
-				};
-				const tool = new DebugTool(session);
-
-				await expect(tool.execute("call", { action: "launch", program: "main.go" })).rejects.toThrow(
-					/go install github\.com\/go-delve\/delve\/cmd\/dlv@latest/,
-				);
-			} finally {
-				await removeWithRetries(cwd);
-			}
-		} finally {
-			launchSpy.mockRestore();
-		}
-	});
-
-	it("points to DAP configuration when a custom adapter command is unavailable", async () => {
-		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue({
-			kind: "unavailable",
-			adapterName: "dlv",
-			command: "./bin/missing-dlv",
-		});
-		try {
-			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-dlv-config-"));
-			try {
-				await fs.writeFile(path.join(cwd, "main.go"), "package main\n\nfunc main() {}\n");
-				const session: ToolSession = {
-					cwd,
-					hasUI: false,
-					getSessionFile: () => null,
-					getSessionSpawns: () => "*",
-					settings: Settings.isolated({ "debug.enabled": true }),
-				};
-				const tool = new DebugTool(session);
-
-				await expect(tool.execute("call", { action: "launch", program: "main.go" })).rejects.toThrow(
-					/configured command '\.\/bin\/missing-dlv' did not resolve.*DAP adapter config/,
-				);
-			} finally {
-				await removeWithRetries(cwd);
-			}
-		} finally {
-			launchSpy.mockRestore();
-		}
-	});
-
-	it("shows the rdbg install command for explicit Ruby attach", async () => {
-		const attachSpy = spyOn(dapModule, "selectAttachAdapter").mockReturnValue(null);
-		try {
-			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-rdbg-attach-"));
-			try {
-				const session: ToolSession = {
-					cwd,
-					hasUI: false,
-					getSessionFile: () => null,
-					getSessionSpawns: () => "*",
-					settings: Settings.isolated({ "debug.enabled": true }),
-				};
-				const tool = new DebugTool(session);
-
-				await expect(tool.execute("call", { action: "attach", pid: 1234, adapter: "rdbg" })).rejects.toThrow(
-					/gem install debug/,
-				);
-			} finally {
-				await removeWithRetries(cwd);
+				await fs.rm(cwd, { recursive: true, force: true });
 			}
 		} finally {
 			attachSpy.mockRestore();
@@ -784,7 +543,7 @@ describe("DebugTool launch validation", () => {
 	});
 
 	it("falls back to the generic 'No debugger adapter' error when adapter is unspecified", async () => {
-		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue({ kind: "none" });
+		const launchSpy = spyOn(dapModule, "selectLaunchAdapter").mockReturnValue(null);
 		try {
 			const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-noadapter-"));
 			try {
@@ -802,7 +561,7 @@ describe("DebugTool launch validation", () => {
 					/No debugger adapter available/,
 				);
 			} finally {
-				await removeWithRetries(cwd);
+				await fs.rm(cwd, { recursive: true, force: true });
 			}
 		} finally {
 			launchSpy.mockRestore();

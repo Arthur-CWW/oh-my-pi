@@ -16,8 +16,7 @@ export function resolveGitHubCopilotBaseUrl(
 	apiKey: string | undefined,
 ): string | undefined {
 	if (!apiKey) return baseUrl;
-	const { enterpriseUrl, apiEndpoint } = parseGitHubCopilotApiKey(apiKey);
-	if (apiEndpoint && (!baseUrl || baseUrl.includes("githubcopilot.com"))) return apiEndpoint;
+	const { enterpriseUrl } = parseGitHubCopilotApiKey(apiKey);
 	if (!enterpriseUrl) return baseUrl;
 	if (baseUrl && !baseUrl.includes("githubcopilot.com")) return baseUrl;
 	return getGitHubCopilotBaseUrl(enterpriseUrl);

@@ -1,38 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { SelectorController } from "@oh-my-pi/pi-coding-agent/modes/controllers/selector-controller";
-import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { getProjectAgentDir, Snowflake } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "./helpers/settings-test-state";
 
 describe("autocompleteMaxVisible setting", () => {
 	let settingsState: SettingsTestState | undefined;
-	let tempDir: TempDir;
+	let testDir = "";
 	let agentDir: string;
 	let projectDir: string;
 
 	beforeEach(() => {
 		settingsState = beginSettingsTest();
-		tempDir = TempDir.createSync("@test-autocomplete-settings-");
-		agentDir = path.join(tempDir.path(), "agent");
-		projectDir = path.join(tempDir.path(), "project");
+		testDir = path.join(os.tmpdir(), "test-autocomplete-settings", Snowflake.next());
+		agentDir = path.join(testDir, "agent");
+		projectDir = path.join(testDir, "project");
 		fs.mkdirSync(agentDir, { recursive: true });
 		fs.mkdirSync(getProjectAgentDir(projectDir), { recursive: true });
 	});
 
-	afterEach(async () => {
-		AgentStorage.resetInstance();
+	afterEach(() => {
 		restoreSettingsTestState(settingsState);
 		settingsState = undefined;
-		if (tempDir) {
-			try {
-				await tempDir.remove();
-			} catch {}
-			tempDir = undefined as unknown as TempDir;
+		if (testDir && fs.existsSync(testDir)) {
+			fs.rmSync(testDir, { recursive: true, force: true });
 		}
+		testDir = "";
 	});
 
 	it("should persist and read back a configured value", async () => {

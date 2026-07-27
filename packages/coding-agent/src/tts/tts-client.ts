@@ -1,18 +1,8 @@
-import { logger } from "@oh-my-pi/pi-utils";
-import {
-	createUnavailableWorker,
-	createWorkerHandle,
-	createWorkerSubprocess,
-	logWorkerMessage,
-	type RefCountedWorkerHandle,
-	resolveWorkerSpawnCmd,
-	SMOKE_TEST_TIMEOUT_MS,
-	type SpawnedSubprocess,
-	smokeTestWorker,
-	spawnWorkerOrUnavailable,
-} from "../subprocess/worker-client";
-import { tinyWorkerEnv } from "../tiny/title-client";
-import { safeSend } from "../utils/ipc";
+import * as path from "node:path";
+import { $env, isBunTestRuntime, isCompiledBinary, logger, workerHostEntry } from "@oh-my-pi/pi-utils";
+import type { Subprocess } from "bun";
+import { settings } from "../config/settings";
+import { tinyWorkerEnvOverlay } from "../tiny/title-client";
 import { isTtsLocalModelKey, type TtsLocalModelKey } from "./models";
 import type { TtsProgressEvent, TtsWorkerInbound, TtsWorkerOutbound } from "./tts-protocol";
 
@@ -20,6 +10,22 @@ import type { TtsProgressEvent, TtsWorkerInbound, TtsWorkerOutbound } from "./tt
 export interface TtsAudio {
 	pcm: Float32Array;
 	sampleRate: number;
+}
+
+/**
+ * Abstraction over the TTS subprocess. The runtime implementation is a Bun child
+ * process so `onnxruntime-node`'s NAPI finalizer never runs inside the main agent
+ * address space — that destructor segfaults Bun during shutdown (issue #1606).
+ */
+interface WorkerHandle {
+	send(message: TtsWorkerInbound): void;
+	onMessage(handler: (message: TtsWorkerOutbound) => void): () => void;
+	onError(handler: (error: Error) => void): () => void;
+	/** Re-reference the subprocess so a pending request keeps the parent event loop alive. */
+	ref(): void;
+	/** Drop the reference once the worker is idle so it never blocks process exit. */
+	unref(): void;
+	terminate(): Promise<void>;
 }
 
 type PendingRequest =
@@ -42,7 +48,7 @@ export interface TtsStreamOptions {
 	signal?: AbortSignal;
 }
 
-/** One synthesized segment of a streaming session, in emission order. */
+/** One synthesized sentence of a streaming session, in emission order. */
 export interface TtsAudioChunk {
 	index: number;
 	text: string;
@@ -51,10 +57,10 @@ export interface TtsAudioChunk {
 }
 
 /**
- * A live streaming-synthesis session. Feed complete speakable segments with
- * {@link push} (the worker synthesizes each push as-is) and close the input
- * with {@link end}; `chunks` yields each segment's audio as soon as it is
- * ready, then completes once the worker finishes draining the closed input.
+ * A live streaming-synthesis session. Feed text incrementally with {@link push}
+ * and close the input with {@link end}; `chunks` yields each synthesized
+ * sentence's audio as soon as it is ready, then completes once the worker
+ * finishes draining the closed input.
  */
 export interface TtsStreamHandle {
 	push(text: string): void;
@@ -127,30 +133,134 @@ class AudioChunkChannel {
 	}
 }
 
+// Cold-starting the worker from a compiled binary (decompress + module graph load)
+// is slow on contended CI runners; the probe only proves the worker spawns and
+// ponges, so a generous bound removes flakes without weakening the check.
+const SMOKE_TEST_TIMEOUT_MS = 30_000;
+
 /**
  * Hidden subcommand on the main CLI that boots the TTS worker in the spawned
  * subprocess. Kept in sync with the dispatch in `cli.ts` (Main-owned).
  */
 export const TTS_WORKER_ARG = "__omp_worker_tts";
 
+function readTinyModelSetting(path: "providers.tinyModelDevice" | "providers.tinyModelDtype"): string | undefined {
+	try {
+		const value = settings.get(path);
+		return typeof value === "string" ? value : undefined;
+	} catch {
+		// Settings may be uninitialized (e.g. `omp --smoke-test`); fall back to env/default.
+		return undefined;
+	}
+}
+
+/**
+ * Env handed to the TTS subprocess. The `PI_TINY_DEVICE` / `PI_TINY_DTYPE` env
+ * vars win; otherwise the persisted `providers.tinyModelDevice` /
+ * `providers.tinyModelDtype` settings are mapped onto those vars so the
+ * subprocess's env-based resolution governs speech the same way it governs the
+ * tiny LLM worker.
+ */
+function ttsWorkerEnv(): Record<string, string> {
+	const overlay = tinyWorkerEnvOverlay(
+		$env,
+		readTinyModelSetting("providers.tinyModelDevice"),
+		readTinyModelSetting("providers.tinyModelDtype"),
+	);
+	const base = $env as Record<string, string | undefined>;
+	const merged: Record<string, string> = {};
+	for (const key in base) {
+		const value = base[key];
+		if (typeof value === "string") merged[key] = value;
+	}
+	for (const key in overlay) merged[key] = overlay[key];
+	return merged;
+}
+
+interface TtsWorkerSpawnCommand {
+	cmd: string[];
+	cwd?: string;
+}
+
+/**
+ * Resolve the command used to relaunch the agent CLI into TTS-worker mode. In a
+ * compiled binary the entry point is the binary itself; otherwise re-enter the
+ * declared worker-host entry (cwd-relative for reliable Bun IPC), falling back
+ * to this package's own `src/cli.ts` when no host entry is declared (bun test).
+ */
+function ttsWorkerSpawnCmd(): TtsWorkerSpawnCommand {
+	if (isCompiledBinary()) return { cmd: [process.execPath, TTS_WORKER_ARG] };
+	const hostEntry = workerHostEntry();
+	if (hostEntry) {
+		return { cmd: [process.execPath, path.basename(hostEntry), TTS_WORKER_ARG], cwd: path.dirname(hostEntry) };
+	}
+	const packageRoot = path.resolve(import.meta.dir, "..", "..");
+	return { cmd: [process.execPath, "src/cli.ts", TTS_WORKER_ARG], cwd: packageRoot };
+}
+
+interface SpawnedSubprocess {
+	proc: Subprocess<"ignore", "ignore", "ignore">;
+	inbound: Set<(message: TtsWorkerOutbound) => void>;
+	errors: Set<(error: Error) => void>;
+	/** Flipped to `true` right before the deliberate SIGKILL so `onExit` can tell it apart from a crash. */
+	intentionalExit: { value: boolean };
+}
+
 /**
  * Spawn the TTS worker as a subprocess. Exported for tests and the smoke probe;
  * production callers go through {@link spawnTtsWorker}.
  */
-export function createTtsSubprocess(): SpawnedSubprocess<TtsWorkerOutbound> {
-	return createWorkerSubprocess<TtsWorkerOutbound>({
-		spawnCommand: resolveWorkerSpawnCmd(TTS_WORKER_ARG),
-		env: tinyWorkerEnv(),
-		exitLabel: "tts subprocess",
+export function createTtsSubprocess(): SpawnedSubprocess {
+	const inbound = new Set<(message: TtsWorkerOutbound) => void>();
+	const errors = new Set<(error: Error) => void>();
+	const intentionalExit = { value: false };
+	const spawnCommand = ttsWorkerSpawnCmd();
+	const proc = Bun.spawn({
+		cmd: spawnCommand.cmd,
+		cwd: spawnCommand.cwd,
+		env: ttsWorkerEnv(),
+		stdin: "ignore",
+		stdout: "ignore",
+		stderr: "ignore",
+		serialization: "advanced",
+		windowsHide: true,
+		ipc(message) {
+			for (const handler of inbound) handler(message as TtsWorkerOutbound);
+		},
+		onExit(_proc, exitCode, signalCode) {
+			if (exitCode === 0) return;
+			if (exitCode === null && intentionalExit.value) return;
+			const reason = exitCode !== null ? `code ${exitCode}` : `signal ${signalCode ?? "unknown"}`;
+			const err = new Error(`tts subprocess exited with ${reason}`);
+			for (const handler of errors) handler(err);
+		},
 	});
+	// Don't keep the parent event loop alive on an idle worker; the dispose path
+	// calls `terminate()` explicitly. Bun's test runner starves IPC for unref'd
+	// subprocesses, so keep it referenced only under tests.
+	if (!isBunTestRuntime()) proc.unref();
+	return { proc, inbound, errors, intentionalExit };
 }
 
-function wrapSubprocess(
-	spawned: SpawnedSubprocess<TtsWorkerOutbound>,
-): RefCountedWorkerHandle<TtsWorkerInbound, TtsWorkerOutbound> {
-	const { proc } = spawned;
+function wrapSubprocess({ proc, inbound, errors, intentionalExit }: SpawnedSubprocess): WorkerHandle {
 	return {
-		...createWorkerHandle<TtsWorkerInbound, TtsWorkerOutbound>(spawned, message => safeSend(proc, message, "tts")),
+		send(message) {
+			try {
+				proc.send(message);
+			} catch (error) {
+				logger.debug("tts: send to subprocess failed", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		},
+		onMessage(handler) {
+			inbound.add(handler);
+			return () => inbound.delete(handler);
+		},
+		onError(handler) {
+			errors.add(handler);
+			return () => errors.delete(handler);
+		},
 		ref() {
 			try {
 				proc.ref();
@@ -165,36 +275,79 @@ function wrapSubprocess(
 				// Already gone.
 			}
 		},
+		async terminate() {
+			// SIGKILL: the point of subprocess isolation is that the parent never
+			// runs `onnxruntime-node`'s NAPI finalizer (it crashes Bun on Windows).
+			// Hard-kill instead; the OS reclaims the model memory.
+			intentionalExit.value = true;
+			try {
+				proc.kill("SIGKILL");
+			} catch {
+				// Already gone.
+			}
+		},
 	};
 }
 
-function spawnInlineUnavailableWorker(error: unknown): RefCountedWorkerHandle<TtsWorkerInbound, TtsWorkerOutbound> {
+function spawnInlineUnavailableWorker(error: unknown): WorkerHandle {
+	const listeners = new Set<(message: TtsWorkerOutbound) => void>();
+	const errorMessage = error instanceof Error ? error.message : String(error);
+	const emit = (message: TtsWorkerOutbound): void => {
+		for (const listener of listeners) listener(message);
+	};
 	return {
-		...createUnavailableWorker<TtsWorkerInbound, TtsWorkerOutbound>(error),
+		send(message) {
+			queueMicrotask(() => {
+				if (message.type === "ping") {
+					emit({ type: "pong", id: message.id });
+					return;
+				}
+				emit({ type: "error", id: message.id, error: errorMessage });
+			});
+		},
+		onMessage(handler) {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		onError() {
+			return () => {};
+		},
 		ref() {},
 		unref() {},
+		async terminate() {
+			listeners.clear();
+		},
 	};
 }
 
-function spawnTtsWorker(): RefCountedWorkerHandle<TtsWorkerInbound, TtsWorkerOutbound> {
-	return spawnWorkerOrUnavailable(
-		() => wrapSubprocess(createTtsSubprocess()),
-		spawnInlineUnavailableWorker,
-		"TTS worker spawn failed; local TTS disabled",
-	);
+function spawnTtsWorker(): WorkerHandle {
+	try {
+		return wrapSubprocess(createTtsSubprocess());
+	} catch (error) {
+		logger.warn("TTS worker spawn failed; local TTS disabled", {
+			error: error instanceof Error ? error.message : String(error),
+		});
+		return spawnInlineUnavailableWorker(error);
+	}
+}
+
+function logWorkerMessage(message: Extract<TtsWorkerOutbound, { type: "log" }>): void {
+	if (message.level === "debug") logger.debug(message.msg, message.meta);
+	else if (message.level === "warn") logger.warn(message.msg, message.meta);
+	else logger.error(message.msg, message.meta);
 }
 
 export class TtsClient {
-	#worker: RefCountedWorkerHandle<TtsWorkerInbound, TtsWorkerOutbound> | null = null;
+	#worker: WorkerHandle | null = null;
 	#unsubscribeMessage: (() => void) | null = null;
 	#unsubscribeError: (() => void) | null = null;
 	#pending = new Map<string, PendingRequest>();
 	#progressListeners = new Set<(event: TtsProgressEvent) => void>();
 	#nextRequestId = 0;
 	#refed = false;
-	#spawnWorker: () => RefCountedWorkerHandle<TtsWorkerInbound, TtsWorkerOutbound>;
+	#spawnWorker: () => WorkerHandle;
 
-	constructor(spawnWorker: () => RefCountedWorkerHandle<TtsWorkerInbound, TtsWorkerOutbound> = spawnTtsWorker) {
+	constructor(spawnWorker: () => WorkerHandle = spawnTtsWorker) {
 		this.#spawnWorker = spawnWorker;
 	}
 
@@ -239,12 +392,11 @@ export class TtsClient {
 	}
 
 	/**
-	 * Open a streaming-synthesis session. Complete speakable segments are fed
-	 * through the returned handle's `push`/`end`; audio is emitted one segment
-	 * at a time via `chunks`, so playback can begin before the full text is
-	 * known. Returns an inert handle (immediately-ended `chunks`) for unknown
-	 * models or an already-aborted signal, and fails the iterator if the worker
-	 * cannot spawn.
+	 * Open a streaming-synthesis session. Text is fed incrementally through the
+	 * returned handle's `push`/`end`; audio is emitted one synthesized sentence at
+	 * a time via `chunks`, so playback can begin before the full text is known.
+	 * Returns an inert handle (immediately-ended `chunks`) for unknown models or
+	 * an already-aborted signal, and fails the iterator if the worker cannot spawn.
 	 */
 	synthesizeStream(modelKey: string, options: TtsStreamOptions = {}): TtsStreamHandle {
 		if (!isTtsLocalModelKey(modelKey) || options.signal?.aborted) {
@@ -253,7 +405,7 @@ export class TtsClient {
 			return { push: () => {}, end: () => {}, chunks: channel.iterator() };
 		}
 
-		let worker: RefCountedWorkerHandle<TtsWorkerInbound, TtsWorkerOutbound>;
+		let worker: WorkerHandle;
 		try {
 			worker = this.#ensureWorker();
 		} catch (error) {
@@ -358,7 +510,7 @@ export class TtsClient {
 		}
 	}
 
-	#ensureWorker(): RefCountedWorkerHandle<TtsWorkerInbound, TtsWorkerOutbound> {
+	#ensureWorker(): WorkerHandle {
 		if (this.#worker) return this.#worker;
 		const worker = this.#spawnWorker();
 		this.#worker = worker;
@@ -471,5 +623,25 @@ export async function smokeTestTtsWorker({
 }: {
 	timeoutMs?: number;
 } = {}): Promise<void> {
-	await smokeTestWorker(wrapSubprocess(createTtsSubprocess()), "tts worker", timeoutMs);
+	const handle = wrapSubprocess(createTtsSubprocess());
+	const { promise, resolve, reject } = Promise.withResolvers<void>();
+	const timer = setTimeout(() => reject(new Error(`tts worker did not pong within ${timeoutMs}ms`)), timeoutMs);
+	const unsubscribeMessage = handle.onMessage(message => {
+		if (message.type === "pong") {
+			resolve();
+			return;
+		}
+		if (message.type === "log") return;
+		reject(new Error(`tts worker: expected pong, got ${JSON.stringify(message)}`));
+	});
+	const unsubscribeError = handle.onError(reject);
+	try {
+		handle.send({ type: "ping", id: "smoke" } satisfies TtsWorkerInbound);
+		await promise;
+	} finally {
+		clearTimeout(timer);
+		unsubscribeMessage();
+		unsubscribeError();
+		await handle.terminate();
+	}
 }

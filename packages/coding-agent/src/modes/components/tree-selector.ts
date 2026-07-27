@@ -6,6 +6,7 @@ import {
 	fuzzyMatch,
 	Input,
 	matchesKey,
+	ScrollView,
 	Spacer,
 	Text,
 	TruncatedText,
@@ -13,14 +14,13 @@ import {
 } from "@oh-my-pi/pi-tui";
 import type { TreeFilterMode } from "../../config/settings-schema";
 import { theme } from "../../modes/theme/theme";
-import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
+import { matchesSelectDown, matchesSelectUp, matchesUiDismiss } from "../../modes/utils/keybinding-matchers";
 import type { SessionTreeNode } from "../../session/session-entries";
-import { toPathList } from "../../tools/path-utils";
 import { shortenPath } from "../../tools/render-utils";
+import { toPathList } from "../../tools/search";
 import { canonicalizeMessage } from "../../utils/thinking-display";
-import { resolveAssistantErrorPresentation } from "../utils/transcript-render-helpers";
 import { DynamicBorder } from "./dynamic-border";
-import { centeredWindow, contentRowWidth, renderScrollableList } from "./selector-helpers";
+import { editorKey } from "./keybinding-hints";
 
 /** Gutter info: position (displayIndent where connector was) and whether to show │ */
 interface GutterInfo {
@@ -476,11 +476,14 @@ class TreeList implements Component {
 			return lines;
 		}
 
-		const { startIndex, endIndex } = centeredWindow(
-			this.#selectedIndex,
-			this.#filteredNodes.length,
-			this.maxVisibleLines,
+		const startIndex = Math.max(
+			0,
+			Math.min(
+				this.#selectedIndex - Math.floor(this.maxVisibleLines / 2),
+				this.#filteredNodes.length - this.maxVisibleLines,
+			),
 		);
+		const endIndex = Math.min(startIndex + this.maxVisibleLines, this.#filteredNodes.length);
 
 		// Cap the per-row gutter prefix so a content budget is always preserved.
 		// Each indent level renders as 3 cells; deep branching would otherwise eat the
@@ -492,7 +495,8 @@ class TreeList implements Component {
 		const contentReserve = Math.max(MIN_CONTENT_COLS, Math.floor(width / 2));
 		const maxIndentLevels = Math.max(1, Math.floor((width - contentReserve - OVERHEAD_COLS) / 3));
 
-		const rowWidth = contentRowWidth(width, this.#filteredNodes.length, this.maxVisibleLines);
+		const overflow = this.#filteredNodes.length > this.maxVisibleLines;
+		const rowWidth = Math.max(0, width - (overflow ? 1 : 0));
 		const rows: string[] = [];
 
 		for (let i = startIndex; i < endIndex; i++) {
@@ -506,61 +510,15 @@ class TreeList implements Component {
 			// If multiple roots, shift display (roots at 0, not 1)
 			const displayIndent = this.#multipleRoots ? Math.max(0, flatNode.indent - 1) : flatNode.indent;
 
-			// Build prefix with gutters at their correct positions, clamped to
-			// `maxIndentLevels` cells so the content always fits. When clamped, the
-			// leftmost cells represent the deepest visible ancestors and a `…` marker
-			// indicates older branch context has been compressed.
-			const hasConnector = flatNode.showConnector && !flatNode.isVirtualRootChild;
-			const connectorSymbol = hasConnector ? (flatNode.isLast ? theme.tree.last : theme.tree.branch) : "";
-			const connectorChars = hasConnector ? Array.from(connectorSymbol) : [];
 			const renderedIndent = Math.min(displayIndent, maxIndentLevels);
 			const scrollOffset = displayIndent - renderedIndent;
-			const connectorPositionDisplay = hasConnector ? renderedIndent - 1 : -1;
-			// Chain rows (no connector of their own) under a last-sibling (`└─`)
-			// branch stay anchored by a vertical drawn one level RIGHT of the
-			// suppressed gutter — the column where the row's own connector would
-			// sit, directly below the branch head's content. Drawing it in the
-			// `└─` column itself contradicts the corner and leaves dangling,
-			// drifting verticals once the chain branches deeper (#2298, #2325).
-			// Chains under `├─` heads need no extra anchor: the sibling line
-			// (`show: true` gutter) already ties them to their branch.
-			const nearestGutter = !hasConnector ? flatNode.gutters[flatNode.gutters.length - 1] : undefined;
-			const chainAnchorLevel = nearestGutter && !nearestGutter.show ? nearestGutter.position + 1 : -1;
 
-			// Build prefix char by char, placing gutters and connector at their positions
+			// Indentation-only prefix: a fixed 3-cell indent per visible depth
+			// level. Hierarchy reads from depth alone — no tree/gutter glyphs.
+			// `renderedIndent`/`maxIndentLevels` scroll math and column widths are
+			// unchanged, so wrapping and horizontal scrolling behave identically.
 			const totalChars = renderedIndent * 3;
-			const prefixChars: string[] = [];
-			for (let i = 0; i < totalChars; i++) {
-				const level = Math.floor(i / 3);
-				const originalLevel = level + scrollOffset;
-				const posInLevel = i % 3;
-
-				// Check if there's a gutter at this level (translated to original tree depth)
-				const gutter = flatNode.gutters.find(g => g.position === originalLevel);
-				if (gutter) {
-					// Gutters follow standard tree semantics: `│` only while more
-					// siblings continue below (`show`), space below a `└─`.
-					if (posInLevel === 0) {
-						prefixChars.push(gutter.show ? theme.tree.vertical : " ");
-					} else {
-						prefixChars.push(" ");
-					}
-				} else if (originalLevel === chainAnchorLevel) {
-					// Chain anchor for rows under a `└─` branch head.
-					prefixChars.push(posInLevel === 0 ? theme.tree.vertical : " ");
-				} else if (hasConnector && level === connectorPositionDisplay) {
-					// Connector at this level
-					if (posInLevel === 0) {
-						prefixChars.push(connectorChars[0] ?? " ");
-					} else if (posInLevel === 1) {
-						prefixChars.push(connectorChars[1] ?? theme.tree.horizontal);
-					} else {
-						prefixChars.push(connectorChars[2] ?? " ");
-					}
-				} else {
-					prefixChars.push(" ");
-				}
-			}
+			const prefixChars: string[] = new Array(totalChars).fill(" ");
 			// Mark the leftmost cell when ancestors were compressed off-screen.
 			if (scrollOffset > 0 && prefixChars.length > 0) {
 				prefixChars[0] = "…";
@@ -581,13 +539,14 @@ class TreeList implements Component {
 			rows.push(truncateToWidth(line, rowWidth));
 		}
 
-		lines.push(
-			...renderScrollableList(rows, {
-				width,
-				totalRows: this.#filteredNodes.length,
-				scrollOffset: startIndex,
-			}),
-		);
+		const sv = new ScrollView(rows, {
+			height: rows.length,
+			scrollbar: "auto",
+			totalRows: this.#filteredNodes.length,
+			theme: { track: t => theme.fg("muted", t), thumb: t => theme.fg("accent", t) },
+		});
+		sv.setScrollOffset(startIndex);
+		lines.push(...sv.render(width));
 
 		const filterLabel = this.#getFilterLabel();
 		if (filterLabel) {
@@ -616,20 +575,15 @@ class TreeList implements Component {
 					const content = normalize(this.#extractContent(msgWithContent.content));
 					result = theme.fg("dim", "developer: ") + theme.fg("muted", content);
 				} else if (role === "assistant") {
-					const presentation = resolveAssistantErrorPresentation(msg);
-					if (presentation.kind === "compact-recovered") {
-						result = theme.fg("success", "assistant: ") + theme.fg("dim", presentation.text);
-						break;
-					}
 					const msgWithContent = msg as { content?: unknown; stopReason?: string; errorMessage?: string };
 					const textContent = normalize(this.#extractContent(msgWithContent.content));
 					if (textContent) {
 						result = theme.fg("success", "assistant: ") + textContent;
-					} else if (presentation.kind === "full") {
-						result =
-							theme.fg("success", "assistant: ") + theme.fg("error", normalize(presentation.text).slice(0, 80));
 					} else if (msgWithContent.stopReason === "aborted") {
 						result = theme.fg("success", "assistant: ") + theme.fg("muted", "(aborted)");
+					} else if (msgWithContent.errorMessage) {
+						const errMsg = normalize(msgWithContent.errorMessage).slice(0, 80);
+						result = theme.fg("success", "assistant: ") + theme.fg("error", errMsg);
 					} else {
 						result = theme.fg("success", "assistant: ") + theme.fg("muted", "(no content)");
 					}
@@ -746,7 +700,7 @@ class TreeList implements Component {
 					.slice(0, 50);
 				return `[bash: ${cmd}${rawCmd.length > 50 ? "..." : ""}]`;
 			}
-			case "grep": {
+			case "search": {
 				const pattern = String(args.pattern || "");
 				const searchPathsInput =
 					typeof args.paths === "string" || Array.isArray(args.paths)
@@ -756,18 +710,11 @@ class TreeList implements Component {
 							: undefined;
 				const paths = toPathList(searchPathsInput);
 				const scope = paths.length > 0 ? paths.join(", ") : ".";
-				return `[grep: /${pattern}/ in ${shortenPath(scope)}]`;
+				return `[search: /${pattern}/ in ${shortenPath(scope)}]`;
 			}
-			case "glob": {
-				const globInput =
-					typeof args.path === "string"
-						? args.path
-						: typeof args.paths === "string" || Array.isArray(args.paths)
-							? args.paths
-							: undefined;
-				const paths = toPathList(globInput);
-				const scope = paths.length > 0 ? paths.join(", ") : ".";
-				return `[glob: ${shortenPath(scope)}]`;
+			case "find": {
+				const paths = Array.isArray(args.paths) ? args.paths.join(", ") : String(args.pattern || ".");
+				return `[find: ${shortenPath(paths)}]`;
 			}
 			case "ls": {
 				const path = shortenPath(String(args.path || "."));
@@ -797,7 +744,7 @@ class TreeList implements Component {
 			if (selected && this.onSelect) {
 				this.onSelect(selected.node.entry.id);
 			}
-		} else if (matchesAppInterrupt(keyData)) {
+		} else if (matchesUiDismiss(keyData)) {
 			if (this.#searchQuery) {
 				this.#searchQuery = "";
 				this.#applyFilter();
@@ -894,7 +841,9 @@ class LabelInput implements Component {
 		const availableWidth = width - indent.length;
 		lines.push(truncateToWidth(`${indent}${theme.fg("muted", "Label (empty to remove):")}`, width));
 		lines.push(...this.#input.render(availableWidth).map(line => truncateToWidth(`${indent}${line}`, width)));
-		lines.push(truncateToWidth(`${indent}${theme.fg("dim", "enter: save  esc: cancel")}`, width));
+		lines.push(
+			truncateToWidth(`${indent}${theme.fg("dim", `enter: save  ${editorKey("ui.dismiss")}: cancel`)}`, width),
+		);
 		return lines;
 	}
 
@@ -902,7 +851,7 @@ class LabelInput implements Component {
 		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
 			const value = this.#input.getValue().trim();
 			this.onSubmit?.(this.entryId, value || undefined);
-		} else if (matchesAppInterrupt(keyData)) {
+		} else if (matchesUiDismiss(keyData)) {
 			this.onCancel?.();
 		} else {
 			this.#input.handleInput(keyData);

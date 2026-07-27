@@ -2,14 +2,13 @@ import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import type { Context, Model, ModelSpec, Tool } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { type } from "arktype";
+import { z } from "zod/v4";
 
 const echoTool: Tool = {
 	name: "echo",
 	description: "Echo input",
-	parameters: type({ text: "string" }),
+	parameters: z.object({ text: z.string() }),
 };
 
 function contextWithTools(tools: Tool[] = [echoTool]): Context {
@@ -25,16 +24,12 @@ function abortedSignal(): AbortSignal {
 	return controller.signal;
 }
 
-async function capturePayload(
-	model: Model<"openai-completions">,
-	tools?: Tool[],
-	reasoning: "high" | "max" = "high",
-): Promise<Record<string, unknown>> {
+async function capturePayload(model: Model<"openai-completions">, tools?: Tool[]): Promise<Record<string, unknown>> {
 	const { promise, resolve } = Promise.withResolvers<unknown>();
 	streamOpenAICompletions(model, contextWithTools(tools), {
 		apiKey: "test-key",
 		signal: abortedSignal(),
-		reasoning,
+		reasoning: "minimal",
 		toolChoice: "auto",
 		maxTokens: 123,
 		onPayload: payload => resolve(payload),
@@ -66,20 +61,25 @@ describe("issue #1207 — DeepSeek V4 keeps reasoning with tools", () => {
 		expect(compat.supportsToolChoice).toBe(false);
 		expect(compat.maxTokensField).toBe("max_tokens");
 		expect(compat.extraBody).toEqual({ thinking: { type: "enabled" } });
-		// DeepSeek's reasoning_effort is the honest wire-exact high/max pair;
-		// no synthetic lower tiers, no alias map.
-		expect(model.thinking?.efforts).toEqual([Effort.High, Effort.Max]);
-		expect(model.thinking?.effortMap).toBeUndefined();
+		expect(model.thinking?.effortMap).toMatchObject({
+			minimal: "high",
+			low: "high",
+			medium: "high",
+			high: "high",
+			xhigh: "max",
+		});
 	});
 
-	it("drops user reasoning map entries outside the honest DeepSeek ladder", () => {
+	it("merges partial user reasoning maps with DeepSeek defaults in thinking metadata", () => {
 		const model = customDeepseekFlash();
 
 		expect(model.compat.supportsToolChoice).toBe(false);
-		// The stale user `xhigh` alias targets a tier the wire-exact
-		// [high, max] ladder no longer exposes, so it is filtered out.
-		expect(model.thinking?.efforts).toEqual([Effort.High, Effort.Max]);
-		expect(model.thinking?.effortMap).toBeUndefined();
+		expect(model.thinking?.effortMap).toMatchObject({
+			minimal: "high",
+			low: "high",
+			medium: "high",
+			xhigh: "max",
+		});
 	});
 
 	it("omits tool_choice but preserves documented reasoning when tools are present", async () => {
@@ -123,8 +123,8 @@ describe("issue #1207 — DeepSeek V4 keeps reasoning with tools", () => {
 		const unionTool: Tool = {
 			name: "union_repro",
 			description: "Union schema repro",
-			parameters: type({
-				paths: "(string | string[])?",
+			parameters: z.object({
+				paths: z.union([z.string(), z.array(z.string())]).optional(),
 			}),
 		};
 		const body = await capturePayload(model, [unionTool]);

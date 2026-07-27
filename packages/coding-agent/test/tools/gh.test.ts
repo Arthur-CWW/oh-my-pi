@@ -2,7 +2,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:te
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import {
@@ -13,7 +12,8 @@ import {
 	resolveDefaultRepoMemoized,
 } from "@oh-my-pi/pi-coding-agent/tools/gh";
 import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
-import { getAgentDir, hashPath, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+import { getAgentDir, hashPath, setAgentDir } from "@oh-my-pi/pi-utils";
+import { z } from "zod/v4";
 
 // Isolate every `git` invocation in this file from the developer's host
 // configuration. The fixture spawns dozens of git subprocesses against tiny
@@ -180,37 +180,19 @@ async function createPrFixture(): Promise<PrFixture> {
  * `getWorktreesDir()` resolves under an isolated temp home instead of the
  * user's real `~/.omp/wt`. Returns the temp home and a cleanup hook.
  */
-interface TempHome {
-	home: string;
-	cleanup: () => Promise<void>;
-}
-
 async function setupTempHome(): Promise<{ home: string; cleanup: () => Promise<void> }> {
 	const home = await fs.mkdtemp(path.join(os.tmpdir(), "gh-pr-tool-home-"));
 	vi.spyOn(os, "homedir").mockReturnValue(home);
-	// Clear XDG_*_HOME so the rebuilt resolver routes `dirs.rootSubdir("wt", "data")`
-	// through the spied homedir instead of `$XDG_DATA_HOME/omp/wt` (CI sets these).
-	const xdgKeys = ["XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"] as const;
-	const xdgPrevious: Partial<Record<(typeof xdgKeys)[number], string | undefined>> = {};
-	for (const key of xdgKeys) {
-		xdgPrevious[key] = process.env[key];
-		delete process.env[key];
-	}
 	// `dirs.configRoot` is computed at constructor time from `os.homedir()`, so
-	// we must rebuild the resolver after the spy + env scrub are in place.
-	// `setAgentDir` recreates it; we point it at the temp home's default agent dir.
+	// we must rebuild the resolver after the spy is in place. `setAgentDir`
+	// recreates it; we point it at the temp home's default agent dir.
 	const originalAgentDir = getAgentDir();
 	setAgentDir(path.join(home, ".omp", "agent"));
 	return {
 		home,
 		cleanup: async () => {
 			setAgentDir(originalAgentDir);
-			for (const key of xdgKeys) {
-				const previous = xdgPrevious[key];
-				if (previous === undefined) delete process.env[key];
-				else process.env[key] = previous;
-			}
-			await removeWithRetries(home);
+			await fs.rm(home, { recursive: true, force: true });
 		},
 	};
 }
@@ -280,7 +262,7 @@ describe("github tool", () => {
 
 	afterAll(async () => {
 		if (prFixtureTemplate) {
-			await removeWithRetries(prFixtureTemplate.baseDir);
+			await fs.rm(prFixtureTemplate.baseDir, { recursive: true, force: true });
 			prFixtureTemplate = null;
 		}
 	});
@@ -783,14 +765,14 @@ describe("github tool", () => {
 		// Arrange the mutable fixture + isolated $HOME once in beforeAll (excluded
 		// from test-body time); the body only performs the checkout and assertions.
 		let fixture: PrFixture;
-		let tempHome: TempHome;
+		let tempHome: Awaited<ReturnType<typeof setupTempHome>>;
 		beforeAll(async () => {
 			fixture = await createPrFixture();
 			tempHome = await setupTempHome();
 		});
 		afterAll(async () => {
 			await tempHome.cleanup();
-			await removeWithRetries(fixture.baseDir);
+			await fs.rm(fixture.baseDir, { recursive: true, force: true });
 		});
 
 		it("checks out a pull request into a worktree and configures contributor push metadata", async () => {
@@ -839,7 +821,7 @@ describe("github tool", () => {
 			remoteFixture = await createPrFixture();
 		});
 		afterAll(async () => {
-			await removeWithRetries(remoteFixture.baseDir);
+			await fs.rm(remoteFixture.baseDir, { recursive: true, force: true });
 		});
 
 		it("treats git.remote.add as a no-op when the remote already exists with the same URL", async () => {
@@ -853,40 +835,6 @@ describe("github tool", () => {
 			);
 			// Existing URL is preserved — we never overwrote it.
 			expect(runGit(remoteFixture.repoRoot, ["remote", "get-url", "forksrc"])).toBe(remoteFixture.forkBare);
-		});
-		it("does not depend on localized git remote-add stderr for existing remotes", async () => {
-			// The shim is a bash script resolved via `which`; neither exists on Windows.
-			if (process.platform === "win32") return;
-			const originalPath = process.env.PATH;
-			const fakeBin = await fs.mkdtemp(path.join(os.tmpdir(), "omp-fake-git-"));
-			const realGitResult = Bun.spawnSync(["which", "git"], { stdout: "pipe", stderr: "pipe" });
-			expect(realGitResult.exitCode).toBe(0);
-			const realGit = new TextDecoder().decode(realGitResult.stdout).trim();
-			const fakeGit = path.join(fakeBin, "git");
-			await fs.writeFile(
-				fakeGit,
-				`#!/usr/bin/env bash
-while [[ "$1" == "-c" ]]; do shift 2; done
-if [[ "$1" == "remote" && "$2" == "add" && "$3" == "forksrc" ]]; then
-	echo "本地化错误：远程 forksrc 已经存在。" >&2
-	exit 3
-fi
-exec ${JSON.stringify(realGit)} "$@"
-`,
-			);
-			await fs.chmod(fakeGit, 0o755);
-
-			try {
-				process.env.PATH = `${fakeBin}${path.delimiter}${originalPath ?? ""}`;
-				await git.remote.add(remoteFixture.repoRoot, "forksrc", remoteFixture.forkBare);
-			} finally {
-				if (originalPath === undefined) {
-					delete process.env.PATH;
-				} else {
-					process.env.PATH = originalPath;
-				}
-				await removeWithRetries(fakeBin);
-			}
 		});
 	});
 
@@ -912,21 +860,21 @@ exec ${JSON.stringify(realGit)} "$@"
 				expect(dump).toContain(`branch.race-test.key${idx} value-${idx}`);
 			}
 		} finally {
-			await removeWithRetries(repoRoot);
+			await fs.rm(repoRoot, { recursive: true, force: true });
 		}
 	});
 
 	describe("pr_checkout (array of pull requests)", () => {
 		// Same beforeAll-hoisted arrange: the body only runs the array checkout.
 		let fixture: PrFixture;
-		let tempHome: TempHome;
+		let tempHome: Awaited<ReturnType<typeof setupTempHome>>;
 		beforeAll(async () => {
 			fixture = await createPrFixture();
 			tempHome = await setupTempHome();
 		});
 		afterAll(async () => {
 			await tempHome.cleanup();
-			await removeWithRetries(fixture.baseDir);
+			await fs.rm(fixture.baseDir, { recursive: true, force: true });
 		});
 
 		it("checks out multiple pull requests in a single call when pr is an array", async () => {
@@ -993,7 +941,7 @@ exec ${JSON.stringify(realGit)} "$@"
 			runGit(fixture.repoRoot, ["commit", "-m", "manual branch commit"]);
 		});
 		afterAll(async () => {
-			await removeWithRetries(fixture.baseDir);
+			await fs.rm(fixture.baseDir, { recursive: true, force: true });
 		});
 
 		it("rejects PR pushes from branches without checkout metadata", async () => {
@@ -1010,7 +958,7 @@ exec ${JSON.stringify(realGit)} "$@"
 
 	it("exposes a flat op-based schema without legacy run_watch parameters", () => {
 		const tool = new GithubTool(createSession());
-		const wire = toolWireSchema(tool);
+		const wire = z.toJSONSchema(tool.parameters, { target: "draft-2020-12" }) as Record<string, unknown>;
 		const properties = wire.properties as Record<string, unknown>;
 		expect(properties.op).toBeDefined();
 		expect(properties.interval).toBeUndefined();
@@ -1096,7 +1044,7 @@ exec ${JSON.stringify(realGit)} "$@"
 			expect(artifactText).toContain("epsilon");
 			expect(artifactText).toContain("zeta");
 		} finally {
-			await removeWithRetries(artifactsDir);
+			await fs.rm(artifactsDir, { recursive: true, force: true });
 		}
 	});
 

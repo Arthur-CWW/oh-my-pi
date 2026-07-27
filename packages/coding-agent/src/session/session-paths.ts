@@ -163,6 +163,22 @@ export interface TerminalBreadcrumb {
 	sessionFile: string;
 }
 
+export interface TerminalBreadcrumbMatch extends TerminalBreadcrumb {
+	mtimeMs: number;
+}
+
+function parseBreadcrumbContent(content: string): TerminalBreadcrumb | null {
+	const lines = content.trim().split("\n");
+	if (lines.length < 2) return null;
+	return { cwd: lines[0] ?? "", sessionFile: lines[1] ?? "" };
+}
+
+function sessionFileExists(sessionFile: string): boolean {
+	if (!sessionFile) return false;
+	const stat = fs.statSync(sessionFile, { throwIfNoEntry: false });
+	return stat?.isFile() === true;
+}
+
 /**
  * Read the raw terminal breadcrumb for the current terminal.
  * Returns the recorded cwd + session file (verified to exist) regardless of
@@ -176,18 +192,47 @@ export async function readTerminalBreadcrumbEntry(): Promise<TerminalBreadcrumb 
 	try {
 		const breadcrumbFile = path.join(getTerminalSessionsDir(), terminalId);
 		const content = await Bun.file(breadcrumbFile).text();
-		const lines = content.trim().split("\n");
-		if (lines.length < 2) return null;
-
-		const breadcrumbCwd = lines[0];
-		const sessionFile = lines[1];
-
-		// Verify the session file still exists
-		const stat = fs.statSync(sessionFile, { throwIfNoEntry: false });
-		if (stat?.isFile()) return { cwd: breadcrumbCwd, sessionFile };
+		const parsed = parseBreadcrumbContent(content);
+		if (parsed && sessionFileExists(parsed.sessionFile)) return parsed;
 	} catch (err) {
 		if (!isEnoent(err)) logger.debug("Terminal breadcrumb read failed", { err });
 		// Breadcrumb doesn't exist or is corrupt — fall through
 	}
 	return null;
+}
+
+/**
+ * Return all usable terminal breadcrumbs recorded for `cwd`, newest breadcrumb
+ * first. This recovers --continue after terminal ids rotate while preserving the
+ * current-terminal breadcrumb as the caller's first choice.
+ */
+export async function readBreadcrumbsForCwd(cwd: string): Promise<TerminalBreadcrumbMatch[]> {
+	const breadcrumbDir = getTerminalSessionsDir();
+	const resolvedCwd = path.resolve(cwd);
+	let names: string[];
+	try {
+		names = await fs.promises.readdir(breadcrumbDir);
+	} catch (err) {
+		if (!isEnoent(err)) logger.debug("Terminal breadcrumb directory scan failed", { err });
+		return [];
+	}
+
+	const matches: TerminalBreadcrumbMatch[] = [];
+	for (const name of names) {
+		const breadcrumbFile = path.join(breadcrumbDir, name);
+		try {
+			const [content, stat] = await Promise.all([Bun.file(breadcrumbFile).text(), fs.promises.stat(breadcrumbFile)]);
+			if (!stat.isFile()) continue;
+			const parsed = parseBreadcrumbContent(content);
+			if (!parsed) continue;
+			if (path.resolve(parsed.cwd) !== resolvedCwd) continue;
+			if (!sessionFileExists(parsed.sessionFile)) continue;
+			matches.push({ ...parsed, mtimeMs: stat.mtimeMs });
+		} catch (err) {
+			if (!isEnoent(err)) logger.debug("Terminal breadcrumb scan skipped entry", { path: breadcrumbFile, err });
+		}
+	}
+
+	matches.sort((a, b) => b.mtimeMs - a.mtimeMs);
+	return matches;
 }

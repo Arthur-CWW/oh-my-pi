@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type AuthCredentialStore, AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-storage";
 import * as oauthUtils from "@oh-my-pi/pi-ai/registry/oauth";
-import { removeWithRetries } from "../../utils/src/temp";
 
 const PROVIDER = "unit-oauth-identity";
 
@@ -25,7 +24,7 @@ describe("AuthStorage.getOAuthAccountIdentity", () => {
 		store = null;
 		authStorage = null;
 		if (tempDir) {
-			await removeWithRetries(tempDir);
+			await fs.rm(tempDir, { recursive: true, force: true });
 			tempDir = "";
 		}
 	});

@@ -2,92 +2,6 @@
 
 ## [Unreleased]
 
-## [16.3.7] - 2026-07-05
-
-### Fixed
-
-- Fixed an issue where the workspace advertised a stale package version (15.11.7) instead of the current release version.
-
-## [16.3.3] - 2026-07-02
-
-### Fixed
-
-- Improved input detection for the edit tool's summary and body views.
-
-## [16.3.1] - 2026-07-02
-
-### Changed
-
-- Updated the glob, grep, and ast_grep tool cards to read the new single `path` argument, falling back to the legacy `paths` array so historical transcripts still render their search scope.
-
-## [16.3.0] - 2026-07-02
-
-### Fixed
-
-- Fixed missing response controls for "ask" questions in the mobile collaboration web UI.
-- Fixed an issue where re-sending an editor "ask" request would clear a guest's in-progress draft response.
-- Fixed infinite retry loops in the agent transcript drawer by ensuring terminal errors are displayed and polling stops.
-- Fixed a delay in displaying pre-welcome connection errors (such as protocol version rejections), allowing the session to terminate immediately with the host's error reason.
-
-## [16.2.0] - 2026-06-27
-
-### Added
-
-- Added dedicated renderers for glob, grep, and legacy find and search tools to improve the readability of search and file discovery results.
-
-## [16.1.23] - 2026-06-26
-
-### Fixed
-
-- Hid advisory wrapper tags in collab transcript Markdown while preserving their content. ([#3559](https://github.com/can1357/oh-my-pi/issues/3559))
-
-## [16.1.16] - 2026-06-23
-
-### Added
-
-- Added support for Ruby and Julia code cells in the eval tool
-
-### Changed
-
-- Updated the eval tool view to render the new single-cell eval args (flat `language`/`code`/`title`/`timeout`/`reset`) and to highlight Ruby (`rb`) and Julia (`jl`) cells with their own syntax instead of collapsing them to Python, while still parsing legacy multi-cell `cells` arrays and framed `input` strings from older transcripts.
-
-### Fixed
-
-- Improved compatibility with legacy todo task transcripts
-
-## [16.1.8] - 2026-06-20
-
-### Breaking Changes
-
-- Bumped `COLLAB_PROTO` to `2`: the `welcome` frame now carries metadata only (header/state/agents/`entryCount`) and the transcript follows in a train of targeted `snapshot-chunk` frames terminated by `final: true`. Old guests speaking proto v1 are rejected with the existing protocol-mismatch error.
-
-### Changed
-
-- Restyled the collab shell with the stats dashboard theme tokens and added the persisted system/light/dark theme toggle.
-
-### Fixed
-
-- Fixed the guest hanging in the "waiting" phase on large host sessions: the client now accumulates `snapshot-chunk` frames into the transcript snapshot and only transitions to `live` after the final chunk lands (or immediately when the host's snapshot is empty). ([#3144](https://github.com/can1357/oh-my-pi/issues/3144))
-
-## [16.0.10] - 2026-06-18
-
-### Added
-
-- Added support for collab browser wrapper links whose web UI host differs from the relay host, so the connect screen joins the relay encoded in the URL fragment.
-
-## [16.0.5] - 2026-06-17
-
-### Fixed
-
-- Preserved assistant soft line breaks and Markdown paragraph/list indentation in the collab web transcript renderer so tree-shaped prose no longer collapses into one paragraph.
-- Changed collab web transcript wrapping to keep Korean/CJK words intact before falling back to emergency breaks for long URLs or identifiers.
-
-## [16.0.3] - 2026-06-16
-
-### Removed
-
-- Removed rendering support for the `render_mermaid` tool from the web tool registry
-
 ## [15.13.3] - 2026-06-15
 
 ### Fixed
@@ -97,6 +11,16 @@
 - Fixed mobile layout issues where the entire chat flow would overflow horizontally and text was rendered too large on iOS Safari (by setting `text-size-adjust: 100%`)
 - Made transcript rows stack vertically on small screens to optimize reading space, and prevented grid track expansion
 - Hid non-essential metadata (such as the model name, thinking level, and working directory path) and context gauge tracks on mobile headers to prevent overflow
+- Fixed mobile layout issues where the entire chat flow would overflow horizontally and text was rendered too large on iOS Safari (by setting `text-size-adjust: 100%`)
+- Made transcript rows stack vertically on small screens to optimize reading space, and prevented grid track expansion
+- Hid non-essential metadata (such as the model name, thinking level, and working directory path) and context gauge tracks on mobile headers to prevent overflow
+- Wrapped composer button labels to display icon-only on mobile devices for a more compact and readable layout
+- Made the connect screen, ended session card, and notification toasts fully responsive for smaller device viewports
+- Fixed mobile layout issues where the entire chat flow would overflow horizontally and text was rendered too large on iOS Safari (by setting `text-size-adjust: 100%`)
+- Made transcript rows stack vertically on small screens to optimize reading space, and prevented grid track expansion
+- Hid non-essential metadata (such as the model name, thinking level, and working directory path) and context gauge tracks on mobile headers to prevent overflow
+- Wrapped composer button labels to display icon-only on mobile devices for a more compact and readable layout
+- Made the connect screen, ended session card, and notification toasts fully responsive for smaller device viewports
 
 ## [15.13.1] - 2026-06-15
 
@@ -110,17 +34,7 @@
 
 ### Fixed
 
-- Fixed mobile layout issues where the entire chat flow would overflow horizontally and text was rendered too large on iOS Safari (by setting `text-size-adjust: 100%`)
 - Pinned the app shell grid to a single `minmax(0, 1fr)` column so a long session title can no longer set a min-content floor that pushes the header, transcript, and composer wider than narrow or in-app mobile viewports; the title now ellipsizes instead of clipping every row's right edge
-- Made transcript rows stack vertically on small screens to optimize reading space, and prevented grid track expansion
-- Hid non-essential metadata (such as the model name, thinking level, and working directory path) and context gauge tracks on mobile headers to prevent overflow
-- Wrapped composer button labels to display icon-only on mobile devices for a more compact and readable layout
-- Made the connect screen, ended session card, and notification toasts fully responsive for smaller device viewports
-- Fixed mobile layout issues where the entire chat flow would overflow horizontally and text was rendered too large on iOS Safari (by setting `text-size-adjust: 100%`)
-- Made transcript rows stack vertically on small screens to optimize reading space, and prevented grid track expansion
-- Hid non-essential metadata (such as the model name, thinking level, and working directory path) and context gauge tracks on mobile headers to prevent overflow
-- Wrapped composer button labels to display icon-only on mobile devices for a more compact and readable layout
-- Made the connect screen, ended session card, and notification toasts fully responsive for smaller device viewports
 
 ## [15.12.4] - 2026-06-13
 

@@ -7,7 +7,7 @@ export interface SessionSnapshot {
 	sessionId: string;
 	/**
 	 * On-disk roots the helpers substitute for internal-URL schemes
-	 * (e.g. `{ local: "/…/artifacts/local" }`). Lets `read`/`write`
+	 * (e.g. `{ local: "/…/artifacts/local" }`). Lets `read`/`write`/`append`
 	 * accept `local://…` paths instead of writing a literal `local:/` directory.
 	 */
 	localRoots?: Record<string, string>;

@@ -14,7 +14,7 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { CompactionPreparation, CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantRetryRecovery, ImageContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { ImageContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import type { Rule } from "../capability/rule";
 import type { Goal, GoalModeState } from "../goals/state";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry } from "../session/session-entries";
@@ -33,7 +33,7 @@ export interface SessionStartEvent {
 export interface SessionBeforeSwitchEvent {
 	type: "session_before_switch";
 	/** Reason for the switch */
-	reason: "new" | "resume" | "fork" | "handoff";
+	reason: "new" | "resume" | "fork";
 	/** Session file we're switching to (only for "resume") */
 	targetSessionFile?: string;
 }
@@ -42,7 +42,7 @@ export interface SessionBeforeSwitchEvent {
 export interface SessionSwitchEvent {
 	type: "session_switch";
 	/** Reason for the switch */
-	reason: "new" | "resume" | "fork" | "handoff";
+	reason: "new" | "resume" | "fork";
 	/** Session file we came from */
 	previousSessionFile: string | undefined;
 }
@@ -91,17 +91,6 @@ export interface SessionCompactEvent {
 /** Fired on process exit (SIGINT/SIGTERM) */
 export interface SessionShutdownEvent {
 	type: "session_shutdown";
-}
-
-/** Fired when a main-agent turn is about to settle; handlers may request one continuation turn. */
-export interface SessionStopEvent {
-	type: "session_stop";
-	messages: AgentMessage[];
-	turn_id: number;
-	last_assistant_message?: AgentMessage;
-	session_id: string;
-	session_file?: string;
-	stop_hook_active: boolean;
 }
 
 /** Preparation data for tree navigation (used by session_before_tree event) */
@@ -156,7 +145,6 @@ export type SessionEvent =
 	| SessionBeforeCompactEvent
 	| SessionCompactingEvent
 	| SessionCompactEvent
-	| SessionStopEvent
 	| SessionShutdownEvent
 	| SessionBeforeTreeEvent
 	| SessionTreeEvent
@@ -234,18 +222,11 @@ export interface AutoCompactionEndEvent {
 /** Fired when auto-retry starts */
 export interface AutoRetryStartEvent {
 	type: "auto_retry_start";
+	cause: "network" | "rate-limit" | "provider";
 	attempt: number;
 	maxAttempts: number;
 	delayMs: number;
 	errorMessage: string;
-	errorId?: number;
-}
-
-export interface RecoveredRetryError {
-	entryId: string;
-	persistenceKey?: string;
-	note: string;
-	retryRecovery: AssistantRetryRecovery;
 }
 
 /** Fired when auto-retry ends */
@@ -254,7 +235,6 @@ export interface AutoRetryEndEvent {
 	success: boolean;
 	attempt: number;
 	finalError?: string;
-	recoveredErrors?: RecoveredRetryError[];
 }
 
 // ============================================================================
@@ -347,18 +327,6 @@ export interface SessionCompactingResult {
 	prompt?: string;
 	/** Custom data to store in compaction entry */
 	preserveData?: Record<string, unknown>;
-}
-
-/** Return type for `session_stop` handlers */
-export interface SessionStopEventResult {
-	/** Continue the main session with additional context before settling */
-	continue?: boolean;
-	/** OMP-native model-visible context for the continuation */
-	additionalContext?: string;
-	/** Claude/Codex-compatible block decision; maps to a continuation */
-	decision?: "block";
-	/** Claude/Codex-compatible model-visible continuation reason */
-	reason?: string;
 }
 
 /** Return type for `session_before_tree` handlers */

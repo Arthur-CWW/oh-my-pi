@@ -1,0 +1,682 @@
+import { randomUUID } from "node:crypto";
+import * as fsSync from "node:fs";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import type { IrcExternalPeer } from "../irc/bus-external";
+import { isIrcExternalPeerFresh } from "../irc/bus-external";
+import {
+	classifyFleetBuildProvenance,
+	classifyFleetCompatibility,
+	type FleetCompatibilityProfile,
+	selectFleetRolloutFeature,
+} from "./fleet-capability";
+import type { RolloutJournal } from "./rollout-journal";
+import type { SessionManager } from "./session-manager";
+
+export const FLEET_ROLLOUT_CUSTOM_TYPE = "fleet_rollout" as const;
+
+export const FLEET_TARGET_STATES = [
+	"Discovered",
+	"Classified",
+	"CordonRequested",
+	"Cordoned",
+	"QuiesceRequested",
+	"Quiesced",
+	"Draining",
+	"Checkpointed",
+	"RestartRequested",
+	"Acknowledged",
+	"ReexecApplied",
+	"Reacquired",
+	"ReAdopted",
+	"AutoResumeAuthorized",
+	"AutoResumed",
+	"Healthy",
+	"PinnedElsewhere",
+	"LegacyIncompatible",
+	"BusyDeferred",
+	"DrainTimedOut",
+	"CheckpointFailed",
+	"RestartFailed",
+	"RecoveryTimedOut",
+	"ReAdoptionDegraded",
+	"HealthFailed",
+	"RollbackRequested",
+	"RolledBack",
+	"RollbackIncomplete",
+] as const;
+export type FleetTargetState = (typeof FLEET_TARGET_STATES)[number];
+export type FleetRolloutTargetRecordState = FleetTargetState | "Frozen";
+
+export type FleetRolloutFailureCondition =
+	| "current owner verification"
+	| "prepare-rollout terminal receipt"
+	| "verified release executable"
+	| "restart terminal receipt"
+	| "replacement heartbeat"
+	| "status terminal receipt"
+	| "healthy target health gate"
+	| "target lifecycle completion";
+
+export interface FleetRolloutFailureReceipt {
+	readonly targetId: string;
+	readonly sessionId: string;
+	readonly phaseReached: FleetTargetState;
+	readonly awaitedCondition: FleetRolloutFailureCondition;
+	readonly commandId?: string;
+	readonly timedOut: boolean;
+	readonly buildVersion?: string;
+	readonly buildDigest?: string;
+	readonly cause: string;
+}
+export interface FleetRolloutSkipReceipt {
+	readonly targetId: string;
+	readonly sessionId: string;
+	readonly phaseReached: FleetTargetState;
+	readonly commandId?: string;
+	readonly reason: string;
+}
+
+
+export class FleetRolloutTargetError extends Error {
+	readonly receipt: FleetRolloutFailureReceipt;
+	readonly terminalState: FleetTargetState;
+	/** True when the target was transiently busy (ask-pending, state-command in-flight). The rollout should skip and continue. */
+	readonly recoverable: boolean;
+
+	constructor(receipt: FleetRolloutFailureReceipt, terminalState: FleetTargetState, recoverable = false) {
+		super(receipt.cause);
+		this.name = "FleetRolloutTargetError";
+		this.receipt = receipt;
+		this.terminalState = terminalState;
+		this.recoverable = recoverable;
+	}
+}
+
+export type FleetRolloutExecutionResult =
+	| { readonly state: "Succeeded"; readonly completed: readonly string[]; readonly skipped: readonly FleetRolloutSkipReceipt[] }
+	| {
+			readonly state: "Frozen";
+			readonly completed: readonly string[];
+			readonly skipped: readonly FleetRolloutSkipReceipt[];
+			readonly failures: readonly FleetRolloutFailureReceipt[];
+	  };
+
+export type FleetTargetSource =
+	| { readonly kind: "explicit" }
+	| { readonly kind: "session-pin"; readonly sessionId: string }
+	| { readonly kind: "requested-channel"; readonly channel: "blessed" }
+	| { readonly kind: "blessed" };
+
+export interface ResolvedFleetTarget {
+	readonly digest: string;
+	readonly source: FleetTargetSource;
+}
+
+export interface FleetRolloutRecordBase {
+	readonly schemaVersion: 1;
+	readonly fleetRolloutId: string;
+	readonly targetDigest: string;
+	readonly targetSource: FleetTargetSource;
+	readonly recordedAt: string;
+	readonly controllerSessionId: string;
+	readonly controllerOwnerEpoch: string;
+}
+
+export interface FleetRolloutIntentRecord extends FleetRolloutRecordBase {
+	readonly record: "intent";
+	readonly state: "Requested" | "Preflight" | "CanaryWave" | "ObserveCanary" | "RollingWaves" | "Frozen" | "Succeeded";
+	readonly previousDigest: string;
+	readonly maxUnavailable: 1;
+}
+
+export interface FleetRolloutTargetRecord extends FleetRolloutRecordBase {
+	readonly record: "target";
+	readonly waveId: string;
+	readonly targetId: string;
+	readonly sessionId: string;
+	readonly commandId: string;
+	readonly expectedOwnerEpoch: string;
+	readonly state: FleetRolloutTargetRecordState;
+	readonly reason?: string;
+	readonly evidence?: {
+		readonly kind: "control-receipt" | "checkpoint" | "heartbeat" | "auto-resume" | "health";
+		readonly commandId?: string;
+		readonly journalUri?: string;
+		readonly ownerEpoch?: string;
+	};
+	readonly failure?: FleetRolloutFailureReceipt;
+}
+
+export interface FleetRolloutSupersededRecord extends FleetRolloutRecordBase {
+	readonly record: "plan-superseded";
+	readonly state: "PlanSuperseded";
+	readonly leaseHolderId: string;
+}
+
+export type FleetRolloutRecord = FleetRolloutIntentRecord | FleetRolloutTargetRecord | FleetRolloutSupersededRecord;
+
+export interface FleetRolloutWave {
+	readonly waveId: string;
+	readonly kind: "canary" | "rolling";
+	readonly targets: readonly FleetRolloutTarget[];
+}
+
+export interface FleetRolloutTarget {
+	readonly targetId: string;
+	readonly sessionId: string;
+	readonly peer: IrcExternalPeer;
+	readonly expectedOwnerEpoch: string;
+	readonly commandId: string;
+	readonly waveId: string;
+	readonly state: FleetTargetState;
+	readonly reason?: string;
+}
+
+export interface FleetRolloutPlan {
+	readonly fleetRolloutId: string;
+	readonly target: ResolvedFleetTarget;
+	readonly previousDigest: string;
+	readonly waves: readonly FleetRolloutWave[];
+	readonly excluded: readonly FleetRolloutTarget[];
+	readonly orderedTargets: readonly FleetRolloutTarget[];
+	readonly maxUnavailable: 1;
+}
+
+export interface FleetArtifactInventory {
+	readonly hasArtifact: (digest: string) => boolean | Promise<boolean>;
+	readonly hasReadinessReceipt: (digest: string) => boolean | Promise<boolean>;
+	readonly previousDigest?: string;
+}
+
+export interface ResolveFleetTargetOptions {
+	readonly explicitDigest?: string;
+	readonly sessionPin?: { readonly sessionId: string; readonly digest: string };
+	readonly requestedChannel?: "blessed";
+	readonly blessedDigest: string;
+}
+
+const SHA256_DIGEST = /^(?:sha256:)?[a-f0-9]{64}$/i;
+
+function assertDigest(digest: string, label: string): void {
+	if (!SHA256_DIGEST.test(digest)) throw new Error(`${label} is not a SHA-256 digest`);
+}
+
+export function resolveFleetTarget(options: ResolveFleetTargetOptions): ResolvedFleetTarget {
+	if (options.explicitDigest !== undefined) {
+		assertDigest(options.explicitDigest, "Explicit rollout digest");
+		return { digest: options.explicitDigest, source: { kind: "explicit" } };
+	}
+	if (options.sessionPin !== undefined) {
+		assertDigest(options.sessionPin.digest, "Session pin digest");
+		return {
+			digest: options.sessionPin.digest,
+			source: { kind: "session-pin", sessionId: options.sessionPin.sessionId },
+		};
+	}
+	assertDigest(options.blessedDigest, "Blessed digest");
+	return options.requestedChannel === "blessed"
+		? { digest: options.blessedDigest, source: { kind: "requested-channel", channel: "blessed" } }
+		: { digest: options.blessedDigest, source: { kind: "blessed" } };
+}
+
+export async function preflightFleetTarget(
+	target: ResolvedFleetTarget,
+	inventory: FleetArtifactInventory,
+): Promise<{ readonly previousDigest: string }> {
+	assertDigest(target.digest, "Target digest");
+	if (!(await inventory.hasArtifact(target.digest)))
+		throw new Error(`Target artifact ${target.digest} is unavailable`);
+	if (!(await inventory.hasReadinessReceipt(target.digest))) {
+		throw new Error(`Readiness receipt for ${target.digest} is unavailable`);
+	}
+	const previousDigest = inventory.previousDigest;
+	if (previousDigest === undefined) throw new Error("N−1 artifact retention is unavailable");
+	assertDigest(previousDigest, "N−1 digest");
+	if (!(await inventory.hasArtifact(previousDigest))) throw new Error(`N−1 artifact ${previousDigest} is unavailable`);
+	return { previousDigest };
+}
+
+export interface CreateFleetRolloutPlanOptions {
+	readonly fleetRolloutId?: string;
+	readonly peers: readonly IrcExternalPeer[];
+	readonly target: ResolvedFleetTarget;
+	readonly previousDigest: string;
+	readonly compatibility: FleetCompatibilityProfile;
+	readonly initiatorSessionIds: ReadonlySet<string>;
+	readonly initiatorPids?: ReadonlySet<number>;
+	readonly sessionPins?: ReadonlyMap<string, string>;
+	readonly pausedSessionIds?: ReadonlySet<string>;
+	readonly includePaused?: boolean;
+	readonly canarySessionId?: string;
+	readonly waveSize?: number;
+	readonly nowMs?: number;
+	readonly id?: () => string;
+	readonly isProcessAlive?: (pid: number) => boolean;
+}
+
+export function isFleetOwnerProcessAlive(pid: number): boolean {
+	if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+function stateRank(peer: IrcExternalPeer): number {
+	return peer.state === "idle" ? 0 : peer.state === "waiting_input" || peer.state === "paused" ? 1 : 2;
+}
+
+function comparePeers(left: IrcExternalPeer, right: IrcExternalPeer): number {
+	return stateRank(left) - stateRank(right) || left.sessionId.localeCompare(right.sessionId);
+}
+
+function isMaterializedSessionJournal(sessionFile: string | undefined): boolean {
+	if (!sessionFile) return false;
+	try {
+		const stats = fsSync.statSync(sessionFile);
+		return stats.isFile() && stats.size > 0;
+	} catch {
+		return false;
+	}
+}
+
+function classifyPeer(
+	peer: IrcExternalPeer,
+	options: CreateFleetRolloutPlanOptions,
+): { readonly state: FleetTargetState; readonly reason?: string } {
+	if (options.initiatorSessionIds.has(peer.sessionId) || options.initiatorPids?.has(peer.pid)) {
+		return { state: "Classified", reason: "rollout initiator excluded" };
+	}
+	if (!isMaterializedSessionJournal(peer.sessionFile))
+		return { state: "BusyDeferred", reason: "durable session journal not materialized" };
+	if (!isIrcExternalPeerFresh(peer.lastSeen, options.nowMs))
+		return { state: "LegacyIncompatible", reason: "stale peer" };
+	const isProcessAlive = options.isProcessAlive ?? isFleetOwnerProcessAlive;
+	if (!isProcessAlive(peer.pid)) return { state: "BusyDeferred", reason: "owner process is not alive" };
+	const provenance = classifyFleetBuildProvenance(peer);
+	if (!provenance.valid) return { state: "LegacyIncompatible", reason: provenance.reason };
+	const compatibility = classifyFleetCompatibility(peer, options.compatibility);
+	if (compatibility.kind !== "compatible")
+		return { state: "LegacyIncompatible", reason: compatibility.reasons.join("; ") };
+	if (selectFleetRolloutFeature("prepare-rollout", options.compatibility, peer) === undefined) {
+		return { state: "LegacyIncompatible", reason: "prepare-rollout capability unavailable" };
+	}
+	if (!peer.ownerEpoch) return { state: "LegacyIncompatible", reason: "owner epoch unavailable" };
+	const pin = options.sessionPins?.get(peer.sessionId);
+	if (pin !== undefined && pin !== options.target.digest)
+		return { state: "PinnedElsewhere", reason: `pinned to ${pin}` };
+	if (!options.includePaused && (options.pausedSessionIds?.has(peer.sessionId) || peer.state === "paused")) {
+		return { state: "BusyDeferred", reason: "paused" };
+	}
+	if (peer.state === "working") return { state: "BusyDeferred", reason: "working peer is not safe to cordon" };
+	if (peer.state !== "idle" && peer.state !== "waiting_input" && !(options.includePaused && peer.state === "paused")) {
+		return { state: "BusyDeferred", reason: `unsafe peer state ${peer.state}` };
+	}
+	if (peer.buildDigest === options.target.digest) return { state: "Classified", reason: "already at target digest" };
+	return { state: "Classified" };
+}
+
+export function createFleetRolloutPlan(options: CreateFleetRolloutPlanOptions): FleetRolloutPlan {
+	const id = options.id ?? randomUUID;
+	const fleetRolloutId = options.fleetRolloutId ?? id();
+	const eligible: IrcExternalPeer[] = [];
+	const excluded: FleetRolloutTarget[] = [];
+	for (const peer of options.peers) {
+		const classification = classifyPeer(peer, options);
+		if (classification.state === "Classified" && classification.reason === undefined) eligible.push(peer);
+		else {
+			excluded.push({
+				targetId: peer.sessionId,
+				sessionId: peer.sessionId,
+				peer,
+				expectedOwnerEpoch: peer.ownerEpoch ?? "unavailable",
+				commandId: id(),
+				waveId: "excluded",
+				...classification,
+			});
+		}
+	}
+	eligible.sort(comparePeers);
+	if (options.canarySessionId !== undefined) {
+		const canaryIndex = eligible.findIndex(peer => peer.sessionId === options.canarySessionId);
+		if (canaryIndex < 0) throw new Error(`Explicit canary ${options.canarySessionId} is not an eligible target`);
+		const [canary] = eligible.splice(canaryIndex, 1);
+		if (canary) eligible.unshift(canary);
+	}
+	const waveSize = options.waveSize ?? 1;
+	if (!Number.isSafeInteger(waveSize) || waveSize < 1) throw new Error("Wave size must be a positive integer");
+	const waves: FleetRolloutWave[] = [];
+	const orderedTargets: FleetRolloutTarget[] = [];
+	for (let offset = 0; offset < eligible.length; ) {
+		const kind = offset === 0 ? "canary" : "rolling";
+		const take = kind === "canary" ? 1 : waveSize;
+		const waveId = id();
+		const targets = eligible.slice(offset, offset + take).map(peer => ({
+			targetId: peer.sessionId,
+			sessionId: peer.sessionId,
+			peer,
+			expectedOwnerEpoch: peer.ownerEpoch as string,
+			commandId: id(),
+			waveId,
+			state: "Classified" as const,
+		}));
+		waves.push({ waveId, kind, targets });
+		orderedTargets.push(...targets);
+		offset += take;
+	}
+	return {
+		fleetRolloutId,
+		target: options.target,
+		previousDigest: options.previousDigest,
+		waves,
+		excluded,
+		orderedTargets,
+		maxUnavailable: 1,
+	};
+}
+
+export interface FleetControllerJournal {
+	readonly appendCustomEntry: SessionManager["appendCustomEntry"];
+	readonly getEntries: SessionManager["getEntries"];
+	readonly getSessionId: SessionManager["getSessionId"];
+	readonly getSessionOwnership: SessionManager["getSessionOwnership"];
+}
+
+function appendFleetRecord(journal: FleetControllerJournal, record: FleetRolloutRecord): void {
+	journal.appendCustomEntry(FLEET_ROLLOUT_CUSTOM_TYPE, record);
+}
+
+export function fleetRolloutRecords(
+	journal: Pick<FleetControllerJournal, "getEntries">,
+	fleetRolloutId?: string,
+): FleetRolloutRecord[] {
+	const records: FleetRolloutRecord[] = [];
+	for (const entry of journal.getEntries()) {
+		if (entry.type !== "custom" || entry.customType !== FLEET_ROLLOUT_CUSTOM_TYPE) continue;
+		const record = entry.data as Partial<FleetRolloutRecord> | undefined;
+		if (record?.schemaVersion !== 1 || typeof record.fleetRolloutId !== "string") continue;
+		if (fleetRolloutId === undefined || record.fleetRolloutId === fleetRolloutId)
+			records.push(record as FleetRolloutRecord);
+	}
+	return records;
+}
+
+export interface FleetControllerLeaseClaim {
+	readonly ownerId: string;
+	readonly ownerEpoch: string;
+	readonly fleetRolloutId: string;
+}
+
+export class FleetControllerLease {
+	readonly #leaseFile: string;
+	readonly #claim: FleetControllerLeaseClaim;
+	#held = false;
+
+	constructor(root: string, claim: FleetControllerLeaseClaim) {
+		this.#leaseFile = path.join(root, "fleet-controller.lease");
+		this.#claim = claim;
+	}
+
+	async acquire(): Promise<
+		{ readonly acquired: true } | { readonly acquired: false; readonly holder: FleetControllerLeaseClaim }
+	> {
+		await fs.mkdir(path.dirname(this.#leaseFile), { recursive: true });
+		try {
+			await fs.writeFile(this.#leaseFile, JSON.stringify(this.#claim), { flag: "wx" });
+			this.#held = true;
+			return { acquired: true };
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			const holder = JSON.parse(await fs.readFile(this.#leaseFile, "utf8")) as FleetControllerLeaseClaim;
+			return { acquired: false, holder };
+		}
+	}
+
+	async release(): Promise<void> {
+		if (!this.#held) return;
+		this.#held = false;
+		await fs.rm(this.#leaseFile, { force: true });
+	}
+}
+
+export interface ExecuteFleetRolloutOptions {
+	readonly plan: FleetRolloutPlan;
+	readonly journal: FleetControllerJournal;
+	readonly rolloutIndex?: Pick<RolloutJournal, "beginRun" | "updatePeer">;
+	readonly listPeers: () => readonly IrcExternalPeer[];
+	readonly compatibility: FleetCompatibilityProfile;
+	readonly initiatorSessionIds: ReadonlySet<string>;
+	readonly sessionPins?: ReadonlyMap<string, string>;
+	readonly pausedSessionIds?: ReadonlySet<string>;
+	readonly includePaused?: boolean;
+	readonly executeTarget: (target: FleetRolloutTarget) => Promise<void>;
+	readonly reobserveTarget?: (target: FleetRolloutTarget) => Promise<void>;
+	readonly nowMs?: number;
+	readonly now?: () => string;
+	readonly isProcessAlive?: (pid: number) => boolean;
+}
+
+function controllerFields(journal: FleetControllerJournal): {
+	controllerSessionId: string;
+	controllerOwnerEpoch: string;
+} {
+	const ownership = journal.getSessionOwnership();
+	if (!ownership) throw new Error("Fleet controller journal is not bound to session ownership");
+	return { controllerSessionId: journal.getSessionId(), controllerOwnerEpoch: ownership.ownerEpoch };
+}
+
+function targetRecord(
+	options: ExecuteFleetRolloutOptions,
+	target: FleetRolloutTarget,
+	state: FleetRolloutTargetRecordState,
+	reason?: string,
+	failure?: FleetRolloutFailureReceipt,
+): FleetRolloutTargetRecord {
+	return {
+		schemaVersion: 1,
+		record: "target",
+		fleetRolloutId: options.plan.fleetRolloutId,
+		waveId: target.waveId,
+		targetId: target.targetId,
+		sessionId: target.sessionId,
+		commandId: target.commandId,
+		expectedOwnerEpoch: target.expectedOwnerEpoch,
+		targetDigest: options.plan.target.digest,
+		targetSource: options.plan.target.source,
+		recordedAt: (options.now ?? (() => new Date().toISOString()))(),
+		...controllerFields(options.journal),
+		state,
+		...(reason === undefined ? {} : { reason }),
+		...(failure === undefined ? {} : { failure }),
+	};
+}
+
+export async function executeFleetRolloutPlan(
+	options: ExecuteFleetRolloutOptions,
+): Promise<FleetRolloutExecutionResult> {
+	const completed: string[] = [];
+	const skipped: FleetRolloutSkipReceipt[] = [];
+	const transition = (target: FleetRolloutTarget, phase: "requested" | "skipped" | "applied" | "recovered" | "failed", detail?: { reason?: string; error?: string }): void => {
+		options.rolloutIndex?.updatePeer({
+			rolloutId: options.plan.fleetRolloutId,
+			sessionId: target.sessionId,
+			...(target.peer.sessionFile ? { sessionFile: target.peer.sessionFile } : {}),
+			name: target.peer.name,
+			phase,
+			...detail,
+		});
+	};
+	for (const excluded of options.plan.excluded)
+		appendFleetRecord(options.journal, targetRecord(options, excluded, excluded.state, excluded.reason));
+	for (let index = 0; index < options.plan.orderedTargets.length; index++) {
+		const planned = options.plan.orderedTargets[index] as FleetRolloutTarget;
+		const current = options.listPeers().find(peer => peer.sessionId === planned.sessionId);
+		const reclassified = current
+			? classifyPeer(current, {
+					peers: [],
+					target: options.plan.target,
+					previousDigest: options.plan.previousDigest,
+					compatibility: options.compatibility,
+					initiatorSessionIds: options.initiatorSessionIds,
+					sessionPins: options.sessionPins,
+					pausedSessionIds: options.pausedSessionIds,
+					includePaused: options.includePaused,
+					nowMs: options.nowMs,
+					isProcessAlive: options.isProcessAlive,
+				})
+			: { state: "BusyDeferred" as const, reason: "peer disappeared before command" };
+		const ownershipChanged =
+			current !== undefined &&
+			(current.ownerEpoch !== planned.expectedOwnerEpoch || current.pid !== planned.peer.pid);
+		if (!current || reclassified.state !== "Classified" || reclassified.reason !== undefined || ownershipChanged) {
+			const state = ownershipChanged ? "BusyDeferred" : reclassified.state;
+			const reason =
+				(ownershipChanged
+					? current.ownerEpoch !== planned.expectedOwnerEpoch
+						? "owner epoch changed before command"
+						: "owner process changed before command"
+					: reclassified.reason) ?? "target became ineligible before command";
+			appendFleetRecord(options.journal, targetRecord(options, planned, state, reason));
+			transition(planned, "skipped", { reason });
+			skipped.push({
+				targetId: planned.targetId,
+				sessionId: planned.sessionId,
+				phaseReached: state,
+				commandId: planned.commandId,
+				reason,
+			});
+			continue;
+		}
+		const priorRequest = fleetRolloutRecords(options.journal, options.plan.fleetRolloutId).some(
+			record =>
+				record.record === "target" &&
+				record.sessionId === planned.sessionId &&
+				record.commandId === planned.commandId &&
+				record.expectedOwnerEpoch === planned.expectedOwnerEpoch &&
+				record.state === "CordonRequested",
+		);
+		if (priorRequest && options.reobserveTarget === undefined) {
+			throw new Error(`Cannot re-observe previously requested command ${planned.commandId}`);
+		}
+		if (priorRequest) {
+			await options.reobserveTarget?.(planned);
+			completed.push(planned.sessionId);
+			continue;
+		}
+		appendFleetRecord(options.journal, targetRecord(options, planned, "CordonRequested"));
+		transition(planned, "requested");
+		try {
+			await options.executeTarget(planned);
+			completed.push(planned.sessionId);
+			transition(planned, "applied");
+			transition(planned, "recovered");
+		} catch (error) {
+			const recoverable = error instanceof FleetRolloutTargetError && error.recoverable;
+			const failure =
+				error instanceof FleetRolloutTargetError
+					? error.receipt
+					: {
+							targetId: planned.targetId,
+							sessionId: planned.sessionId,
+							phaseReached: "CordonRequested" as const,
+							awaitedCondition: "target lifecycle completion" as const,
+							commandId: planned.commandId,
+							timedOut: false,
+							buildVersion: planned.peer.version ?? "unknown/legacy",
+							buildDigest: planned.peer.buildDigest ?? planned.peer.fleetCapability?.buildDigest ?? "unknown/legacy",
+							cause: error instanceof Error ? error.message : String(error),
+						};
+			const terminalState = error instanceof FleetRolloutTargetError ? error.terminalState : "RestartFailed";
+			if (recoverable) {
+				const skip = {
+					targetId: planned.targetId,
+					sessionId: planned.sessionId,
+					phaseReached: failure.phaseReached,
+					...(failure.commandId === undefined ? {} : { commandId: failure.commandId }),
+					reason: failure.cause,
+				} satisfies FleetRolloutSkipReceipt;
+				appendFleetRecord(options.journal, targetRecord(options, planned, "BusyDeferred", skip.reason));
+				transition(planned, "skipped", { reason: skip.reason });
+				skipped.push(skip);
+				continue;
+			}
+			appendFleetRecord(options.journal, targetRecord(options, planned, terminalState, failure.cause, failure));
+			transition(planned, "failed", { error: failure.cause });
+			for (const later of options.plan.orderedTargets.slice(index + 1)) {
+				const reason = `frozen after ${planned.sessionId} failed`;
+				appendFleetRecord(options.journal, targetRecord(options, later, "Frozen", reason));
+				transition(later, "skipped", { reason });
+			}
+			return { state: "Frozen", completed, skipped, failures: [failure] };
+		}
+	}
+	return { state: "Succeeded", completed, skipped };
+}
+
+export interface StartFleetRolloutOptions
+	extends Omit<CreateFleetRolloutPlanOptions, "peers" | "target" | "previousDigest"> {
+	readonly journal: FleetControllerJournal;
+	readonly rolloutIndex?: Pick<RolloutJournal, "beginRun" | "updatePeer">;
+	readonly lease: FleetControllerLease;
+	readonly resolveTarget: ResolveFleetTargetOptions;
+	readonly inventory: FleetArtifactInventory;
+	readonly listPeers: () => readonly IrcExternalPeer[];
+	readonly targetVersion: string;
+	readonly now?: () => string;
+}
+
+export async function startFleetRollout(
+	options: StartFleetRolloutOptions,
+): Promise<
+	| { readonly mode: "active"; readonly plan: FleetRolloutPlan }
+	| { readonly mode: "read-only"; readonly reason: "plan superseded" }
+> {
+	const target = resolveFleetTarget(options.resolveTarget);
+	const { previousDigest } = await preflightFleetTarget(target, options.inventory);
+	const plan = createFleetRolloutPlan({ ...options, peers: options.listPeers(), target, previousDigest });
+	const common = {
+		schemaVersion: 1 as const,
+		fleetRolloutId: plan.fleetRolloutId,
+		targetDigest: target.digest,
+		targetSource: target.source,
+		recordedAt: (options.now ?? (() => new Date().toISOString()))(),
+		...controllerFields(options.journal),
+	};
+	const lease = await options.lease.acquire();
+	if (!lease.acquired) {
+		appendFleetRecord(options.journal, {
+			...common,
+			record: "plan-superseded",
+			state: "PlanSuperseded",
+			leaseHolderId: lease.holder.ownerId,
+		});
+		return { mode: "read-only", reason: "plan superseded" };
+	}
+	appendFleetRecord(options.journal, {
+		...common,
+		record: "intent",
+		state: "Requested",
+		previousDigest,
+		maxUnavailable: 1,
+	});
+	options.rolloutIndex?.beginRun({
+		rolloutId: plan.fleetRolloutId,
+		targetDigest: target.digest,
+		targetVersion: options.targetVersion,
+		startedAt: common.recordedAt,
+	});
+	for (const targetPlan of [...plan.excluded, ...plan.orderedTargets]) {
+		options.rolloutIndex?.updatePeer({
+			rolloutId: plan.fleetRolloutId,
+			sessionId: targetPlan.sessionId,
+			...(targetPlan.peer.sessionFile ? { sessionFile: targetPlan.peer.sessionFile } : {}),
+			name: targetPlan.peer.name,
+			phase: targetPlan.state === "Classified" ? "planned" : "skipped",
+			...(targetPlan.reason === undefined ? {} : { reason: targetPlan.reason }),
+		});
+	}
+	return { mode: "active", plan };
+}

@@ -1,10 +1,12 @@
 import type {
+	AssistantMessage,
 	ImageContent,
 	Message,
 	MessageAttribution,
 	ProviderPayload,
 	TextContent,
 	ToolResultMessage,
+	UserContent,
 } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import type { AgentMessage } from "../types";
@@ -17,7 +19,7 @@ const BRANCH_SUMMARY_TEMPLATE = branchSummaryContextPrompt;
 export interface CustomMessage<T = unknown> {
 	role: "custom";
 	customType: string;
-	content: string | (TextContent | ImageContent)[];
+	content: string | UserContent[];
 	display: boolean;
 	details?: T;
 	/** Who initiated this message for billing/attribution semantics. */
@@ -29,7 +31,7 @@ export interface CustomMessage<T = unknown> {
 export interface HookMessage<T = unknown> {
 	role: "hookMessage";
 	customType: string;
-	content: string | (TextContent | ImageContent)[];
+	content: string | UserContent[];
 	display: boolean;
 	details?: T;
 	/** Who initiated this message for billing/attribution semantics. */
@@ -50,11 +52,7 @@ export interface CompactionSummaryMessage {
 	shortSummary?: string;
 	tokensBefore: number;
 	providerPayload?: ProviderPayload;
-	/** Runtime-only ordered archive blocks for snapcompact: old text region,
-	 *  imaged middle, then new text region. When present, `summary` is already
-	 *  the final lead-in text (no legacy wrapper applied). */
-	blocks?: (TextContent | ImageContent)[];
-	/** Snapcompact image blocks, kept for display counts / legacy consumers. */
+	/** Snapcompact frames archived by this compaction; appended as image blocks after the summary text. */
 	images?: ImageContent[];
 	timestamp: number;
 }
@@ -104,26 +102,21 @@ export function createCompactionSummaryMessage(
 	shortSummary?: string,
 	providerPayload?: ProviderPayload,
 	images?: ImageContent[],
-	blocks?: (TextContent | ImageContent)[],
 ): CompactionSummaryMessage {
-	const imageBlocks =
-		blocks?.filter((block): block is ImageContent => block.type === "image") ??
-		(images && images.length > 0 ? images : undefined);
 	return {
 		role: "compactionSummary",
 		summary,
 		shortSummary,
 		tokensBefore,
 		providerPayload,
-		blocks: blocks && blocks.length > 0 ? blocks : undefined,
-		images: imageBlocks && imageBlocks.length > 0 ? imageBlocks : undefined,
+		images: images && images.length > 0 ? images : undefined,
 		timestamp: new Date(timestamp).getTime(),
 	};
 }
 
 export function createCustomMessage(
 	customType: string,
-	content: string | (TextContent | ImageContent)[],
+	content: string | UserContent[],
 	display: boolean,
 	details: unknown | undefined,
 	timestamp: string,
@@ -190,16 +183,13 @@ export function convertMessageToLlm(message: AgentMessage): Message | undefined 
 			case "compactionSummary":
 				return {
 					role: "user",
-					content:
-						message.blocks !== undefined
-							? [{ type: "text" as const, text: message.summary }, ...message.blocks]
-							: [
-									{
-										type: "text" as const,
-										text: renderCompactionSummaryContext(message.summary),
-									},
-									...(message.images ?? []),
-								],
+					content: [
+						{
+							type: "text" as const,
+							text: renderCompactionSummaryContext(message.summary),
+						},
+						...(message.images ?? []),
+					],
 					attribution: "agent",
 					providerPayload: message.providerPayload,
 					timestamp: message.timestamp,
@@ -213,7 +203,7 @@ export function convertMessageToLlm(message: AgentMessage): Message | undefined 
 		case "developer":
 			return { ...message, attribution: message.attribution ?? "agent" };
 		case "assistant":
-			return message;
+			return message as AssistantMessage;
 		case "toolResult":
 			return {
 				...message,

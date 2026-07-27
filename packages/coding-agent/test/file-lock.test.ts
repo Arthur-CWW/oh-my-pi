@@ -3,7 +3,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { __internalsForTesting, withFileLock } from "@oh-my-pi/pi-coding-agent/config/file-lock";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 const { tryAcquireLock, releaseLock, readLockInfo, isLockStale, getLockPath } = __internalsForTesting;
 
@@ -17,7 +16,7 @@ async function mkRoot(): Promise<string> {
 
 afterAll(async () => {
 	for (const root of ROOTS) {
-		await removeWithRetries(root).catch(() => {});
+		await fs.rm(root, { recursive: true, force: true }).catch(() => {});
 	}
 });
 
@@ -56,7 +55,7 @@ describe("file-lock token ownership (F1)", () => {
 		const stale = await isLockStale(lockPath, 10_000);
 		expect(stale).toBe(false);
 
-		await removeWithRetries(lockPath);
+		await fs.rm(lockPath, { recursive: true });
 	});
 
 	test("withFileLock serializes N concurrent writers without lost updates", async () => {

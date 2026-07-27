@@ -5,14 +5,15 @@ import * as path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
-import type { ModelRegistry, ProviderDiscoveryState } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import type { ProviderDiscoveryState } from "@oh-my-pi/pi-coding-agent/config/model-availability";
+import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { ModelRegistry as ModelRegistryImpl } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ModelSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { TUI } from "@oh-my-pi/pi-tui";
-import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { Snowflake } from "@oh-my-pi/pi-utils";
 
 function normalizeRenderedText(text: string): string {
 	return stripVTControlCharacters(text).replace(/\s+/g, " ").trim();
@@ -33,11 +34,19 @@ async function createSelector(state: ProviderDiscoveryState): Promise<ModelSelec
 		refreshProvider: async () => {},
 		getError: () => undefined,
 		getAvailable: () => [],
+		getAvailabilitySnapshot: () => ({
+			generation: 1,
+			models: [],
+			refreshingProviders: [],
+			staleProviders: [],
+		}),
+		onAvailabilityChanged: () => () => {},
 		getAll: () => [],
 		getDiscoverableProviders: () => [state.provider],
+		getCanonicalModelSelections: () => [],
 		getProviderDiscoveryState: () => state,
 	} as unknown as ModelRegistry;
-	const ui = { requestRender: vi.fn() } as unknown as TUI;
+	const ui = { requestRender: vi.fn(), requestComponentRender: vi.fn() } as unknown as TUI;
 	const selector = new ModelSelectorComponent(
 		ui,
 		undefined,
@@ -49,6 +58,7 @@ async function createSelector(state: ProviderDiscoveryState): Promise<ModelSelec
 	);
 	await Bun.sleep(0);
 	installTestTheme();
+	selector.handleInput("\x1b[C");
 	selector.handleInput("\x1b[C");
 	await Bun.sleep(0);
 	return selector;
@@ -76,7 +86,7 @@ describe("issue #970 custom provider discovery", () => {
 	afterEach(() => {
 		authStorage.close();
 		if (tempDir && fs.existsSync(tempDir)) {
-			removeSyncWithRetries(tempDir);
+			fs.rmSync(tempDir, { recursive: true });
 		}
 	});
 
@@ -111,7 +121,7 @@ describe("issue #970 custom provider discovery", () => {
 			const headers = init?.headers as Headers | Record<string, string> | undefined;
 			const authHeader = headers instanceof Headers ? headers.get("Authorization") : headers?.Authorization;
 			expect(authHeader).toBe("Bearer sk-1234");
-			return new Response(JSON.stringify({ data: [{ id: "qwen3.6" }, { id: "vllm-lab-fork-b2" }] }), {
+			return new Response(JSON.stringify({ data: [{ id: "qwen3.6" }, { id: "deepseek-r1" }] }), {
 				status: 200,
 				headers: { "Content-Type": "application/json" },
 			});
@@ -121,7 +131,7 @@ describe("issue #970 custom provider discovery", () => {
 		await registry.refreshProvider("vllm");
 
 		const providerModels = registry.getAll().filter(model => model.provider === "vllm");
-		expect(providerModels.map(model => model.id).sort()).toEqual(["qwen3.6", "vllm-lab-fork-b2"]);
+		expect(providerModels.map(model => model.id).sort()).toEqual(["deepseek-r1", "qwen3.6"]);
 		expect(registry.getProviderDiscoveryState("vllm")?.status).toBe("ok");
 
 		const qwen = registry.find("vllm", "qwen3.6");
@@ -131,10 +141,10 @@ describe("issue #970 custom provider discovery", () => {
 		expect(qwen?.contextWindow).toBe(128000);
 		expect(qwen?.maxTokens).toBe(8192);
 
-		const deepseek = registry.find("vllm", "vllm-lab-fork-b2");
+		const deepseek = registry.find("vllm", "deepseek-r1");
 		expect(deepseek?.api).toBe("openai-completions");
 		expect(deepseek?.provider).toBe("vllm");
-		expect(deepseek?.name).toBe("vllm-lab-fork-b2");
+		expect(deepseek?.name).toBe("deepseek-r1");
 		expect(deepseek?.contextWindow).toBe(128000);
 		expect(deepseek?.maxTokens).toBe(32_768);
 	});
@@ -195,13 +205,13 @@ describe("issue #970 custom provider discovery", () => {
 		const fetchMock: (input: string | URL | Request) => Promise<Response> = async input => {
 			const url = String(input);
 			if (url === "http://192.168.5.3:8085/v1/models") {
-				return new Response(JSON.stringify({ data: [{ id: "vllm-lab-fork-flash", max_model_len: 262_144 }] }), {
+				return new Response(JSON.stringify({ data: [{ id: "DeepSeek-V4-Flash", max_model_len: 262_144 }] }), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },
 				});
 			}
 			if (url === "http://192.168.5.4:8085/v1/models") {
-				return new Response(JSON.stringify({ data: [{ id: "vllm-lab-fork-long", context_length: "1048576" }] }), {
+				return new Response(JSON.stringify({ data: [{ id: "DeepSeek-V4-Long", context_length: "1048576" }] }), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },
 				});
@@ -213,10 +223,10 @@ describe("issue #970 custom provider discovery", () => {
 		await registry.refreshProvider("vllm-fast");
 		await registry.refreshProvider("vllm-long");
 
-		const fast = registry.find("vllm-fast", "vllm-lab-fork-flash");
+		const fast = registry.find("vllm-fast", "DeepSeek-V4-Flash");
 		expect(fast?.contextWindow).toBe(262_144);
 		expect(fast?.maxTokens).toBe(32_768);
-		const long = registry.find("vllm-long", "vllm-lab-fork-long");
+		const long = registry.find("vllm-long", "DeepSeek-V4-Long");
 		expect(long?.contextWindow).toBe(1_048_576);
 		expect(long?.maxTokens).toBe(32_768);
 		expect(registry.getProviderDiscoveryState("vllm-fast")?.status).toBe("ok");
@@ -467,51 +477,5 @@ describe("issue #970 custom provider discovery", () => {
 		await registry.refreshProvider("vllm");
 
 		expect(registry.getProviderDiscoveryState("vllm")?.status).toBe("ok");
-	});
-
-	test("does not send llama.cpp-local placeholder as discovery bearer", async () => {
-		fs.writeFileSync(
-			modelsPath,
-			[
-				"providers:",
-				"  llama.cpp:",
-				"    baseUrl: http://127.0.0.1:8080",
-				"    apiKey: llama-cpp-local",
-				"    api: openai-responses",
-				"    discovery:",
-				"      type: llama.cpp",
-			].join("\n"),
-		);
-
-		const fetchMock: (input: string | URL | Request, init?: RequestInit) => Promise<Response> = async (
-			input,
-			init,
-		) => {
-			const url = String(input);
-			if (url === "http://127.0.0.1:8080/props") {
-				const headers = init?.headers as Headers | Record<string, string> | undefined;
-				const authHeader = headers instanceof Headers ? headers.get("Authorization") : headers?.Authorization;
-				expect(authHeader).toBeUndefined();
-				return new Response(JSON.stringify({ default_generation_settings: { n_ctx: 8192 } }), {
-					status: 200,
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-			if (url !== "http://127.0.0.1:8080/models") {
-				throw new Error(`Unexpected URL: ${url}`);
-			}
-			const headers = init?.headers as Headers | Record<string, string> | undefined;
-			const authHeader = headers instanceof Headers ? headers.get("Authorization") : headers?.Authorization;
-			expect(authHeader).toBeUndefined();
-			return new Response(JSON.stringify({ data: [{ id: "local-llama" }] }), {
-				status: 200,
-				headers: { "Content-Type": "application/json" },
-			});
-		};
-
-		const registry = new ModelRegistryImpl(authStorage, modelsPath, { fetch: fetchMock });
-		await registry.refreshProvider("llama.cpp");
-
-		expect(registry.getProviderDiscoveryState("llama.cpp")?.status).toBe("ok");
 	});
 });

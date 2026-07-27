@@ -1,4 +1,4 @@
-import { type AsciiRenderOptions, renderMermaidASCII } from "./vendor/mermaid-ascii";
+import { type AsciiRenderOptions, renderMermaidASCII } from "beautiful-mermaid";
 
 export type { AsciiRenderOptions as MermaidAsciiRenderOptions };
 

@@ -12,7 +12,7 @@
  * test/task/task-schema.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { type AsyncJob, AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
+import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -29,13 +29,18 @@ const taskAgent: AgentDefinition = {
 	source: "bundled",
 };
 
-function createSession(options: { manager?: AsyncJobManager; settings?: Record<string, unknown> }): ToolSession {
+function createSession(options: {
+	manager?: AsyncJobManager;
+	settings?: Record<string, unknown>;
+	agentId?: string;
+}): ToolSession {
 	return {
 		cwd: "/tmp",
 		hasUI: false,
 		settings: Settings.isolated(options.settings ?? {}),
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
+		getAgentId: () => options.agentId,
 		asyncJobManager: options.manager,
 	} as unknown as ToolSession;
 }
@@ -72,6 +77,24 @@ interface Deferred {
 function deferred(): Deferred {
 	const { promise, resolve } = Promise.withResolvers<void>();
 	return { promise, resolve };
+}
+
+function registerRevivableParked(id: string): void {
+	AgentRegistry.global().register({
+		id,
+		displayName: id,
+		kind: "sub",
+		parentId: "Main",
+		session: null,
+		sessionFile: `/tmp/${id}.jsonl`,
+		status: "parked",
+	});
+	AgentLifecycleManager.global().adopt(id, {
+		idleTtlMs: 0,
+		revive: async () => {
+			throw new Error("revive should not run in this test");
+		},
+	});
 }
 
 async function pollUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
@@ -113,11 +136,13 @@ describe("task spawn routing", () => {
 		const gate = deferred();
 		const runSpy = vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
 			await gate.promise;
-			return makeResult(options.id ?? "?");
+			const id = options.id ?? "?";
+			registerRevivableParked(id);
+			return makeResult(id);
 		});
 
 		const manager = createManager();
-		const tool = await TaskTool.create(createSession({ manager }));
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
 
 		const result = await tool.execute("tc-spawn", {
 			agent: "task",
@@ -135,17 +160,215 @@ describe("task spawn routing", () => {
 		const job = manager.getJob(jobId!);
 		expect(job?.status).toBe("running");
 		expect(job?.resultText).toBeUndefined();
+		expect(job?.group).toEqual({ groupId: "Main", topology: "flat", reporting: "main" });
 
 		gate.resolve();
 		await job!.promise;
 
 		expect(job!.status).toBe("completed");
-		expect(job!.resultText).toContain("Spawnling is now idle");
-		expect(job!.resultText).toContain("message it via `irc` to follow up");
+		expect(job!.resultText).toContain("Spawnling remains addressable after this job");
+		expect(job!.resultText).toContain('op:"send", to:"Spawnling"');
 		expect(job!.resultText).toContain("history://Spawnling");
 		expect(runSpy).toHaveBeenCalledTimes(1);
+		expect(runSpy.mock.calls[0]?.[0]?.parentAgentId).toBe("Main");
 	});
 
+	it("refuses a NameResume duplicate when the parked agent can be revived", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		const runSpy = vi.spyOn(executorModule, "runSubprocess");
+		const registry = AgentRegistry.global();
+		registry.register({
+			id: "Foo",
+			displayName: "Foo",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			sessionFile: "/tmp/Foo.jsonl",
+			status: "parked",
+		});
+		AgentLifecycleManager.global().adopt("Foo", {
+			idleTtlMs: 0,
+			revive: async () => {
+				throw new Error("revive should not run during duplicate detection");
+			},
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-resume-duplicate", {
+			agent: "task",
+			id: "FooResume",
+			assignment: "Continue Foo's work.",
+		} as TaskParams);
+
+		const text = getFirstText(result);
+		expect(text).toContain("Spawn refused");
+		expect(text).toContain("existing agent `Foo` (parked, revivable)");
+		expect(text).toContain('op:"send", to:"Foo"');
+		expect(text).toContain("history://Foo");
+		expect(text).toContain("resumes it in place with context intact");
+		expect(runSpy).not.toHaveBeenCalled();
+		expect(manager.getAllJobs()).toHaveLength(0);
+	});
+
+	it("refuses an exact revivable id instead of silently allocating a dedupe suffix", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		const registry = AgentRegistry.global();
+		registry.register({
+			id: "Foo",
+			displayName: "Foo",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			sessionFile: "/tmp/Foo.jsonl",
+			status: "parked",
+		});
+		AgentLifecycleManager.global().adopt("Foo", {
+			idleTtlMs: 0,
+			revive: async () => {
+				throw new Error("revive should not run during duplicate detection");
+			},
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-exact-duplicate", {
+			agent: "task",
+			id: "Foo",
+			assignment: "Repeat Foo's work.",
+		} as TaskParams);
+
+		const text = getFirstText(result);
+		expect(text).toContain("Spawn refused");
+		expect(text).toContain("agent `Foo` is the same id as existing agent `Foo`");
+		expect(text).not.toContain("Foo-2");
+		expect(manager.getAllJobs()).toHaveLength(0);
+	});
+
+	it("warns on a running exact match and allocates around its live registry id", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => makeResult(options.id ?? "?"));
+		AgentRegistry.global().register({
+			id: "Foo",
+			displayName: "Foo",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			status: "running",
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-running-duplicate", {
+			agent: "task",
+			id: "Foo",
+			assignment: "Repeat Foo's work.",
+		} as TaskParams);
+
+		const text = getFirstText(result);
+		expect(text).toContain("Spawned agent `Foo-2`");
+		expect(text).toContain("running agent `Foo`");
+		expect(text).toContain("duplicates live work");
+		expect(text).toContain('op:"send", to:"Foo"');
+		await manager.getJob(result.details!.async!.jobId)!.promise;
+	});
+
+	it("delivers resume-in-place guidance when a started task job fails", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			const id = options.id ?? "?";
+			registerRevivableParked(id);
+			return makeResult(id, {
+				exitCode: 1,
+				output: "Worker failed.",
+				error: "provider failed",
+			});
+		});
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-failed-delivery", {
+			agent: "task",
+			id: "FailingWorker",
+			assignment: "Attempt the work.",
+		} as TaskParams);
+		const job = manager.getJob(result.details!.async!.jobId)!;
+		await job.promise;
+
+		expect(job.status).toBe("failed");
+		expect(job.errorText).toContain("FailingWorker remains addressable after this job");
+		expect(job.errorText).toContain('op:"send", to:"FailingWorker"');
+		expect(job.errorText).toContain("resume it in place with context intact");
+		expect(job.errorText).toContain("history://FailingWorker");
+	});
+
+	it("delivers transcript salvage guidance when a failed agent is no longer addressable", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options =>
+			makeResult(options.id ?? "?", {
+				exitCode: 1,
+				output: "Worker terminated.",
+				error: "cancelled",
+			}),
+		);
+
+		const manager = createManager();
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-terminated-delivery", {
+			agent: "task",
+			id: "TerminatedWorker",
+			assignment: "Attempt the work.",
+		} as TaskParams);
+		const job = manager.getJob(result.details!.async!.jobId)!;
+		await job.promise;
+
+		expect(job.status).toBe("failed");
+		expect(job.errorText).toContain("TerminatedWorker is no longer addressable");
+		expect(job.errorText).toContain("Salvage its transcript at history://TerminatedWorker");
+		expect(job.errorText).not.toContain('op:"send", to:"TerminatedWorker"');
+	});
+
+	it("derives a supervised group snapshot from nested registry parentage", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		const registry = AgentRegistry.global();
+		registry.register({ id: "Hub", displayName: "Hub", kind: "sub", parentId: "Main", session: null });
+		registry.register({ id: "Leaf", displayName: "Leaf", kind: "sub", parentId: "Hub", session: null });
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => makeResult(options.id ?? "?"));
+
+		const manager = createManager();
+		manager.configureGroup("Hub", { topology: "supervised", reporting: "hub" });
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Leaf" }));
+		const result = await tool.execute("tc-nested", {
+			agent: "task",
+			id: "Nested",
+			assignment: "Do the nested thing.",
+		} as TaskParams);
+
+		expect(manager.getJob(result.details!.async!.jobId)?.group).toEqual({
+			groupId: "Hub",
+			coordinatorId: "Leaf",
+			topology: "supervised",
+			reporting: "hub",
+		});
+	});
 	it("bounds concurrent job bodies with the session spawn semaphore", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
@@ -188,260 +411,66 @@ describe("task spawn routing", () => {
 		expect(secondJob.status).toBe("completed");
 	});
 
-	it("settles a cancelled spawn while it is queued behind the semaphore", async () => {
+	it("reserves a starting identity before the gated job body builds a session", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
 			projectAgentsDir: null,
 		});
-		const started: string[] = [];
-		const gates = new Map<string, Deferred>();
+		const gate = deferred();
 		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			const id = options.id ?? "?";
-			started.push(id);
-			const gate = deferred();
-			gates.set(id, gate);
 			await gate.promise;
+			const id = options.id ?? "?";
+			registerRevivableParked(id);
 			return makeResult(id);
 		});
 
 		const manager = createManager();
-		const tool = await TaskTool.create(createSession({ manager, settings: { "task.maxConcurrency": 1 } }));
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-starting", {
+			agent: "task",
+			id: "Queued",
+			assignment: "Do the queued thing.",
+		} as TaskParams);
 
-		const first = await tool.execute("tc-1", { agent: "task", id: "First", assignment: "Work A." } as TaskParams);
-		const second = await tool.execute("tc-2", { agent: "task", id: "Second", assignment: "Work B." } as TaskParams);
-		const firstJob = manager.getJob(first.details!.async!.jobId)!;
-		const secondJob = manager.getJob(second.details!.async!.jobId)!;
+		// The tool has returned while the job body is still gated inside the
+		// executor, so the child has not built a session yet — but its identity
+		// is reserved as durable `starting` work rather than reported unknown.
+		const ref = AgentRegistry.global().get("Queued");
+		expect(ref).toBeDefined();
+		expect(ref?.starting).toBe(true);
+		expect(ref?.session).toBeNull();
+		expect(ref?.status).toBe("running");
+		expect(AgentRegistry.global().get("NeverSpawned")).toBeUndefined();
 
-		await pollUntil(() => started.length === 1);
-		expect(started).toEqual(["First"]);
-		expect(secondJob.queued).toBe(true);
-
-		expect(manager.cancel(secondJob.id)).toBe(true);
-		const queuedResult = await Promise.race([
-			secondJob.promise.then(() => "settled" as const),
-			Bun.sleep(75).then(() => "timeout" as const),
-		]);
-
-		gates.get("First")!.resolve();
-		await firstJob.promise;
-		await secondJob.promise;
-
-		expect(queuedResult).toBe("settled");
-		expect(started).toEqual(["First"]);
-		expect(secondJob.status).toBe("cancelled");
+		gate.resolve();
+		await manager.getJob(result.details!.async!.jobId)!.promise;
+		// Coming live clears the reserve flag (here the executor parks it).
+		expect(AgentRegistry.global().get("Queued")?.starting).toBeFalsy();
 	});
 
-	it("keeps the concurrency cap intact when a queued spawn is cancelled (no permit leak)", async () => {
+	it("finalizes a failed-startup identity as terminal, keeping it inspectable not unknown", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [taskAgent],
 			projectAgentsDir: null,
 		});
-		const started: string[] = [];
-		const gates = new Map<string, Deferred>();
-		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			const id = options.id ?? "?";
-			started.push(id);
-			const gate = deferred();
-			gates.set(id, gate);
-			await gate.promise;
-			return makeResult(id);
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async () => {
+			throw new Error("provider blocked before the session was built");
 		});
 
 		const manager = createManager();
-		const tool = await TaskTool.create(createSession({ manager, settings: { "task.maxConcurrency": 1 } }));
+		const tool = await TaskTool.create(createSession({ manager, agentId: "Main" }));
+		const result = await tool.execute("tc-start-fail", {
+			agent: "task",
+			id: "StartupFailer",
+			assignment: "Attempt the work.",
+		} as TaskParams);
+		await manager.getJob(result.details!.async!.jobId)!.promise;
 
-		// A holds the only permit, gated inside the executor.
-		const first = await tool.execute("tc-1", { agent: "task", id: "First", assignment: "Work A." } as TaskParams);
-		const firstJob = manager.getJob(first.details!.async!.jobId)!;
-		await pollUntil(() => started.length === 1);
-
-		// B parks at the semaphore, then is cancelled while queued. Its
-		// teardown must NOT release a permit it never acquired.
-		const second = await tool.execute("tc-2", { agent: "task", id: "Second", assignment: "Work B." } as TaskParams);
-		const secondJob = manager.getJob(second.details!.async!.jobId)!;
-		expect(secondJob.queued).toBe(true);
-		expect(manager.cancel(secondJob.id)).toBe(true);
-		await secondJob.promise;
-		expect(secondJob.status).toBe("cancelled");
-
-		// C must stay parked while A still holds the cap. A phantom release
-		// from B's cancellation would admit C here, running 2 bodies at cap 1.
-		const third = await tool.execute("tc-3", { agent: "task", id: "Third", assignment: "Work C." } as TaskParams);
-		const thirdJob = manager.getJob(third.details!.async!.jobId)!;
-		await Bun.sleep(50);
-		expect(started).toEqual(["First"]);
-		expect(thirdJob.queued).toBe(true);
-
-		// A finishing admits C — the cap still cycles normally.
-		gates.get("First")!.resolve();
-		await firstJob.promise;
-		await pollUntil(() => started.length === 2);
-		expect(started).toEqual(["First", "Third"]);
-
-		// D queued behind running C stays serialized: if B's teardown had
-		// double-released, two permits would be free and D would start now.
-		const fourth = await tool.execute("tc-4", { agent: "task", id: "Fourth", assignment: "Work D." } as TaskParams);
-		const fourthJob = manager.getJob(fourth.details!.async!.jobId)!;
-		await Bun.sleep(50);
-		expect(started).toEqual(["First", "Third"]);
-		expect(fourthJob.queued).toBe(true);
-
-		gates.get("Third")!.resolve();
-		await thirdJob.promise;
-		await pollUntil(() => started.length === 3);
-		gates.get("Fourth")!.resolve();
-		await fourthJob.promise;
-
-		expect(started).toEqual(["First", "Third", "Fourth"]);
-		expect(firstJob.status).toBe("completed");
-		expect(thirdJob.status).toBe("completed");
-		expect(fourthJob.status).toBe("completed");
-	});
-
-	for (const maxConcurrency of [0, 0.5]) {
-		it(`runs spawn job bodies unbounded when task.maxConcurrency is ${maxConcurrency}`, async () => {
-			vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-				agents: [taskAgent],
-				projectAgentsDir: null,
-			});
-			const started: string[] = [];
-			const gates = new Map<string, Deferred>();
-			vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-				const id = options.id ?? "?";
-				started.push(id);
-				const gate = deferred();
-				gates.set(id, gate);
-				await gate.promise;
-				return makeResult(id);
-			});
-
-			const manager = createManager();
-			const tool = await TaskTool.create(
-				createSession({ manager, settings: { "task.maxConcurrency": maxConcurrency } }),
-			);
-
-			const first = await tool.execute("tc-1", { agent: "task", id: "First", assignment: "Work A." } as TaskParams);
-			const second = await tool.execute("tc-2", {
-				agent: "task",
-				id: "Second",
-				assignment: "Work B.",
-			} as TaskParams);
-			const third = await tool.execute("tc-3", { agent: "task", id: "Third", assignment: "Work C." } as TaskParams);
-
-			// All three job bodies clear the spawn semaphore in parallel — none stays queued.
-			await pollUntil(() => started.length === 3);
-			expect(started.sort()).toEqual(["First", "Second", "Third"]);
-
-			for (const id of ["First", "Second", "Third"]) gates.get(id)!.resolve();
-			await Promise.all([
-				manager.getJob(first.details!.async!.jobId)!.promise,
-				manager.getJob(second.details!.async!.jobId)!.promise,
-				manager.getJob(third.details!.async!.jobId)!.promise,
-			]);
-		});
-	}
-
-	it("re-reads task.maxConcurrency on each spawn so a mid-session change applies on the next acquire", async () => {
-		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-			agents: [taskAgent],
-			projectAgentsDir: null,
-		});
-		const started: string[] = [];
-		const gates = new Map<string, Deferred>();
-		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			const id = options.id ?? "?";
-			started.push(id);
-			const gate = deferred();
-			gates.set(id, gate);
-			await gate.promise;
-			return makeResult(id);
-		});
-
-		const manager = createManager();
-		const settings = Settings.isolated({ "task.maxConcurrency": 4 });
-		const tool = await TaskTool.create({
-			cwd: "/tmp",
-			hasUI: false,
-			settings,
-			getSessionFile: () => null,
-			getSessionSpawns: () => "*",
-			asyncJobManager: manager,
-		} as unknown as ToolSession);
-
-		// Prime the semaphore at the initial high cap.
-		const first = await tool.execute("tc-1", { agent: "task", id: "First", assignment: "Work A." } as TaskParams);
-		await pollUntil(() => started.length === 1);
-
-		// Tighten the cap mid-session. The next spawn MUST see the new ceiling.
-		settings.override("task.maxConcurrency", 1);
-		const second = await tool.execute("tc-2", { agent: "task", id: "Second", assignment: "Work B." } as TaskParams);
-		const secondJob = manager.getJob(second.details!.async!.jobId)!;
-
-		// First is still running (and holding the only slot under the new cap),
-		// so Second is parked at the semaphore — queued, not running.
-		expect(started).toEqual(["First"]);
-		expect(secondJob.queued).toBe(true);
-
-		// Releasing First admits Second.
-		gates.get("First")!.resolve();
-		await manager.getJob(first.details!.async!.jobId)!.promise;
-		await pollUntil(() => started.length === 2);
-		expect(started).toEqual(["First", "Second"]);
-
-		gates.get("Second")!.resolve();
-		await secondJob.promise;
-	});
-
-	it("applies a lowered maxConcurrency to work already queued in the semaphore", async () => {
-		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-			agents: [taskAgent],
-			projectAgentsDir: null,
-		});
-		const started: string[] = [];
-		const gates = new Map<string, Deferred>();
-		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			const id = options.id ?? "?";
-			started.push(id);
-			const gate = deferred();
-			gates.set(id, gate);
-			await gate.promise;
-			return makeResult(id);
-		});
-
-		const manager = createManager();
-		const settings = Settings.isolated({ "task.maxConcurrency": 4 });
-		const tool = await TaskTool.create({
-			cwd: "/tmp",
-			hasUI: false,
-			settings,
-			getSessionFile: () => null,
-			getSessionSpawns: () => "*",
-			asyncJobManager: manager,
-		} as unknown as ToolSession);
-
-		const jobs: AsyncJob[] = [];
-		for (const id of ["First", "Second", "Third", "Fourth", "Fifth"]) {
-			const result = await tool.execute(`tc-${id}`, { agent: "task", id, assignment: `Work ${id}.` } as TaskParams);
-			jobs.push(manager.getJob(result.details!.async!.jobId)!);
-		}
-		const fifthJob = jobs[4]!;
-
-		await pollUntil(() => started.length === 4);
-		expect([...started].sort()).toEqual(["First", "Fourth", "Second", "Third"]);
-		expect(fifthJob.queued).toBe(true);
-
-		settings.override("task.maxConcurrency", 1);
-		gates.get("First")!.resolve();
-		await jobs[0]!.promise;
-		await Promise.resolve();
-		expect([...started].sort()).toEqual(["First", "Fourth", "Second", "Third"]);
-		expect(fifthJob.queued).toBe(true);
-
-		for (const id of ["Second", "Third", "Fourth"]) gates.get(id)!.resolve();
-		await pollUntil(() => started.length === 5);
-		expect([...started].sort()).toEqual(["Fifth", "First", "Fourth", "Second", "Third"]);
-
-		gates.get("Fifth")!.resolve();
-		await Promise.all(jobs.map(job => job.promise));
+		// The reserved identity is never lost: it stays registered (known) and
+		// terminal (aborted), not a phantom `starting` row and not unknown.
+		const ref = AgentRegistry.global().get("StartupFailer");
+		expect(ref).toBeDefined();
+		expect(ref?.status).toBe("aborted");
+		expect(ref?.starting).toBeFalsy();
 	});
 });

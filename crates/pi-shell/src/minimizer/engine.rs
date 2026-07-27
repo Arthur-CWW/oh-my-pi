@@ -62,6 +62,7 @@ pub fn mode_for(command: &str, config: &MinimizerConfig) -> MinimizerMode {
 }
 
 /// Return true when the command should be captured for minimization.
+#[allow(dead_code, reason = "test-only API surface")]
 #[must_use]
 pub fn should_minimize(command: &str, config: &MinimizerConfig) -> bool {
 	!matches!(mode_for(command, config), MinimizerMode::None)
@@ -483,12 +484,14 @@ fn record_unknown_command(_command: &str) {
 
 /// Total number of commands that fell through `apply` without any matching
 /// filter. Useful for a "coverage gap" indicator in telemetry dashboards.
+#[allow(dead_code, reason = "test-only API surface")]
 pub fn unknown_command_count() -> u64 {
 	UNKNOWN_COMMAND_COUNT.load(Ordering::Relaxed)
 }
 
 /// Reset the unknown-command counter (intended for tests).
 #[doc(hidden)]
+#[allow(dead_code, reason = "test-only API surface")]
 pub fn reset_unknown_command_count() {
 	UNKNOWN_COMMAND_COUNT.store(0, Ordering::Relaxed);
 }
@@ -509,6 +512,7 @@ fn builtin_pipelines() -> &'static PipelineRegistry {
 }
 
 /// Expose the built-in registry's inline tests for the verify CLI surface.
+#[allow(dead_code, reason = "test-only API surface")]
 #[must_use]
 pub fn verify_builtin_filters() -> Vec<pipeline::TestOutcome> {
 	pipeline::run_tests(builtin_pipelines())
@@ -523,7 +527,6 @@ mod tests {
 	};
 
 	static CONFIG_COUNTER: AtomicUsize = AtomicUsize::new(0);
-	pub(crate) static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 	use super::*;
 	use crate::minimizer::MinimizerOptions;
@@ -759,7 +762,6 @@ strip_lines_matching = [".*"]
 
 	#[test]
 	fn segmented_chain_supported_command_does_not_record_unknown() {
-		let _guard = TEST_LOCK.lock();
 		// Phase 7 (Mode α resolution): supported chains route through
 		// filters::dispatch via the chain decomposer instead of falling
 		// back to passthrough. The unknown-command counter must remain
@@ -1095,15 +1097,10 @@ strip_lines_matching = [".*"]
 		}
 		let out = apply("rails db:migrate", &input, 0, &cfg);
 		assert!(out.changed);
-		// Only the def's max_lines=40 cap should fire; filter_rake's head_tail must
-		// NOT also condense. Both now emit `[…Nln elided…]`, so a single marker
-		// proves no double truncation (two would mean both stages fired).
-		assert_eq!(
-			out.text.matches("ln elided…]").count(),
-			1,
-			"double truncation detected: {:#?}",
-			out.text
-		);
+		// The def's max_lines=40 produces ONE truncation marker.
+		// filter_rake's head_tail marker ("lines omitted") must NOT appear.
+		assert!(!out.text.contains("lines omitted"), "double truncation detected: {:#?}", out.text);
+		assert!(out.text.contains("lines truncated"));
 	}
 
 	#[test]
@@ -1230,7 +1227,6 @@ mod pipeline_integration_tests {
 
 	#[test]
 	fn unknown_command_counter_increments() {
-		let _guard = super::tests::TEST_LOCK.lock();
 		reset_unknown_command_count();
 		let cfg = MinimizerConfig::from_options(&MinimizerOptions {
 			enabled: Some(true),

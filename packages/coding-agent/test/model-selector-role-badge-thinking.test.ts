@@ -3,53 +3,27 @@ import { stripVTControlCharacters } from "node:util";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { classifyModelSelectorItem } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector-availability";
 import { ModelSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AUTO_THINKING, type ConfiguredThinkingLevel } from "@oh-my-pi/pi-coding-agent/thinking";
 import type { TUI } from "@oh-my-pi/pi-tui";
 
 function normalizeRenderedText(text: string): string {
 	return stripVTControlCharacters(text).replace(/\s+/g, " ").trim();
 }
 
-const DEFAULT_RETRY_FALLBACK_ACTION_LABEL = "Set as DEFAULT retry fallback";
-const DEFAULT_RETRY_FALLBACK_ACTION = "retryFallback";
-
-type ModelSelectorAction = "modelRole" | typeof DEFAULT_RETRY_FALLBACK_ACTION;
-type TestRoleSelectArgs = [
-	model: Model,
-	role: string | null,
-	thinkingLevel?: ConfiguredThinkingLevel,
-	selector?: string,
-	action?: ModelSelectorAction,
-];
-type TestRoleSelectCallback = (...args: TestRoleSelectArgs) => void;
-
-function isSelectedMenuLine(line: string): boolean {
-	const trimmed = line.trimStart();
-	return trimmed.startsWith("❯") || trimmed.startsWith("▸") || trimmed.startsWith(">") || trimmed.startsWith("\uf054");
-}
-
-function selectMenuAction(selector: ModelSelectorComponent, label: string): void {
-	for (let attempt = 0; attempt < 20; attempt++) {
-		const selectedTarget = stripVTControlCharacters(selector.render(220).join("\n"))
-			.split("\n")
-			.find(line => line.includes(label) && isSelectedMenuLine(line));
-		if (selectedTarget) return;
-		selector.handleInput("\x1b[B");
-	}
-	throw new Error(`Menu action not selectable: ${label}`);
-}
-
 function createSelector(model: Model, settings: Settings): ModelSelectorComponent {
 	const modelRegistry = {
 		getAll: () => [model],
 		getDiscoverableProviders: () => [],
+		getCanonicalModelSelections: () => [],
 	} as unknown as ModelRegistry;
 	const ui = {
 		requestRender: vi.fn(),
+		requestComponentRender: vi.fn(),
 	} as unknown as TUI;
 
 	return new ModelSelectorComponent(
@@ -95,29 +69,32 @@ function createContextTestModel(id: string, contextWindow: number): Model {
 function createScopedSelector(
 	models: Model[],
 	settings: Settings,
-	onSelect: TestRoleSelectCallback,
-	options?: { temporaryOnly?: boolean; currentContextTokens?: number },
+	onSelect: (model: Model) => void,
+	options?: {
+		temporaryOnly?: boolean;
+		currentContextTokens?: number;
+		initialSearchInput?: string;
+		modelRegistry?: ModelRegistry;
+	},
 ): ModelSelectorComponent {
-	const modelRegistry = {
-		getAll: () => models,
-		getDiscoverableProviders: () => [],
-	} as unknown as ModelRegistry;
+	const modelRegistry =
+		options?.modelRegistry ??
+		({
+			getAll: () => models,
+			getDiscoverableProviders: () => [],
+			getCanonicalModelSelections: () => [],
+		} as unknown as ModelRegistry);
 	const ui = {
 		requestRender: vi.fn(),
+		requestComponentRender: vi.fn(),
 	} as unknown as TUI;
 	return new ModelSelectorComponent(
 		ui,
 		undefined,
 		settings,
 		modelRegistry,
-		models.map(model => ({ model })),
-		(
-			model: Model,
-			role: string | null,
-			thinkingLevel?: ConfiguredThinkingLevel,
-			selector?: string,
-			action?: ModelSelectorAction,
-		) => onSelect(model, role, thinkingLevel, selector, action),
+		options?.modelRegistry ? [] : models.map(model => ({ model })),
+		model => onSelect(model),
 		() => {},
 		options,
 	);
@@ -137,6 +114,30 @@ describe("ModelSelector role badge thinking display", () => {
 		if (!testTheme) {
 			throw new Error("Failed to load dark theme for ModelSelector tests");
 		}
+	});
+
+	test("classifies context overflow as selectable warning without masking real disable reasons", () => {
+		expect(classifyModelSelectorItem({ currentContextTokens: 312_000, contextWindow: 256_000 })).toEqual({
+			disabled: false,
+			contextOverflow: true,
+			contextWarning: "context 312k > 256k — will compact on switch",
+		});
+		expect(
+			classifyModelSelectorItem({
+				currentContextTokens: 1000,
+				contextWindow: 128_000,
+				disabledReason: "unauthenticated",
+			}),
+		).toEqual({
+			disabled: true,
+			contextOverflow: false,
+			contextWarning: null,
+		});
+		expect(classifyModelSelectorItem({ currentContextTokens: 1000, contextWindow: 128_000 })).toEqual({
+			disabled: false,
+			contextOverflow: false,
+			contextWarning: null,
+		});
 	});
 
 	test("shows custom roles from cycleOrder/modelRoles and honors built-in metadata overrides", async () => {
@@ -171,103 +172,6 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(menuRendered).toContain("Set as SMOL (Quick)");
 	});
 
-	test("renders the xhigh-ceiling ladder without a speculative max tier (GPT-5.5)", async () => {
-		installTestTheme();
-		const model = getBundledModel("openai", "gpt-5.5");
-		if (!model) throw new Error("Expected bundled model openai/gpt-5.5");
-
-		const selector = createSelector(model, Settings.isolated({}));
-		await Bun.sleep(0);
-		installTestTheme();
-
-		selector.handleInput("\n");
-		selector.handleInput("\n");
-
-		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(rendered).toContain("Thinking for: Default (gpt-5.5)");
-		expect(rendered).toContain("low medium high xhigh");
-		// gpt-5.5's wire has no max tier; the selector must not invent one.
-		expect(rendered).not.toContain("max");
-	});
-
-	test("renders max as a real final tier on max-capable models (GPT-5.6)", async () => {
-		installTestTheme();
-		const model = getBundledModel("openai", "gpt-5.6");
-		if (!model) throw new Error("Expected bundled model openai/gpt-5.6");
-
-		const selector = createSelector(model, Settings.isolated({}));
-		await Bun.sleep(0);
-		installTestTheme();
-
-		selector.handleInput("\n");
-		selector.handleInput("\n");
-
-		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(rendered).toContain("Thinking for: Default (gpt-5.6)");
-		expect(rendered).toContain("low medium high xhigh max");
-	});
-
-	test("reloads DEFAULT(auto) from defaultThinkingLevel", async () => {
-		installTestTheme();
-		const model = getBundledModel("openai", "gpt-5.5");
-		if (!model) throw new Error("Expected bundled model openai/gpt-5.5");
-
-		const settings = Settings.isolated({
-			defaultThinkingLevel: AUTO_THINKING,
-			modelRoles: {
-				default: `${model.provider}/${model.id}`,
-			},
-		});
-
-		const selector = createSelector(model, settings);
-		await Bun.sleep(0);
-		installTestTheme();
-
-		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(rendered).toContain("DEFAULT (auto)");
-	});
-
-	test("renders DEFAULT (auto) when modelRoles.default carries an explicit :auto suffix", async () => {
-		installTestTheme();
-		const model = getBundledModel("openai", "gpt-5.5");
-		if (!model) throw new Error("Expected bundled model openai/gpt-5.5");
-
-		const settings = Settings.isolated({
-			modelRoles: {
-				default: `${model.provider}/${model.id}:auto`,
-			},
-		});
-
-		const selector = createSelector(model, settings);
-		await Bun.sleep(0);
-		installTestTheme();
-
-		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(rendered).toContain("DEFAULT (auto)");
-		expect(rendered).not.toContain("DEFAULT (inherit)");
-	});
-
-	test("renders SMOL (auto) when modelRoles.smol carries an explicit :auto suffix", async () => {
-		installTestTheme();
-		const model = getBundledModel("openai", "gpt-5.5");
-		if (!model) throw new Error("Expected bundled model openai/gpt-5.5");
-
-		const settings = Settings.isolated({
-			modelRoles: {
-				default: `${model.provider}/${model.id}`,
-				smol: `${model.provider}/${model.id}:auto`,
-			},
-		});
-
-		const selector = createSelector(model, settings);
-		await Bun.sleep(0);
-		installTestTheme();
-
-		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(rendered).toContain("SMOL (auto)");
-		expect(rendered).not.toContain("SMOL (inherit)");
-	});
-
 	test("shows compact auto badges for unconfigured role defaults", async () => {
 		installTestTheme();
 		const settings = Settings.isolated({});
@@ -285,7 +189,7 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(rendered).toContain("[SLOW auto]");
 	});
 
-	test("dims and disables models below the current context size in temporary mode", async () => {
+	test("warns and allows selecting models below the current context size", async () => {
 		installTestTheme();
 		const settings = Settings.isolated({});
 		const small = createContextTestModel("a-small", 4096);
@@ -300,27 +204,56 @@ describe("ModelSelector role badge thinking display", () => {
 
 		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(rendered).toContain("a-small");
-		expect(rendered).toContain("context>4.1k");
+		expect(rendered).toContain("⚠ context 6k > 4.1k — will compact on switch");
 
 		selector.handleInput("\n");
-		expect(selected).toEqual(["b-large"]);
+		expect(selected).toEqual(["a-small"]);
 	});
 
-	test("labels temporary picker as session-only and points to role assignment", async () => {
+	test("warns but selects every authenticated GPT-5.6 Codex model over its context window", async () => {
 		installTestTheme();
-		const settings = Settings.isolated({});
-		const model = createContextTestModel("session-model", 128_000);
-		const selector = createScopedSelector([model], settings, () => {}, { temporaryOnly: true });
-		await Bun.sleep(0);
-		installTestTheme();
+		const authStorage = await AuthStorage.create(":memory:");
+		await authStorage.set("openai-codex", {
+			type: "oauth",
+			access: "selector-test-access",
+			refresh: "selector-test-refresh",
+			expires: Date.now() + 60 * 60_000,
+			accountId: "selector-test",
+		});
+		const modelRegistry = new ModelRegistry(authStorage);
+		await modelRegistry.refresh("offline");
+		expect(modelRegistry.getAvailabilitySnapshot().refreshingProviders).toEqual([]);
 
-		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(rendered).toContain("Temporary model selection is session-only");
-		expect(rendered).toContain("Alt+M or /model");
-		expect(rendered).toContain("default/smol/plan/task/slow/custom roles");
+		try {
+			for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+				const selected: string[] = [];
+				const selector = createScopedSelector([], Settings.isolated({}), model => selected.push(model.id), {
+					modelRegistry,
+					temporaryOnly: true,
+					initialSearchInput: id,
+					currentContextTokens: 1_050_001,
+				});
+				await Bun.sleep(0);
+				installTestTheme();
+
+				const rendered = normalizeRenderedText(selector.render(220).join("\n"));
+				const expectedWarning = classifyModelSelectorItem({
+					currentContextTokens: 1_050_001,
+					contextWindow: 1_050_000,
+				}).contextWarning;
+				expect(expectedWarning).toBeDefined();
+				expect(expectedWarning).toContain(" > ");
+				expect(rendered).toContain(id);
+				expect(rendered).toContain(expectedWarning!);
+				selector.handleInput("\n");
+				expect(selected).toEqual([id]);
+			}
+		} finally {
+			authStorage.close();
+		}
 	});
 
-	test("opens over-context default role actions for global configuration", async () => {
+	test("opens the model menu when the only candidate overflows context", async () => {
 		installTestTheme();
 		const settings = Settings.isolated({});
 		const small = createContextTestModel("only-small", 4096);
@@ -333,49 +266,12 @@ describe("ModelSelector role badge thinking display", () => {
 
 		const rendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(rendered).toContain("only-small");
-		expect(rendered).not.toContain("current context 6k > 4.1k limit");
+		expect(rendered).toContain("context 6k > 4.1k — will compact on switch");
 
 		selector.handleInput("\n");
-		const afterOpen = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(afterOpen).toContain("Action for: only-small");
-		expect(afterOpen).toContain("Set as DEFAULT (Default)");
-		expect(afterOpen).not.toContain("context>4.1k");
-
-		selector.handleInput("\n");
-		const afterRoleEnter = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(afterRoleEnter).toContain("Thinking for: Default (only-small)");
-		expect(onSelect).not.toHaveBeenCalled();
-
-		selector.handleInput("\n");
-		expect(onSelect.mock.calls[0]?.[0]).toBe(small);
-		expect(onSelect.mock.calls[0]?.[1]).toBe("default");
-		expect(onSelect.mock.calls[0]?.[3]).toBe("test/only-small");
-	});
-
-	test("assigns selected model as default retry fallback without opening thinking options", () => {
-		installTestTheme();
-		const settings = Settings.isolated({});
-		const fallback = createContextTestModel("retry-fallback-model", 128_000);
-		const onSelect = vi.fn();
-		const selector = createScopedSelector([fallback], settings, onSelect);
-		installTestTheme();
-
-		selector.handleInput("\n");
-		const menuRendered = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(menuRendered).toContain("Action for: retry-fallback-model");
-		expect(menuRendered).toContain(DEFAULT_RETRY_FALLBACK_ACTION_LABEL);
-
-		selectMenuAction(selector, DEFAULT_RETRY_FALLBACK_ACTION_LABEL);
-		selector.handleInput("\n");
-
 		const afterEnter = normalizeRenderedText(selector.render(220).join("\n"));
-		expect(afterEnter).not.toContain("Thinking for:");
-		expect(onSelect).toHaveBeenCalledTimes(1);
-		const call = onSelect.mock.calls[0];
-		expect(call?.[0]).toBe(fallback);
-		expect(call?.[1]).toBe("default");
-		expect(call?.[3]).toBe("test/retry-fallback-model");
-		expect(call?.[4]).toBe(DEFAULT_RETRY_FALLBACK_ACTION);
+		expect(afterEnter).toContain("Action for");
+		expect(onSelect).not.toHaveBeenCalled();
 	});
 
 	test("uses cached models for Enter while offline refresh is still pending", () => {
@@ -390,10 +286,19 @@ describe("ModelSelector role badge thinking display", () => {
 			refreshProvider: vi.fn(async () => {}),
 			getError: () => undefined,
 			getAvailable: () => [cachedModel],
+			getAvailabilitySnapshot: () => ({
+				generation: 1,
+				models: [cachedModel],
+				refreshingProviders: [],
+				staleProviders: [],
+			}),
+			onAvailabilityChanged: () => () => {},
 			getDiscoverableProviders: () => [],
+			getCanonicalModelSelections: () => [],
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),
+			requestComponentRender: vi.fn(),
 		} as unknown as TUI;
 
 		const selector = new ModelSelectorComponent(
@@ -428,10 +333,19 @@ describe("ModelSelector role badge thinking display", () => {
 			refreshProvider: vi.fn(async () => {}),
 			getError: () => undefined,
 			getAvailable: () => availableModels,
+			getAvailabilitySnapshot: () => ({
+				generation: 1,
+				models: availableModels,
+				refreshingProviders: [],
+				staleProviders: [],
+			}),
+			onAvailabilityChanged: () => () => {},
 			getDiscoverableProviders: () => [],
+			getCanonicalModelSelections: () => [],
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),
+			requestComponentRender: vi.fn(),
 		} as unknown as TUI;
 
 		const selector = new ModelSelectorComponent(
@@ -472,7 +386,15 @@ describe("ModelSelector role badge thinking display", () => {
 			refreshProvider,
 			getError: () => undefined,
 			getAvailable: () => availableModels,
+			getAvailabilitySnapshot: () => ({
+				generation: 1,
+				models: availableModels,
+				refreshingProviders: [],
+				staleProviders: [],
+			}),
+			onAvailabilityChanged: () => () => {},
 			getDiscoverableProviders: () => ["ollama-cloud"],
+			getCanonicalModelSelections: () => [],
 			getProviderDiscoveryState: () => ({
 				provider: "ollama-cloud",
 				status: "idle",
@@ -483,6 +405,7 @@ describe("ModelSelector role badge thinking display", () => {
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),
+			requestComponentRender: vi.fn(),
 		} as unknown as TUI;
 
 		const selector = new ModelSelectorComponent(
@@ -500,6 +423,7 @@ describe("ModelSelector role badge thinking display", () => {
 		const initialRendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(initialRendered).toContain("OLLAMA CLOUD");
 
+		selector.handleInput("\t");
 		selector.handleInput("\t");
 		await Bun.sleep(125);
 		installTestTheme();
@@ -532,7 +456,15 @@ describe("ModelSelector role badge thinking display", () => {
 			refreshProvider,
 			getError: () => undefined,
 			getAvailable: () => availableModels,
+			getAvailabilitySnapshot: () => ({
+				generation: 1,
+				models: availableModels,
+				refreshingProviders: [],
+				staleProviders: [],
+			}),
+			onAvailabilityChanged: () => () => {},
 			getDiscoverableProviders: () => ["ollama-cloud"],
+			getCanonicalModelSelections: () => [],
 			getProviderDiscoveryState: () => ({
 				provider: "ollama-cloud",
 				status: "idle",
@@ -543,6 +475,7 @@ describe("ModelSelector role badge thinking display", () => {
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),
+			requestComponentRender: vi.fn(),
 		} as unknown as TUI;
 
 		const selector = new ModelSelectorComponent(
@@ -557,6 +490,7 @@ describe("ModelSelector role badge thinking display", () => {
 		await Bun.sleep(0);
 		installTestTheme();
 
+		selector.handleInput("\t");
 		selector.handleInput("\t");
 
 		// Core regression: tab switch must not synchronously enter provider refresh.
@@ -585,5 +519,96 @@ describe("ModelSelector role badge thinking display", () => {
 		const finalRendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(finalRendered).toContain("deepseek-v4-pro");
 		expect(finalRendered).not.toContain("Refreshing OLLAMA CLOUD in background");
+	});
+
+	test("renders registry auth-refresh snapshots without dropping Codex rows", () => {
+		installTestTheme();
+		const settings = Settings.isolated({});
+		const gpt55 = getBundledModel("openai-codex", "gpt-5.5");
+		const gpt56 = getBundledModel("openai-codex", "gpt-5.6-sol");
+		if (!gpt55 || !gpt56) throw new Error("Expected bundled Codex GPT-5.5 and GPT-5.6 models");
+		const models = [gpt55, gpt56];
+		const refreshGate = Promise.withResolvers<void>();
+		let snapshot = {
+			generation: 1,
+			models,
+			refreshingProviders: [] as readonly string[],
+			staleProviders: [] as readonly string[],
+		};
+		let availabilityListener: ((next: typeof snapshot) => void) | undefined;
+		const modelRegistry = {
+			getAll: () => models,
+			refresh: () => refreshGate.promise,
+			getError: () => undefined,
+			getAvailabilitySnapshot: () => snapshot,
+			onAvailabilityChanged: (listener: (next: typeof snapshot) => void) => {
+				availabilityListener = listener;
+				return () => {
+					availabilityListener = undefined;
+				};
+			},
+			getDiscoverableProviders: () => [],
+			getCanonicalModelSelections: () => [],
+		} as unknown as ModelRegistry;
+		const requestComponentRender = vi.fn();
+		const ui = {
+			requestRender: vi.fn(),
+			requestComponentRender,
+		} as unknown as TUI;
+		const selector = new ModelSelectorComponent(
+			ui,
+			undefined,
+			settings,
+			modelRegistry,
+			[],
+			() => {},
+			() => {},
+		);
+
+		snapshot = {
+			generation: 2,
+			models,
+			refreshingProviders: ["openai-codex"],
+			staleProviders: ["openai-codex"],
+		};
+		availabilityListener?.(snapshot);
+		const staleRendered = normalizeRenderedText(selector.render(220).join("\n"));
+		expect(staleRendered).toContain("gpt-5.5");
+		expect(staleRendered).toContain("gpt-5.6-sol");
+		expect(staleRendered).toContain("[stale — refreshing auth]");
+		expect(requestComponentRender).toHaveBeenCalledTimes(1);
+
+		snapshot = {
+			generation: 3,
+			models,
+			refreshingProviders: ["openai-codex"],
+			staleProviders: [],
+		};
+		availabilityListener?.(snapshot);
+		const recoveredRendered = normalizeRenderedText(selector.render(220).join("\n"));
+		expect(recoveredRendered).toContain("[refreshing auth]");
+		expect(recoveredRendered).not.toContain("[stale — refreshing auth]");
+
+		snapshot = {
+			generation: 4,
+			models,
+			refreshingProviders: [],
+			staleProviders: [],
+		};
+		availabilityListener?.(snapshot);
+		expect(normalizeRenderedText(selector.render(220).join("\n"))).not.toContain("[refreshing auth]");
+
+		snapshot = {
+			generation: 5,
+			models: [],
+			refreshingProviders: [],
+			staleProviders: [],
+		};
+		availabilityListener?.(snapshot);
+		const loggedOutRendered = normalizeRenderedText(selector.render(220).join("\n"));
+		expect(loggedOutRendered).not.toContain("gpt-5.5");
+		expect(loggedOutRendered).not.toContain("gpt-5.6-sol");
+		expect(loggedOutRendered).toContain("No matching models");
+		expect(requestComponentRender).toHaveBeenCalledTimes(4);
 	});
 });

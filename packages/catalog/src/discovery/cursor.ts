@@ -1,6 +1,6 @@
 import * as http2 from "node:http2";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import { getBundledModels } from "../models";
 import { toModelSpec } from "../provider-models/bundled-references";
 import type { Model, ModelSpec } from "../types";
@@ -13,41 +13,27 @@ const CURSOR_GET_USABLE_MODELS_PATH = "/agent.v1.AgentService/GetUsableModels";
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const DEFAULT_MAX_TOKENS = 64_000;
 
-/**
- * Model-id families whose native catalogs (anthropic, openai/openai-codex,
- * google) are multimodal. Cursor-only or text-only families (`composer-*`,
- * `grok-code-*`) intentionally stay outside this pattern.
- */
-const CURSOR_MULTIMODAL_ID_PATTERN = /claude|gemini|gpt-|codex/;
+const OptionalDisplayNameSchema = z.string().optional().catch(undefined);
+const CursorAliasesSchema = z
+	.array(z.unknown())
+	.optional()
+	.catch([])
+	.transform(aliases => (aliases ?? []).filter((alias: unknown): alias is string => typeof alias === "string"));
 
-const OptionalDisplayNameSchema = type("unknown").pipe(raw => (typeof raw === "string" ? raw : undefined));
-const CursorAliasesSchema = type("unknown").pipe(raw => {
-	if (Array.isArray(raw)) {
-		return raw.filter((alias: unknown): alias is string => typeof alias === "string");
-	}
-	return [];
+const CursorModelDetailsSchema = z.object({
+	modelId: z.string(),
+	displayName: OptionalDisplayNameSchema,
+	displayNameShort: OptionalDisplayNameSchema,
+	displayModelId: OptionalDisplayNameSchema,
+	aliases: CursorAliasesSchema,
+	thinkingDetails: z.unknown().optional(),
 });
 
-const CursorModelDetailsSchema = type({
-	modelId: "string",
-	displayName: OptionalDisplayNameSchema.default(undefined),
-	displayNameShort: OptionalDisplayNameSchema.default(undefined),
-	displayModelId: OptionalDisplayNameSchema.default(undefined),
-	aliases: CursorAliasesSchema.default(() => []),
-	"thinkingDetails?": "unknown",
+const CursorDecodedResponseSchema = z.object({
+	models: z.array(z.unknown()).optional().catch([]),
 });
 
-const CursorModelsInnerSchema = type("unknown[]");
-const ResilientCursorModelsSchema = type("unknown").pipe(raw => {
-	const out = CursorModelsInnerSchema(raw);
-	return out instanceof type.errors ? [] : out;
-});
-
-const CursorDecodedResponseSchema = type({
-	models: ResilientCursorModelsSchema.default(() => []),
-});
-
-type CursorModelDetailsValue = typeof CursorModelDetailsSchema.infer;
+type CursorModelDetailsValue = z.infer<typeof CursorModelDetailsSchema>;
 
 /**
  * Options for fetching dynamic Cursor models from `GetUsableModels`.
@@ -88,13 +74,13 @@ export async function fetchCursorUsableModels(
 			return null;
 		}
 		const decoded = decodeGetUsableModelsResponse(responseBuffer);
-		const parsedDecoded = CursorDecodedResponseSchema(decoded);
-		if (parsedDecoded instanceof type.errors) {
+		const parsedDecoded = CursorDecodedResponseSchema.safeParse(decoded);
+		if (!parsedDecoded.success) {
 			return null;
 		}
 
 		const references = createCursorReferenceMap();
-		return normalizeCursorModels(parsedDecoded.models, options.baseUrl, references);
+		return normalizeCursorModels(parsedDecoded.data.models, options.baseUrl, references);
 	} catch {
 		return null;
 	}
@@ -268,12 +254,12 @@ function normalizeCursorModel(
 	baseUrlOverride: string | undefined,
 	references: Map<string, ModelSpec<"cursor-agent">>,
 ): ModelSpec<"cursor-agent"> | null {
-	const parsedModel = CursorModelDetailsSchema(model);
-	if (parsedModel instanceof type.errors) {
+	const parsedModel = CursorModelDetailsSchema.safeParse(model);
+	if (!parsedModel.success) {
 		return null;
 	}
 
-	const details = parsedModel;
+	const details = parsedModel.data;
 	const id = details.modelId.trim();
 	if (!id) {
 		return null;
@@ -299,7 +285,7 @@ function normalizeCursorModel(
 		provider: "cursor",
 		baseUrl: baseUrlOverride ?? CURSOR_DEFAULT_BASE_URL,
 		reasoning,
-		input: inferInputFromCursorId(id),
+		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: DEFAULT_CONTEXT_WINDOW,
 		maxTokens: DEFAULT_MAX_TOKENS,
@@ -318,19 +304,4 @@ function pickModelDisplayName(model: CursorModelDetailsValue, fallbackId: string
 		}
 	}
 	return fallbackId;
-}
-
-/**
- * Infers input modalities for Cursor models without a bundled reference.
- *
- * `GetUsableModels` carries no per-model modality metadata, so classification
- * falls back to the model family: families that are multimodal in OMP's own
- * native catalogs accept images, everything else stays text-only. Mirrors
- * `inferInputFromGeminiId` in ./gemini.ts.
- */
-function inferInputFromCursorId(id: string): ("text" | "image")[] {
-	if (CURSOR_MULTIMODAL_ID_PATTERN.test(id.toLowerCase())) {
-		return ["text", "image"];
-	}
-	return ["text"];
 }

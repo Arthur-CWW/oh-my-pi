@@ -1,15 +1,30 @@
 /**
- * Kagi API Client
+ * Kagi Search Client
  *
- * Implements the Kagi V1 Search API (POST /api/v1/search), the public-preview
- * successor to the sunset V0 endpoint. Authentication is resolved exclusively
- * through the shared {@link AuthStorage} broker (Bearer token), and responses
- * are categorized result buckets rather than the legacy flat object array.
+ * Uses the signed-in Kagi browser account session first, then falls back to the
+ * Kagi V1 Search API when no browser session is available and API auth exists.
  */
+import { Database } from "bun:sqlite";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { type AuthStorage, type FetchImpl, withAuth } from "@oh-my-pi/pi-ai";
+import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { parseHTML } from "linkedom";
+import puppeteer, { type Browser } from "puppeteer-core";
 import { withHardTimeout } from "./search/providers/utils";
 
-const KAGI_SEARCH_URL = "https://kagi.com/api/v1/search";
+const KAGI_API_SEARCH_URL = "https://kagi.com/api/v1/search";
+const KAGI_SOCKET_SEARCH_URL = "https://kagi.com/socket/search";
+const KAGI_BROWSER_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+export const NO_KAGI_BROWSER_SESSION_MESSAGE =
+	"No Kagi browser session found. Sign into kagi.com in Chrome or Firefox.";
+
+const FIREFOX_USER_AGENT =
+	os.platform() === "darwin"
+		? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:136.0) Gecko/20100101 Firefox/136.0"
+		: "Mozilla/5.0 (X11; Linux x86_64; rv:136.0) Gecko/20100101 Firefox/136.0";
 
 // ---------------------------------------------------------------------------
 // Request / Response Types
@@ -83,6 +98,37 @@ export interface KagiErrorResponse {
 	detail?: string;
 }
 
+export interface KagiBrowserSession {
+	token: string;
+	headers: Record<string, string>;
+	capturedAt: string;
+}
+
+interface FirefoxProfileCandidate {
+	dir: string;
+	rank: number;
+}
+
+interface KagiBrowserSessionLookupOptions {
+	cachePath?: string;
+	allowChrome?: boolean;
+}
+
+interface ChromeCookie {
+	name: string;
+	value: string;
+	domain: string;
+}
+
+interface ChromeCookiesResponse {
+	cookies: ChromeCookie[];
+}
+
+interface BrowserHeaderValues {
+	"user-agent": string;
+	"accept-language": string;
+}
+
 // ---------------------------------------------------------------------------
 // Error Handling
 // ---------------------------------------------------------------------------
@@ -147,6 +193,332 @@ function parseKagiErrorResponse(statusCode: number, responseText: string): KagiA
 	}
 }
 
+function createKagiBrowserSearchError(response: Response, responseText: string): KagiApiError {
+	const detail = responseText.trim();
+	const message = detail
+		? `Kagi browser search failed (${response.status}): ${detail}`
+		: `Kagi browser search failed (${response.status} ${response.statusText})`;
+	return new KagiApiError(message, response.status);
+}
+
+// ---------------------------------------------------------------------------
+// Browser Session Discovery
+// ---------------------------------------------------------------------------
+
+export function getKagiBrowserSessionPath(): string {
+	return path.join(getAgentDir(), "web", "kagi-session.json");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function asStringRecord(value: unknown): Record<string, string> {
+	const out: Record<string, string> = {};
+	if (!isRecord(value)) return out;
+	for (const [key, entry] of Object.entries(value)) {
+		if (typeof entry === "string") out[key] = entry;
+	}
+	return out;
+}
+
+function isFreshBrowserSession(session: KagiBrowserSession): boolean {
+	const capturedAt = session.capturedAt.trim();
+	if (capturedAt.length === 0) return false;
+	const capturedMs = Date.parse(capturedAt);
+	return Number.isFinite(capturedMs) && Date.now() - capturedMs <= KAGI_BROWSER_SESSION_MAX_AGE_MS;
+}
+
+function normalizeBrowserSession(value: unknown): KagiBrowserSession | null {
+	if (!isRecord(value) || typeof value.token !== "string" || value.token.trim().length === 0) return null;
+	const capturedAt = typeof value.capturedAt === "string" ? value.capturedAt : "";
+	const session = {
+		token: value.token.trim(),
+		headers: asStringRecord(value.headers),
+		capturedAt,
+	} satisfies KagiBrowserSession;
+	return isFreshBrowserSession(session) ? session : null;
+}
+
+function loadCachedKagiBrowserSession(cachePath = getKagiBrowserSessionPath()): KagiBrowserSession | null {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(cachePath, "utf-8")) as unknown;
+		return normalizeBrowserSession(parsed);
+	} catch {
+		return null;
+	}
+}
+
+export function hasCachedKagiBrowserSession(cachePath = getKagiBrowserSessionPath()): boolean {
+	return loadCachedKagiBrowserSession(cachePath) !== null;
+}
+
+function firefoxAppDirs(): string[] {
+	return os.platform() === "darwin"
+		? [path.join(os.homedir(), "Library/Application Support/Firefox")]
+		: [path.join(os.homedir(), ".mozilla/firefox"), path.join(os.homedir(), "snap/firefox/common/.mozilla/firefox")];
+}
+
+function parseIniBlocks(text: string): Array<{ section: string; values: Record<string, string> }> {
+	const blocks: Array<{ section: string; values: Record<string, string> }> = [];
+	for (const block of text.split(/\r?\n(?=\[)/)) {
+		const header = block.match(/^\[([^\]]+)\]/);
+		if (!header?.[1]) continue;
+		const values: Record<string, string> = {};
+		for (const line of block.split(/\r?\n/)) {
+			const match = line.match(/^([^=]+)=(.*)$/);
+			if (match?.[1]) values[match[1].trim()] = (match[2] ?? "").trim();
+		}
+		blocks.push({ section: header[1], values });
+	}
+	return blocks;
+}
+
+function parseFirefoxInstallDefaults(appDir: string): FirefoxProfileCandidate[] {
+	const out: FirefoxProfileCandidate[] = [];
+	for (const file of ["installs.ini", "profiles.ini"]) {
+		let text: string;
+		try {
+			text = fs.readFileSync(path.join(appDir, file), "utf-8");
+		} catch {
+			continue;
+		}
+		for (const block of parseIniBlocks(text)) {
+			if (!block.section.startsWith("Install") || !block.values.Default) continue;
+			out.push({ dir: path.join(appDir, block.values.Default), rank: -100 + out.length });
+		}
+	}
+	return out;
+}
+
+function parseFirefoxProfilesIni(appDir: string): FirefoxProfileCandidate[] {
+	let text: string;
+	try {
+		text = fs.readFileSync(path.join(appDir, "profiles.ini"), "utf-8");
+	} catch {
+		return [];
+	}
+
+	const profiles: Array<FirefoxProfileCandidate & { isDefault: boolean; index: number }> = [];
+	let index = 0;
+	for (const block of parseIniBlocks(text)) {
+		if (!/^Profile\d+$/.test(block.section)) continue;
+		if (!block.values.Path) continue;
+		profiles.push({
+			dir: block.values.IsRelative !== "0" ? path.join(appDir, block.values.Path) : path.resolve(block.values.Path),
+			isDefault: block.values.Default === "1",
+			rank: 0,
+			index,
+		});
+		index += 1;
+	}
+
+	profiles.sort((a, b) => {
+		if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+		return a.index - b.index;
+	});
+	return profiles.map((profile, i) => ({
+		dir: profile.dir,
+		rank: profile.isDefault ? i : 100 + i,
+	}));
+}
+
+function addFirefoxProfileDb(
+	candidates: Array<{ path: string; rank: number; mtimeMs: number }>,
+	seen: Set<string>,
+	profileDir: string,
+	rank: number,
+): void {
+	const dbPath = path.join(profileDir, "cookies.sqlite");
+	if (seen.has(dbPath) || !fs.existsSync(dbPath)) return;
+	let mtimeMs = 0;
+	try {
+		mtimeMs = fs.statSync(dbPath).mtimeMs;
+	} catch {
+		mtimeMs = 0;
+	}
+	seen.add(dbPath);
+	candidates.push({ path: dbPath, rank, mtimeMs });
+}
+
+function findFirefoxCookiesDbs(): string[] {
+	const candidates: Array<{ path: string; rank: number; mtimeMs: number }> = [];
+	const seen = new Set<string>();
+
+	for (const appDir of firefoxAppDirs()) {
+		for (const profile of [...parseFirefoxInstallDefaults(appDir), ...parseFirefoxProfilesIni(appDir)]) {
+			addFirefoxProfileDb(candidates, seen, profile.dir, profile.rank);
+		}
+
+		for (const container of [path.join(appDir, "Profiles"), appDir]) {
+			try {
+				for (const dirent of fs.readdirSync(container, { withFileTypes: true })) {
+					if (!dirent.isDirectory()) continue;
+					addFirefoxProfileDb(candidates, seen, path.join(container, dirent.name), 1000);
+				}
+			} catch {}
+		}
+	}
+
+	return candidates.sort((a, b) => a.rank - b.rank || b.mtimeMs - a.mtimeMs).map(candidate => candidate.path);
+}
+
+function readKagiSessionTokenFromFirefoxDb(dbPath: string): string | null {
+	const tempDir = path.join(
+		os.tmpdir(),
+		`omp-kagi-ff-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+	);
+	const tmpDb = path.join(tempDir, "cookies.sqlite");
+	let db: Database | null = null;
+	try {
+		fs.mkdirSync(tempDir, { recursive: true });
+		fs.copyFileSync(dbPath, tmpDb);
+		for (const suffix of ["-wal", "-shm"]) {
+			const source = `${dbPath}${suffix}`;
+			if (fs.existsSync(source)) fs.copyFileSync(source, `${tmpDb}${suffix}`);
+		}
+
+		db = new Database(tmpDb, { readonly: true });
+		const row = db
+			.query(
+				"SELECT value FROM moz_cookies WHERE (host = 'kagi.com' OR host LIKE '%.kagi.com') AND name = 'kagi_session' AND (expiry > unixepoch() OR expiry = 0) ORDER BY expiry DESC LIMIT 1",
+			)
+			.get() as { value?: unknown } | null;
+		return typeof row?.value === "string" && row.value.trim().length > 0 ? row.value.trim() : null;
+	} catch {
+		return null;
+	} finally {
+		db?.close();
+		try {
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		} catch {
+			// Best-effort cleanup.
+		}
+	}
+}
+
+function captureKagiBrowserSessionFromFirefox(): KagiBrowserSession | null {
+	for (const dbPath of findFirefoxCookiesDbs()) {
+		const token = readKagiSessionTokenFromFirefoxDb(dbPath);
+		if (!token) continue;
+		return {
+			token,
+			headers: {
+				"user-agent": FIREFOX_USER_AGENT,
+				"accept-language": "en-US,en;q=0.9",
+				accept: "application/json",
+			},
+			capturedAt: new Date().toISOString(),
+		};
+	}
+	return null;
+}
+
+function isChromeCookiesResponse(value: unknown): value is ChromeCookiesResponse {
+	if (!isRecord(value) || !Array.isArray(value.cookies)) return false;
+	return value.cookies.every(
+		cookie =>
+			isRecord(cookie) &&
+			typeof cookie.name === "string" &&
+			typeof cookie.value === "string" &&
+			typeof cookie.domain === "string",
+	);
+}
+
+function isBrowserHeaderValues(value: unknown): value is BrowserHeaderValues {
+	return (
+		isRecord(value) &&
+		typeof value["user-agent"] === "string" &&
+		typeof value["accept-language"] === "string" &&
+		value["user-agent"].length > 0 &&
+		value["accept-language"].length > 0
+	);
+}
+
+async function captureKagiBrowserSessionFromChromeCdp(
+	browserUrl = "http://localhost:9222",
+): Promise<KagiBrowserSession | null> {
+	let browser: Browser | null = null;
+	try {
+		browser = await puppeteer.connect({ browserURL: browserUrl, defaultViewport: null, protocolTimeout: 5000 });
+		const pages = await browser.pages();
+		const page = pages.find(candidate => candidate.url().startsWith("https://kagi.com")) ?? (await browser.newPage());
+		if (!page.url().startsWith("https://kagi.com")) {
+			await page.goto("https://kagi.com", { waitUntil: "domcontentloaded", timeout: 15000 });
+		}
+		const cdp = await page.target().createCDPSession();
+		const cookiesPayload = (await cdp.send("Network.getAllCookies")) as unknown;
+		if (!isChromeCookiesResponse(cookiesPayload)) return null;
+		const kagiSession = cookiesPayload.cookies.find(
+			cookie =>
+				(cookie.domain === "kagi.com" || cookie.domain.endsWith(".kagi.com")) && cookie.name === "kagi_session",
+		);
+		if (!kagiSession?.value) return null;
+		const headerValues = (await page.evaluate(() => ({
+			"accept-language": navigator.language || "en-US,en;q=0.9",
+			"user-agent": navigator.userAgent,
+		}))) as unknown;
+		const headers = isBrowserHeaderValues(headerValues)
+			? headerValues
+			: { "accept-language": "en-US,en;q=0.9", "user-agent": FIREFOX_USER_AGENT };
+		return {
+			token: kagiSession.value,
+			headers: { ...headers, accept: "application/json" },
+			capturedAt: new Date().toISOString(),
+		};
+	} catch {
+		return null;
+	} finally {
+		if (browser) {
+			try {
+				await browser.disconnect();
+			} catch {
+				// Best-effort cleanup.
+			}
+		}
+	}
+}
+
+function saveKagiBrowserSession(session: KagiBrowserSession, cachePath = getKagiBrowserSessionPath()): void {
+	try {
+		fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+		fs.writeFileSync(cachePath, JSON.stringify(session, null, 2), "utf-8");
+	} catch {
+		// Session caching is opportunistic.
+	}
+}
+
+async function captureFreshKagiBrowserSession(
+	options: KagiBrowserSessionLookupOptions = {},
+): Promise<KagiBrowserSession | null> {
+	const firefox = captureKagiBrowserSessionFromFirefox();
+	if (firefox) return firefox;
+	return options.allowChrome === false ? null : await captureKagiBrowserSessionFromChromeCdp();
+}
+
+async function getOrCaptureKagiBrowserSession(
+	options: KagiBrowserSessionLookupOptions = {},
+): Promise<KagiBrowserSession | null> {
+	const cachePath = options.cachePath ?? getKagiBrowserSessionPath();
+	const cached = loadCachedKagiBrowserSession(cachePath);
+	if (cached) return cached;
+
+	const session = await captureFreshKagiBrowserSession(options);
+	if (session) saveKagiBrowserSession(session, cachePath);
+	return session;
+}
+
+export async function refreshKagiBrowserSession(cachePath = getKagiBrowserSessionPath()): Promise<string> {
+	const session = await captureFreshKagiBrowserSession();
+	if (!session) throw new Error(NO_KAGI_BROWSER_SESSION_MESSAGE);
+	saveKagiBrowserSession(session, cachePath);
+	return cachePath;
+}
+
+export async function hasAvailableKagiBrowserSession(cachePath = getKagiBrowserSessionPath()): Promise<boolean> {
+	return (await getOrCaptureKagiBrowserSession({ cachePath })) !== null;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -157,6 +529,9 @@ export interface KagiSearchOptions {
 	sessionId?: string;
 	signal?: AbortSignal;
 	fetch?: FetchImpl;
+	/** Set false to force the API-key route instead of the browser account-session route. */
+	browserSession?: boolean;
+	browserSessionCachePath?: string;
 }
 
 export interface KagiSearchSource {
@@ -234,9 +609,183 @@ function questionOf(item: KagiSearchResultItem): string | undefined {
 	return typeof q === "string" && q.length > 0 ? q : undefined;
 }
 
-export async function searchWithKagi(
+function headerValue(headers: Record<string, string>, name: string): string | undefined {
+	const exact = headers[name];
+	if (exact) return exact;
+	const lowerName = name.toLowerCase();
+	for (const [key, value] of Object.entries(headers)) {
+		if (key.toLowerCase() === lowerName && value.length > 0) return value;
+	}
+	return undefined;
+}
+
+function buildBrowserSearchHeaders(query: string, session: KagiBrowserSession): Record<string, string> {
+	return {
+		Accept: "text/event-stream, application/json;q=0.9, */*;q=0.8",
+		"Accept-Language": headerValue(session.headers, "accept-language") ?? "en-US,en;q=0.9",
+		"Cache-Control": "no-cache",
+		Referer: `https://kagi.com/search?q=${encodeURIComponent(query)}`,
+		"Sec-Fetch-Dest": "empty",
+		"Sec-Fetch-Mode": "cors",
+		"Sec-Fetch-Site": "same-origin",
+		"User-Agent": headerValue(session.headers, "user-agent") ?? FIREFOX_USER_AGENT,
+		"X-Kagi-Authorization": session.token,
+	};
+}
+
+export function stripKagiHtml(html: string): string {
+	return html
+		.replace(/<!--[\s\S]*?-->/g, " ")
+		.replace(/<\/?[a-z][^>]*>/gi, " ")
+		.replace(/<![^>]*>/g, " ")
+		.replace(/&#39;/g, "'")
+		.replace(/&quot;/g, '"')
+		.replace(/&amp;/g, "&")
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/\s+/g, " ")
+		.replace(/\s+([.,;:!?])/g, "$1")
+		.trim();
+}
+
+export type KagiSocketEventItem = { tag: string; payload: string | { content?: string } };
+
+function isKagiSocketEventItem(value: unknown): value is KagiSocketEventItem {
+	if (!isRecord(value) || typeof value.tag !== "string") return false;
+	if (typeof value.payload === "string") return true;
+	return isRecord(value.payload) && (value.payload.content === undefined || typeof value.payload.content === "string");
+}
+
+export function getKagiPayloadHtml(item: KagiSocketEventItem): string {
+	if (typeof item.payload === "string") return item.payload;
+	return item.payload.content ?? "";
+}
+
+type KagiSocketAnchor = {
+	getAttribute(name: string): string | null;
+	innerHTML: string;
+	textContent: string | null;
+	closest(selector: string): {
+		querySelector(selector: string): { innerHTML: string; textContent: string | null } | null;
+	} | null;
+	parentElement: {
+		querySelector(selector: string): { innerHTML: string; textContent: string | null } | null;
+	} | null;
+};
+
+function extractSocketSnippet(anchor: KagiSocketAnchor): string | undefined {
+	const container = anchor.closest("._0_SRI") ?? anchor.closest(".search-result") ?? anchor.parentElement;
+	const desc = container?.querySelector(".__sri-desc");
+	const snippet = stripKagiHtml(desc?.innerHTML ?? desc?.textContent ?? "");
+	return snippet.length > 0 ? snippet : undefined;
+}
+
+export function parseKagiSocketEvents(raw: string): Array<{ data: unknown }> {
+	const events: Array<{ data: unknown }> = [];
+	for (const block of raw.split(/\r?\n\r?\n/)) {
+		const data = block
+			.split(/\r?\n/)
+			.filter(line => line.startsWith("data:"))
+			.map(line => line.slice(5).trimStart())
+			.join("\n")
+			.trim();
+		if (data.length === 0) continue;
+		try {
+			events.push({ data: JSON.parse(data) as unknown });
+		} catch {}
+	}
+	return events;
+}
+
+export function parseKagiSocketResults(events: Array<{ data: unknown }>): KagiSearchSource[] {
+	const out: KagiSearchSource[] = [];
+	const seen = new Set<string>();
+	for (const event of events) {
+		if (!Array.isArray(event.data)) continue;
+		for (const value of event.data) {
+			if (!isKagiSocketEventItem(value) || value.tag !== "search") continue;
+			const html = getKagiPayloadHtml(value);
+			if (!html) continue;
+			const { document } = parseHTML(html);
+			for (const anchor of Array.from(
+				document.querySelectorAll("a.__sri_title_link") as Iterable<KagiSocketAnchor>,
+			)) {
+				const url = anchor.getAttribute("href")?.trim() ?? "";
+				const title = stripKagiHtml(anchor.innerHTML || anchor.textContent || "");
+				if (!/^https?:\/\//i.test(url) || !title || seen.has(url)) continue;
+				seen.add(url);
+				out.push({ title, url, snippet: extractSocketSnippet(anchor) });
+			}
+		}
+	}
+	return out;
+}
+
+export function parseKagiSocketAnswer(events: Array<{ data: unknown }>): string | undefined {
+	for (const event of events) {
+		if (!Array.isArray(event.data)) continue;
+		for (const value of event.data) {
+			if (!isKagiSocketEventItem(value)) continue;
+			if (value.tag !== "top-content-unique" && value.tag !== "answer") continue;
+			const answer = stripKagiHtml(getKagiPayloadHtml(value));
+			if (answer.length > 0) return answer;
+		}
+	}
+	return undefined;
+}
+
+export function parseKagiSocketResponse(raw: string): KagiSearchResult {
+	const events = parseKagiSocketEvents(raw);
+	return {
+		requestId: "",
+		sources: parseKagiSocketResults(events),
+		relatedQuestions: [],
+		answer: parseKagiSocketAnswer(events),
+	};
+}
+
+async function searchWithKagiBrowserSession(
 	query: string,
-	options: KagiSearchOptions = {},
+	options: KagiSearchOptions,
+	session: KagiBrowserSession,
+): Promise<KagiSearchResult> {
+	const fetchImpl = options.fetch ?? fetch;
+	const request = async (activeSession: KagiBrowserSession): Promise<Response> => {
+		const url = new URL(KAGI_SOCKET_SEARCH_URL);
+		url.searchParams.set("q", query);
+		try {
+			return await fetchImpl(url.toString(), {
+				headers: buildBrowserSearchHeaders(query, activeSession),
+				signal: withHardTimeout(options.signal),
+			});
+		} catch (err) {
+			throw new KagiApiError(
+				`Kagi browser search request failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+	};
+
+	let activeSession = session;
+	let response = await request(activeSession);
+	if (response.status === 401 || response.status === 403) {
+		const refreshed = await captureFreshKagiBrowserSession();
+		if (refreshed) {
+			activeSession = refreshed;
+			saveKagiBrowserSession(activeSession, options.browserSessionCachePath);
+			response = await request(activeSession);
+		}
+	}
+
+	const responseText = await response.text();
+	if (!response.ok) {
+		throw createKagiBrowserSearchError(response, responseText);
+	}
+	return parseKagiSocketResponse(responseText);
+}
+
+async function searchWithKagiApi(
+	query: string,
+	options: KagiSearchOptions,
 	authStorage: AuthStorage,
 ): Promise<KagiSearchResult> {
 	const fetchImpl = options.fetch ?? fetch;
@@ -245,7 +794,7 @@ export async function searchWithKagi(
 	const response = await withAuth(
 		authStorage.resolver("kagi", { sessionId: options.sessionId }),
 		async apiKey => {
-			const res = await fetchImpl(KAGI_SEARCH_URL, {
+			const res = await fetchImpl(KAGI_API_SEARCH_URL, {
 				method: "POST",
 				headers: {
 					Authorization: `Bearer ${apiKey}`,
@@ -301,4 +850,31 @@ export async function searchWithKagi(
 		relatedQuestions,
 		answer,
 	};
+}
+
+export async function searchWithKagi(
+	query: string,
+	options: KagiSearchOptions = {},
+	authStorage: AuthStorage,
+): Promise<KagiSearchResult> {
+	if (options.browserSession !== false) {
+		const session = await getOrCaptureKagiBrowserSession({ cachePath: options.browserSessionCachePath });
+		if (session) {
+			try {
+				return await searchWithKagiBrowserSession(query, options, session);
+			} catch (err) {
+				const canUseApiFallback =
+					err instanceof KagiApiError &&
+					(err.statusCode === 401 || err.statusCode === 403) &&
+					authStorage.hasAuth("kagi");
+				if (!canUseApiFallback) throw err;
+			}
+		}
+	}
+
+	if (options.browserSession === false || authStorage.hasAuth("kagi")) {
+		return await searchWithKagiApi(query, options, authStorage);
+	}
+
+	throw new KagiApiError(NO_KAGI_BROWSER_SESSION_MESSAGE);
 }

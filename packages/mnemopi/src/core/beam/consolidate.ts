@@ -1,9 +1,8 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { generateId, stableMemoryId } from "../../util/ids";
 import { aaakEncode } from "../aaak";
-import { REGEX_EXTRACTION_MAX_INPUT_CHARS } from "../entities";
 import { EpisodicGraph } from "../episodic-graph";
-import { type ExtractedFactCategories, heuristicExtractFacts } from "../extraction";
+import { heuristicExtractFacts } from "../extraction";
 import { clampVeracity } from "../veracity-consolidation";
 import { scheduleEmbedding } from "./helpers";
 import type { BeamMemoryState, BeamStats, JsonValue, MemoriaRetrieveResult, Metadata, SleepResult } from "./types";
@@ -58,70 +57,6 @@ const TIER2_DAYS = envInt("MNEMOPI_TIER2_DAYS", 30);
 const TIER3_DAYS = envInt("MNEMOPI_TIER3_DAYS", 180);
 const DEGRADE_BATCH_SIZE = envInt("MNEMOPI_DEGRADE_BATCH", 100);
 const TIER3_MAX_CHARS = envInt("MNEMOPI_TIER3_MAX_CHARS", 300);
-const DEFAULT_MAX_EPISODE_CHARS = 100_000;
-const SLEEP_SUMMARY_SEPARATOR = " | ";
-const SLEEP_TRUNCATION_MARKER = "\n[... sleep_consolidation episode truncated by maxEpisodeChars ...]";
-const PATTERN_FACT_EXTRACTION_MAX_INPUT_CHARS = REGEX_EXTRACTION_MAX_INPUT_CHARS;
-
-type SleepSummary = {
-	summary: string;
-	originalChars: number;
-	truncated: boolean;
-	maxChars: number;
-};
-type SleepChunk = {
-	items: Row[];
-	originalChars: number;
-};
-
-function normalizedMaxEpisodeChars(beam: BeamMemoryState): number {
-	const configured = Math.trunc(beam.config?.maxEpisodeChars ?? DEFAULT_MAX_EPISODE_CHARS);
-	return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MAX_EPISODE_CHARS;
-}
-
-function markTruncated(content: string, maxChars: number): string {
-	if (maxChars <= 0) return "";
-	if (maxChars <= SLEEP_TRUNCATION_MARKER.length) return content.slice(0, maxChars);
-	const bodyChars = maxChars - SLEEP_TRUNCATION_MARKER.length;
-	return `${content.slice(0, bodyChars).trimEnd()}${SLEEP_TRUNCATION_MARKER}`;
-}
-
-function splitSleepItems(beam: BeamMemoryState, source: string, items: readonly Row[]): SleepChunk[] {
-	const maxChars = normalizedMaxEpisodeChars(beam);
-	const prefixChars = `[${source}] `.length;
-	const joinedLimit = Math.max(0, maxChars - prefixChars);
-	const chunks: SleepChunk[] = [];
-	let current: Row[] = [];
-	let currentChars = 0;
-
-	for (const item of items) {
-		const contentChars = (rowValue(item, "content") ?? "").length;
-		const separatorChars = current.length === 0 ? 0 : SLEEP_SUMMARY_SEPARATOR.length;
-		if (current.length > 0 && currentChars + separatorChars + contentChars > joinedLimit) {
-			chunks.push({ items: current, originalChars: currentChars });
-			current = [];
-			currentChars = 0;
-		}
-		current.push(item);
-		currentChars += (current.length === 1 ? 0 : SLEEP_SUMMARY_SEPARATOR.length) + contentChars;
-	}
-	if (current.length > 0) chunks.push({ items: current, originalChars: currentChars });
-	return chunks;
-}
-
-function buildSleepSummary(beam: BeamMemoryState, source: string, chunk: SleepChunk): SleepSummary {
-	const maxChars = normalizedMaxEpisodeChars(beam);
-	const prefix = `[${source}] `;
-	const joined = chunk.items.map(item => rowValue(item, "content") ?? "").join(SLEEP_SUMMARY_SEPARATOR);
-	const uncapped = `${prefix}${aaakEncode(joined)}`;
-	const truncated = uncapped.length > maxChars;
-	return {
-		summary: truncated ? markTruncated(uncapped, maxChars) : uncapped,
-		originalChars: chunk.originalChars,
-		truncated,
-		maxChars,
-	};
-}
 
 function isoNow(): string {
 	return new Date().toISOString();
@@ -292,7 +227,7 @@ function insertFactRows(
 function insertTimeline(
 	beam: BeamMemoryState,
 	messageIdx: number,
-	date: string | null,
+	date: string,
 	description: string,
 	sourceMemoryId: string | null,
 ): void {
@@ -325,38 +260,6 @@ function insertKg(
 		source: sourceMemoryId ?? "extraction",
 		confidence: 0.65,
 	});
-}
-
-function insertPreference(
-	beam: BeamMemoryState,
-	messageIdx: number,
-	preference: string,
-	topic: string | null,
-	sourceMemoryId: string | null,
-): void {
-	beam.db.run(
-		`INSERT INTO memoria_preferences (session_id, message_idx, preference, topic, evolution, context_snippet, source_memory_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		[sourceSession(beam), messageIdx, preference, topic, null, preference, sourceMemoryId],
-	);
-}
-
-function insertInstruction(
-	beam: BeamMemoryState,
-	messageIdx: number,
-	instruction: string,
-	context: string,
-	sourceMemoryId: string | null,
-): void {
-	beam.db.run(
-		`INSERT INTO memoria_instructions (session_id, message_idx, instruction, active, topic, context_snippet, source_memory_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		[sourceSession(beam), messageIdx, instruction, 1, null, context, sourceMemoryId],
-	);
-}
-
-function timelineDate(description: string): string | null {
-	return /\b\d{4}-\d{2}-\d{2}\b/.exec(description)?.[0] ?? null;
 }
 
 /**
@@ -490,65 +393,33 @@ export function detectLanguage(_beam: BeamMemoryState, text: string): string {
 	}
 	return spanish >= 3 ? "es" : "en";
 }
-type StoreFactStringOptions = {
-	routeHeuristicCategories?: boolean;
-};
-
 export function storeFactStrings(
 	beam: BeamMemoryState,
 	facts: readonly string[],
 	messageIdx = 0,
 	sourceMemoryId: string | null = null,
 	importance = 0.7,
-	options: StoreFactStringOptions = {},
 ): number {
-	const routeHeuristicCategories = options.routeHeuristicCategories ?? true;
 	let stored = 0;
 	for (const fact of facts) {
 		insertFactRows(beam, messageIdx, "entity", "fact", fact, fact, importance, sourceMemoryId);
 		stored++;
-		if (!routeHeuristicCategories) continue;
 		const pref = /^The user (prefers|dislikes) (.+)$/i.exec(fact);
 		if (pref?.[2]) {
-			insertPreference(beam, messageIdx, fact, pref[2], sourceMemoryId);
+			beam.db.run(
+				`INSERT INTO memoria_preferences (session_id, message_idx, preference, topic, evolution, context_snippet, source_memory_id)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				[sourceSession(beam), messageIdx, fact, pref[2], null, fact, sourceMemoryId],
+			);
 		}
 		const instruction = /^Instruction: (.+)$/i.exec(fact);
 		if (instruction?.[1]) {
-			insertInstruction(beam, messageIdx, instruction[1], fact, sourceMemoryId);
+			beam.db.run(
+				`INSERT INTO memoria_instructions (session_id, message_idx, instruction, active, topic, context_snippet, source_memory_id)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				[sourceSession(beam), messageIdx, instruction[1], 1, null, fact, sourceMemoryId],
+			);
 		}
-	}
-	return stored;
-}
-
-/** Store category-preserving LLM extraction output in MEMORIA and KG tables. */
-export function storeExtractedFactCategories(
-	beam: BeamMemoryState,
-	extracted: ExtractedFactCategories,
-	messageIdx = 0,
-	sourceMemoryId: string | null = null,
-	importance = 0.7,
-): number {
-	let stored = storeFactStrings(beam, extracted.facts, messageIdx, sourceMemoryId, importance);
-	stored += storeFactStrings(beam, extracted.instructions, messageIdx, sourceMemoryId, importance, {
-		routeHeuristicCategories: false,
-	});
-	stored += storeFactStrings(beam, extracted.preferences, messageIdx, sourceMemoryId, importance, {
-		routeHeuristicCategories: false,
-	});
-	stored += storeFactStrings(beam, extracted.timelines, messageIdx, sourceMemoryId, importance, {
-		routeHeuristicCategories: false,
-	});
-	for (const instruction of extracted.instructions) {
-		insertInstruction(beam, messageIdx, instruction, instruction, sourceMemoryId);
-	}
-	for (const preference of extracted.preferences) {
-		insertPreference(beam, messageIdx, preference, null, sourceMemoryId);
-	}
-	for (const timeline of extracted.timelines) {
-		insertTimeline(beam, messageIdx, timelineDate(timeline), timeline, sourceMemoryId);
-	}
-	for (const triple of extracted.kg) {
-		insertKg(beam, messageIdx, triple.subject, triple.predicate, triple.object, sourceMemoryId);
 	}
 	return stored;
 }
@@ -569,7 +440,6 @@ export function extractAndStoreFacts(
 		decision: 0,
 	};
 	const text = String(content ?? "");
-	if (text.length > PATTERN_FACT_EXTRACTION_MAX_INPUT_CHARS) return counts;
 	for (const match of text.matchAll(
 		/(\d+(?:[.,]\d+)?)\s*(ms|sec|seconds?|minutes?|hours?|days?|weeks?|months?|%|KB|MB|GB|TB|rows?|columns?|roles?|features?|bugs?|commits?|cards?|users?|items?|tests?|APIs?|endpoints?|sprints?|tickets?)\b/gi,
 	)) {
@@ -960,7 +830,7 @@ function eligibleWorkingRows(beam: BeamMemoryState, sessionId: string): Row[] {
 	return asRows(
 		beam.db
 			.query(
-				`SELECT id, COALESCE(embed_text, content) AS content, source, timestamp, importance, metadata_json, scope, valid_until, veracity
+				`SELECT id, content, source, timestamp, importance, metadata_json, scope, valid_until, veracity
 		 FROM working_memory
 		 WHERE COALESCE(session_id, 'default') = ? AND timestamp < ? AND consolidated_at IS NULL
 		 ORDER BY timestamp ASC LIMIT ?`,
@@ -1008,34 +878,26 @@ export function sleep(beam: BeamMemoryState, dryRun = false): SleepResult {
 	const consolidatedIds: string[] = [];
 	let summariesCreated = 0;
 	for (const [source, items] of grouped) {
-		for (const chunk of splitSleepItems(beam, source, items)) {
-			const ids = chunk.items.map(item => rowValue(item, "id")).filter((id): id is string => id !== null);
-			let scope = "session";
-			let validUntil: string | null = null;
-			for (const item of chunk.items) {
-				if (rowValue(item, "scope") === "global") scope = "global";
-				const itemValidUntil = rowValue(item, "valid_until");
-				if (itemValidUntil && (validUntil === null || itemValidUntil < validUntil)) validUntil = itemValidUntil;
-			}
-			const sleepSummary = buildSleepSummary(beam, source, chunk);
-			const metadata: Metadata = { original_count: chunk.items.length, source, llm_used: false };
-			if (sleepSummary.truncated) {
-				metadata.truncated = true;
-				metadata.original_chars = sleepSummary.originalChars;
-				metadata.max_chars = sleepSummary.maxChars;
-			}
-			const summary = sleepSummary.summary;
-			if (!dryRun) {
-				consolidateToEpisodic(beam, summary, ids, "sleep_consolidation", 0.6, {
-					scope,
-					validUntil,
-					veracity: aggregateEpisodicVeracity(chunk.items.map(item => rowValue(item, "veracity") ?? "unknown")),
-					metadata,
-				});
-			}
-			consolidatedIds.push(...ids);
-			summariesCreated++;
+		const lines = items.map(item => rowValue(item, "content") ?? "");
+		const ids = items.map(item => rowValue(item, "id")).filter((id): id is string => id !== null);
+		let scope = "session";
+		let validUntil: string | null = null;
+		for (const item of items) {
+			if (rowValue(item, "scope") === "global") scope = "global";
+			const itemValidUntil = rowValue(item, "valid_until");
+			if (itemValidUntil && (validUntil === null || itemValidUntil < validUntil)) validUntil = itemValidUntil;
 		}
+		const summary = `[${source}] ${aaakEncode(lines.join(" | "))}`;
+		if (!dryRun) {
+			consolidateToEpisodic(beam, summary, ids, "sleep_consolidation", 0.6, {
+				scope,
+				validUntil,
+				veracity: aggregateEpisodicVeracity(items.map(item => rowValue(item, "veracity") ?? "unknown")),
+				metadata: { original_count: items.length, source, llm_used: false },
+			});
+		}
+		consolidatedIds.push(...ids);
+		summariesCreated++;
 	}
 	if (!dryRun) {
 		beam.db.run(

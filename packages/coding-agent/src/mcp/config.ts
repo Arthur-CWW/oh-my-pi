@@ -9,13 +9,15 @@ import { mcpCapability } from "../capability/mcp";
 import type { SourceMeta } from "../capability/types";
 import type { MCPServer } from "../discovery";
 import { loadCapability } from "../discovery";
-import { readDisabledServers, readEnabledServers } from "./config-writer";
+import { readDisabledServers } from "./config-writer";
 import type { MCPServerConfig } from "./types";
 
 /** Options for loading MCP configs */
 export interface LoadMCPConfigsOptions {
 	/** Whether to load project-level config (default: true) */
 	enableProjectConfig?: boolean;
+	/** Whether to load Codex-compatible MCP config.toml files (default: false) */
+	codexCompat?: boolean;
 	/** Whether to filter out Exa MCP servers (default: true) */
 	filterExa?: boolean;
 	/** Whether to filter out browser MCP servers when builtin browser tool is enabled (default: false) */
@@ -94,31 +96,32 @@ function convertToLegacyConfig(server: MCPServer): MCPServerConfig {
  */
 export async function loadAllMCPConfigs(cwd: string, options?: LoadMCPConfigsOptions): Promise<LoadMCPConfigsResult> {
 	const enableProjectConfig = options?.enableProjectConfig ?? true;
+	const codexCompat = options?.codexCompat ?? false;
 	const filterExa = options?.filterExa ?? true;
 	const filterBrowser = options?.filterBrowser ?? false;
 
-	// Load MCP servers via capability system
-	const result = await loadCapability<MCPServer>(mcpCapability.id, { cwd });
-
+	// Load MCP servers via capability system. Codex's config.toml is an
+	// compatibility surface and must be explicitly enabled; project/user mcp.json
+	// providers remain enabled regardless of this setting.
+	const result = await loadCapability<MCPServer>(mcpCapability.id, {
+		cwd,
+		...(codexCompat ? {} : { excludeProviders: ["codex"] }),
+	});
 	// Filter out project-level configs if disabled
 	const servers = enableProjectConfig
 		? result.items
 		: result.items.filter(server => server._source.level !== "project");
 
-	// Load user-level disable/force-enable lists. The denylist always wins; the
-	// allowlist overrides a non-writable source config's `enabled: false`.
-	const userPath = getMCPConfigPath("user", cwd);
-	const [disabledServers, forcedEnabled] = await Promise.all([
-		readDisabledServers(userPath).then(list => new Set(list)),
-		readEnabledServers(userPath).then(list => new Set(list)),
-	]);
+	// Load user-level disabled servers list
+	const disabledServers = new Set(await readDisabledServers(getMCPConfigPath("user", cwd)));
 	// Convert to legacy format and preserve source metadata
 	let configs: Record<string, MCPServerConfig> = {};
 	let sources: Record<string, SourceMeta> = {};
 	for (const server of servers) {
 		const config = convertToLegacyConfig(server);
-		if (disabledServers.has(server.name)) continue;
-		if (config.enabled === false && !forcedEnabled.has(server.name)) continue;
+		if (config.enabled === false || disabledServers.has(server.name)) {
+			continue;
+		}
 		configs[server.name] = config;
 		sources[server.name] = server._source;
 	}

@@ -4,11 +4,9 @@
  * Uses PI_CONFIG_DIR (default ".omp") for the config root and
  * PI_CODING_AGENT_DIR to override the agent directory.
  *
- * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME environment
- * variables are set, paths are redirected to XDG-compliant locations under
- * $XDG_*_HOME/omp/. This requires running `omp config migrate` first to
- * move data to the new locations. No filesystem existence checks are performed
- * — if the env var is set, omp trusts that the migration has been done.
+ * On Linux and macOS, XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME redirect
+ * paths under $XDG_*_HOME/omp only after all three app roots exist. Running
+ * `omp config init-xdg` creates that complete root set.
  */
 
 import * as fs from "node:fs";
@@ -22,11 +20,9 @@ export const APP_NAME: string = "omp";
 /** Config directory name (e.g. ".omp") */
 export const CONFIG_DIR_NAME: string = ".omp";
 
-/** Ordered main settings filenames: canonical write target first, legacy-compatible YAML fallback second. */
-export const MAIN_CONFIG_FILENAMES = ["config.yml", "config.yaml"] as const;
-
-/** Version (e.g. "1.0.0") */
-export const VERSION: string = version;
+/** Version (e.g. "1.0.0" or "1.0.0+fork.abcdef1" for local fork binaries) */
+const FORK_HASH = process.env.PI_FORK_HASH?.trim();
+export const VERSION: string = FORK_HASH ? `${version}+fork.${FORK_HASH}` : version;
 
 /** Minimum Bun version */
 export const MIN_BUN_VERSION: string = engines.bun.replace(/[^0-9.]/g, "");
@@ -188,20 +184,6 @@ export function setProjectDir(dir: string): void {
 	process.chdir(projectDir);
 }
 
-/**
- * Whether `dir` resolves to an existing directory. Any stat failure — a deleted
- * path (ENOENT), permission error, or a non-directory — returns `false`, so
- * callers can decide whether a directory is safe to `chdir` into or adopt as a
- * working directory before {@link setProjectDir} throws on it.
- */
-export async function directoryExists(dir: string): Promise<boolean> {
-	try {
-		return (await fs.promises.stat(dir)).isDirectory();
-	} catch {
-		return false;
-	}
-}
-
 /** Get the config directory name relative to home (e.g. ".omp" or PI_CONFIG_DIR override). */
 export function getConfigDirName(): string {
 	return process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
@@ -246,10 +228,17 @@ class DirResolver {
 		this.agentDir = agentDirOverride ? path.resolve(agentDirOverride) : defaultAgent;
 		const isDefault = this.agentDir === defaultAgent;
 
-		// XDG is a Linux convention. On supported platforms, default profile state
-		// resolves under $XDG_*_HOME/omp once `omp config init-xdg` has migrated
-		// the user's data. Named profiles follow a stricter rule: the XDG choice
-		// is keyed on the profile-specific XDG path, never the base app root.
+		// XDG is a Linux convention. On supported platforms, state resolves under
+		// $XDG_*_HOME/omp only after all three category roots exist. `omp config
+		// init-xdg` creates the three roots as one operation.
+		//
+		// The all-or-nothing check is intentional: release/workspace artifacts may
+		// create $XDG_DATA_HOME/omp on their own. Treating that single directory as
+		// an XDG migration used to split auth, sessions, blobs, logs, and caches
+		// across unrelated roots.
+		//
+		// Named profiles follow the same atomic rule, keyed on their profile-
+		// specific XDG paths rather than the base app roots.
 		//
 		// Why: if we consulted the base app root for named profiles too, the same
 		// profile could resolve to `~/.omp/profiles/<name>` on first activation
@@ -262,27 +251,29 @@ class DirResolver {
 		let xdgState: string | undefined;
 		let xdgCache: string | undefined;
 		if ((process.platform === "linux" || process.platform === "darwin") && isDefault) {
-			const resolveIf = (envVar: string) => {
+			const resolveRoot = (envVar: string): string | undefined => {
 				const value = process.env[envVar];
 				if (!value) return undefined;
-				try {
-					const appRoot = path.join(value, APP_NAME);
-					if (profile) {
-						const profilePath = path.join(appRoot, "profiles", profile);
-						if (fs.existsSync(profilePath)) {
-							return profilePath;
-						}
-						return undefined;
-					}
-					if (fs.existsSync(appRoot)) {
-						return appRoot;
-					}
-				} catch {}
-				return undefined;
+				const appRoot = path.join(value, APP_NAME);
+				return profile ? path.join(appRoot, "profiles", profile) : appRoot;
 			};
-			xdgData = resolveIf("XDG_DATA_HOME");
-			xdgState = resolveIf("XDG_STATE_HOME");
-			xdgCache = resolveIf("XDG_CACHE_HOME");
+			const candidateData = resolveRoot("XDG_DATA_HOME");
+			const candidateState = resolveRoot("XDG_STATE_HOME");
+			const candidateCache = resolveRoot("XDG_CACHE_HOME");
+			try {
+				const xdgInitialized =
+					candidateData !== undefined &&
+					candidateState !== undefined &&
+					candidateCache !== undefined &&
+					fs.existsSync(candidateData) &&
+					fs.existsSync(candidateState) &&
+					fs.existsSync(candidateCache);
+				if (xdgInitialized) {
+					xdgData = candidateData;
+					xdgState = candidateState;
+					xdgCache = candidateCache;
+				}
+			} catch {}
 		}
 
 		this.#rootDirs = {
@@ -434,18 +425,6 @@ export function __resetProfileSnapshotForTests(): void {
 	);
 }
 
-/**
- * Test-only: rebuild profile + directory state from the current process env.
- * Production code keeps the module-load profile stable; tests that mutate
- * `setAgentDir`/`setProfile` need an exact restore point after they put env vars
- * back.
- */
-export function __resetDirsFromEnvForTests(): void {
-	activeProfile = readProfileFromEnvSafe();
-	__resetProfileSnapshotForTests();
-	refreshDirsFromEnv();
-}
-
 /** Activate a named profile. Passing undefined or "default" returns to the default profile. */
 export function setProfile(profile: string | undefined): void {
 	const next = normalizeProfileName(profile);
@@ -555,51 +534,9 @@ export function getRemoteDir(): string {
 	return dirs.rootSubdir("remote", "data");
 }
 
-/**
- * Expand a leading `~` and require an absolute result. Returns `undefined` for
- * empty/whitespace input or a path that is still relative after expansion.
- *
- * A worktree base is process-global and consumed by both creation
- * (PR checkout, task isolation) and cleanup (`omp worktree`). A relative value
- * would resolve against whatever cwd happened to launch `omp`, so checkout and
- * cleanup could disagree — we refuse it rather than silently bind it to cwd.
- */
-function resolveWorktreeBase(value: string | undefined): string | undefined {
-	const trimmed = value?.trim();
-	if (!trimmed) return undefined;
-	let p = trimmed;
-	if (p === "~") p = os.homedir();
-	else if (p.startsWith("~/") || p.startsWith("~\\")) p = os.homedir() + p.slice(1);
-	return path.isAbsolute(p) ? path.normalize(p) : undefined;
-}
-
-let worktreesDirOverride: string | undefined;
-
-/**
- * Relocate the base directory for agent-managed worktrees (PR checkouts, task
- * isolation, and `omp worktree` cleanup all read the same base). Driven by the
- * `worktree.base` setting in coding-agent; pass `undefined`/empty to clear and
- * fall back to `OMP_WORKTREE_DIR` or the `~/.omp/wt` default.
- *
- * `~` is expanded and a relative path is rejected (see {@link resolveWorktreeBase}).
- * Returns the absolute path that took effect, or `undefined` if the input was
- * cleared or rejected — callers can warn on a non-empty input that returns
- * `undefined`.
- */
-export function setWorktreesDir(dir: string | undefined): string | undefined {
-	worktreesDirOverride = resolveWorktreeBase(dir);
-	return worktreesDirOverride;
-}
-
-/**
- * Get the agent-managed worktrees directory. Resolution order: the
- * `OMP_WORKTREE_DIR` env var, then the {@link setWorktreesDir} override (the
- * `worktree.base` setting), then the `~/.omp/wt` default. The env var and the
- * override are both `~`-expanded and must be absolute; a relative value is
- * ignored and resolution falls through.
- */
+/** Get the agent-managed worktrees directory (~/.omp/wt). */
 export function getWorktreesDir(): string {
-	return resolveWorktreeBase(process.env.OMP_WORKTREE_DIR) ?? worktreesDirOverride ?? dirs.rootSubdir("wt", "data");
+	return dirs.rootSubdir("wt", "data");
 }
 
 /** Get the SSH control socket directory (~/.omp/ssh-control). */
@@ -748,11 +685,6 @@ export function getModelDbPath(agentDir?: string): string {
 /** Get the tiny title model cache directory (~/.omp/agent/cache/tiny-models). */
 export function getTinyModelsCacheDir(agentDir?: string): string {
 	return dirs.agentSubdir(agentDir, path.join("cache", "tiny-models"), "cache");
-}
-
-/** Get the document conversion cache directory (~/.omp/agent/cache/document-conversions; XDG default: $XDG_CACHE_HOME/omp/cache/document-conversions). */
-export function getDocumentConversionCacheDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, path.join("cache", "document-conversions"), "cache");
 }
 
 /** Get the sessions directory (~/.omp/agent/sessions). */

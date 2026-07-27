@@ -35,31 +35,35 @@ describe("WelcomeComponent tips", () => {
 		expect(welcomeRegular.tip).not.toBe("Please use nerdfont 😭.");
 		expect(welcomeRegular.tip).toBeDefined();
 	});
+});
 
-	it("weights [NEW] tips above ordinary tips in selection", () => {
-		// Skip the nerdfont gate so the only Math.random() call is the weighted pick.
-		vi.spyOn(theme, "getSymbolPreset").mockReturnValue("nerd");
-		let r = 0;
-		vi.spyOn(Math, "random").mockImplementation(() => r);
+describe("WelcomeComponent rendering", () => {
+	beforeAll(async () => {
+		await Settings.init({ inMemory: true });
+		await initTheme(false);
+	});
 
-		const counts = new Map<string, number>();
-		const samples = 10_000;
-		for (let i = 0; i < samples; i++) {
-			r = (i + 0.5) / samples; // sweep the selection domain uniformly
-			const tip = new WelcomeComponent("1.0.0", "model", "provider").tip;
-			if (tip) counts.set(tip, (counts.get(tip) ?? 0) + 1);
+	it("renders the welcome panel without an enclosing box frame", () => {
+		const welcome = new WelcomeComponent("1.2.3", "test-model", "test-provider", [
+			{ name: "recent-session-name", timeAgo: "2h ago" },
+		]);
+		const plain = welcome.render(100).map(line => Bun.stripANSI(line));
+		const joined = plain.join("\n");
+
+		// No box-frame corners or tee-joins anywhere in the panel…
+		expect(joined).not.toMatch(/[┌┐└┘╭╮╰╯┬┴├┤┼]/);
+		// …and no enclosing side verticals: content rows never start or end with a
+		// vertical bar (a single middle divider between the two columns is allowed).
+		for (const line of plain) {
+			expect(line.startsWith("│")).toBe(false);
+			expect(line.endsWith("│")).toBe(false);
 		}
 
-		let newMax = 0;
-		let ordinaryMax = 0;
-		for (const [tip, count] of counts) {
-			if (/\[NEW\]\s*$/.test(tip)) newMax = Math.max(newMax, count);
-			else ordinaryMax = Math.max(ordinaryMax, count);
-		}
-
-		// A "[NEW]" tip carries a >1 weight, so it covers strictly more of the
-		// uniform selection domain than any single ordinary tip.
-		expect(newMax).toBeGreaterThan(0);
-		expect(newMax).toBeGreaterThan(ordinaryMax);
+		// Heading, both columns, and the recent-session entry are preserved.
+		expect(joined).toContain("Welcome back!");
+		expect(joined).toContain("v1.2.3");
+		expect(joined).toContain("test-model");
+		expect(joined).toContain("test-provider");
+		expect(joined).toContain("recent-session-name");
 	});
 });

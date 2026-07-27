@@ -5,20 +5,15 @@
  * block self-clears. Sync task spawns and eval `agent()` spawns are excluded:
  * their progress is already rendered inline (tool block / eval cell).
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { InteractiveMode, renderSubagentHudLines } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
+import { beforeAll, describe, expect, it, setSystemTime, vi } from "bun:test";
+import { renderSubagentHudLines } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
+import { SubagentHudRenderer } from "@oh-my-pi/pi-coding-agent/modes/components/subagent-hud";
 import {
 	type ObservableSession,
 	SessionObserverRegistry,
 } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import {
 	type AgentProgress,
 	type SubagentLifecyclePayload,
@@ -27,7 +22,6 @@ import {
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
 } from "@oh-my-pi/pi-coding-agent/task";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { TempDir } from "@oh-my-pi/pi-utils";
 
 function makeSession(overrides: Partial<ObservableSession> & { id: string }): ObservableSession {
 	return {
@@ -163,9 +157,74 @@ describe("subagent HUD lines", () => {
 		expect(out).not.toContain("Inline");
 	});
 
+	it("rehydrates a rebuilt roster from AgentRegistry without progress events", () => {
+		const agents = new AgentRegistry();
+		agents.register({
+			id: MAIN_AGENT_ID,
+			displayName: "Main Session",
+			kind: "main",
+			session: null,
+			status: "running",
+		});
+		agents.register({
+			id: "QuietRoot",
+			displayName: "Quiet root",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			status: "running",
+		});
+		agents.register({
+			id: "QuietRoot.ParkedLeaf",
+			displayName: "Parked leaf",
+			kind: "sub",
+			parentId: "QuietRoot",
+			session: null,
+			status: "parked",
+		});
+		agents.register({
+			id: "IdleSibling",
+			displayName: "Idle sibling",
+			kind: "sub",
+			parentId: MAIN_AGENT_ID,
+			session: null,
+			status: "idle",
+		});
+
+		const first = new SessionObserverRegistry();
+		first.subscribeToAgentRegistry(agents);
+		const expected = agents
+			.list()
+			.filter(ref => ref.kind === "sub")
+			.map(ref => ref.id);
+		expect(
+			first
+				.getSessions()
+				.filter(session => session.kind === "subagent")
+				.map(session => session.id),
+		).toEqual(expected);
+		expect(first.getSessions().find(session => session.id === "QuietRoot.ParkedLeaf")).toMatchObject({
+			registryStatus: "parked",
+			parentAgentId: "QuietRoot",
+		});
+		first.dispose();
+
+		const rebuilt = new SessionObserverRegistry();
+		rebuilt.subscribeToAgentRegistry(agents);
+		expect(
+			rebuilt
+				.getSessions()
+				.filter(session => session.kind === "subagent")
+				.map(session => session.id),
+		).toEqual(expected);
+		expect(render(rebuilt.getSessions())).toContain("QuietRoot: Quiet root");
+		rebuilt.dispose();
+	});
+
 	it("renders nested ids as a breadcrumb and truncates long descriptions to the viewport", () => {
 		const out = render([makeSession({ id: "Anna.Bob", description: `start ${"x".repeat(300)} end` })], 60);
-		expect(out).toContain("Anna>Bob:");
+		expect(out).toContain("Bob:");
+		expect(out).not.toContain("Anna>Bob");
 		expect(out).not.toContain("end");
 		for (const line of out.split("\n")) {
 			expect(Bun.stringWidth(line)).toBeLessThanOrEqual(60);
@@ -208,99 +267,264 @@ describe("subagent HUD lines", () => {
 
 		expect(activeIds()).toEqual(["SelectorSurfaces", "BlastRadius", "VariantsSurvey"]);
 	});
-
-	it("renders the first eight active detached subagents and summarizes the rest", () => {
-		const active = Array.from({ length: 10 }, (_, index) =>
-			makeSession({
-				id: `Worker${index}`,
-				description: `job ${index}`,
-			}),
-		);
-
-		const out = render(active, 120);
-
-		for (const session of active.slice(0, 8)) {
-			expect(out).toContain(`${session.id}: ${session.description}`);
-		}
-		for (const session of active.slice(8)) {
-			expect(out).not.toContain(`${session.id}: ${session.description}`);
-		}
-		expect(out).toContain("2 more running");
-	});
-});
-
-describe("InteractiveMode subagent observer UI sync", () => {
-	let tempDir: TempDir;
-	let authStorage: AuthStorage;
-	let session: AgentSession;
-	let mode: InteractiveMode;
-	let eventBus: EventBus;
-
-	beforeAll(async () => {
-		await initTheme();
-	});
-
-	beforeEach(async () => {
-		resetSettingsForTest();
-		tempDir = TempDir.createSync("@pi-subagent-observer-");
-		await Settings.init({
-			inMemory: true,
-			cwd: tempDir.path(),
-			overrides: { "startup.quiet": true },
-		});
-		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		const modelRegistry = new ModelRegistry(authStorage);
-		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
-		if (!model) throw new Error("Expected claude-sonnet-4-5 to exist in registry");
-
-		eventBus = new EventBus();
-		session = new AgentSession({
-			agent: new Agent({
-				initialState: {
-					model,
-					systemPrompt: ["Test"],
-					tools: [],
-					messages: [],
-				},
-			}),
-			sessionManager: SessionManager.create(tempDir.path(), tempDir.path()),
-			settings: Settings.isolated({ "startup.quiet": true }),
-			modelRegistry,
-		});
-		mode = new InteractiveMode(session, "test", undefined, undefined, undefined, undefined, eventBus);
-	});
-
-	afterEach(async () => {
-		mode?.stop();
-		await session?.dispose();
-		authStorage?.close();
-		tempDir?.removeSync();
-		vi.useRealTimers();
-		vi.restoreAllMocks();
-		resetSettingsForTest();
-	});
-
-	it("coalesces a burst of progress observer changes into one HUD rebuild and render request", async () => {
-		await mode.init({ suppressWelcomeIntro: true });
-		const requestRender = vi.spyOn(mode.ui, "requestRender").mockImplementation(() => {});
-		const rebuildHud = vi.spyOn(mode.subagentContainer, "clear");
+	it("computes a sliding token rate and marks an event-stale running row", () => {
 		vi.useFakeTimers();
+		const registry = new SessionObserverRegistry();
+		const eventBus = new EventBus();
+		registry.subscribeToEventBus(eventBus);
+		const start = new Date("2025-01-01T00:00:00.000Z");
+		setSystemTime(start);
+		try {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("RateWorker", 0, "rate work", true));
+			const progress = (tokens: number, outputTokens?: number): SubagentProgressPayload => ({
+				...makeProgressPayload("RateWorker", 0, "rate work", true),
+				progress: makeProgress({ id: "RateWorker", index: 0, description: "rate work", tokens, outputTokens }),
+			});
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(100, 10));
+			setSystemTime(new Date(start.getTime() + 15_000));
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(250, 25));
 
-		for (let index = 0; index < 6; index++) {
-			eventBus.emit(
-				TASK_SUBAGENT_PROGRESS_CHANNEL,
-				makeProgressPayload(`BurstAgent${index}`, index, `Burst job ${index}`, true),
-			);
+			const live = registry.getSessions().find(session => session.id === "RateWorker");
+			// Rate is computed from outputTokens: (25-10)/15s = 1 t/s
+			expect(live?.tokenRate).toBeCloseTo(1, 5);
+			expect(live?.tokenRateStuck).toBe(false);
+			expect(render(registry.getSessions())).toMatch(/\s1 t\/s$/m);
+
+			setSystemTime(new Date(start.getTime() + 61_000));
+			const decayed = registry.getSessions().find(session => session.id === "RateWorker");
+			expect(decayed).toMatchObject({ tokenRate: 0, tokenRateStuck: false });
+
+			setSystemTime(new Date(start.getTime() + 76_000));
+			const stale = registry.getSessions().find(session => session.id === "RateWorker");
+			expect(stale).toMatchObject({ tokenRate: 0, tokenRateStuck: true });
+			expect(render(registry.getSessions())).toMatch(/\s0 t\/s$/m);
+		} finally {
+			registry.dispose();
+			vi.useRealTimers();
 		}
+	});
 
-		await Promise.resolve();
-		vi.runAllTimers();
-		await Promise.resolve();
+	it("renders parent-probed liveness states instead of 0 t/s", () => {
+		const out = render([
+			makeSession({
+				id: "StalledWorker",
+				tokenRateStuck: true,
+				progress: makeProgress({ id: "StalledWorker", livenessState: "stalled" }),
+			}),
+			makeSession({
+				id: "DeadWorker",
+				tokenRateStuck: true,
+				progress: makeProgress({ id: "DeadWorker", livenessState: "dead" }),
+			}),
+		]);
 
-		const hud = Bun.stripANSI(mode.subagentContainer.render(120).join("\n"));
-		expect(hud).toContain("BurstAgent0: Burst job 0");
-		expect(hud).toContain("BurstAgent5: Burst job 5");
-		expect(rebuildHud).toHaveBeenCalledTimes(1);
-		expect(requestRender).toHaveBeenCalledTimes(1);
+		expect(out).toContain("STALLED");
+		expect(out).toContain("DEAD");
+		expect(out).not.toContain("0 t/s");
+	});
+
+	it("resets the rate baseline when a revived child's counters regress", () => {
+		vi.useFakeTimers();
+		const registry = new SessionObserverRegistry();
+		const eventBus = new EventBus();
+		registry.subscribeToEventBus(eventBus);
+		const start = new Date("2025-01-01T00:00:00.000Z");
+		setSystemTime(start);
+		try {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("ReviveWorker", 0, "revive work", true));
+			const progress = (tokens: number, outputTokens: number): SubagentProgressPayload => ({
+				...makeProgressPayload("ReviveWorker", 0, "revive work", true),
+				progress: makeProgress({ id: "ReviveWorker", index: 0, description: "revive work", tokens, outputTokens }),
+			});
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(1000, 500));
+			setSystemTime(new Date(start.getTime() + 5_000));
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(1100, 600));
+			// Revival: same agent id, counters restart from zero.
+			setSystemTime(new Date(start.getTime() + 10_000));
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(50, 10));
+			setSystemTime(new Date(start.getTime() + 15_000));
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(150, 60));
+			const live = registry.getSessions().find(session => session.id === "ReviveWorker");
+			// Fresh baseline after regression: (60-10)/5s = 10 t/s, never a
+			// zero-clamped delta against the pre-revival 600 baseline.
+			expect(live?.tokenRate).toBeCloseTo(10, 5);
+		} finally {
+			registry.dispose();
+			vi.useRealTimers();
+		}
+	});
+
+	it("renders liveness badges even when the token-rate badge is disabled", () => {
+		const renderer = new SubagentHudRenderer();
+		const rows = renderer.render(
+			[
+				makeSession({
+					id: "StalledQuiet",
+					description: "stalled work",
+					progress: makeProgress({ id: "StalledQuiet", livenessState: "stalled" }),
+				}),
+			],
+			120,
+			false,
+		);
+		expect(Bun.stripANSI(rows.join("\n"))).toContain("STALLED");
+	});
+
+	it("rebuilds a cached row when a healthy 0 t/s turns stuck", () => {
+		const renderer = new SubagentHudRenderer();
+		const session = (stuck: boolean) =>
+			makeSession({ id: "ZeroRate", description: "zero work", tokenRate: 0, tokenRateStuck: stuck });
+		renderer.render([session(false)], 120);
+		renderer.resetPerformanceCounters();
+		renderer.render([session(true)], 120);
+		// Same badge text, different color state — the cached green row must not be reused.
+		expect(renderer.getPerformanceCounters().rowRebuilds).toBe(1);
+	});
+
+	it("renders a three-deep short-name tree with aligned badge columns", () => {
+		const rows = [
+			makeSession({
+				id: "HR147ColonMode",
+				description: "Colon-mode UX implementer",
+				tokenRate: 9.6,
+				progress: makeProgress({ id: "HR147ColonMode", resolvedModel: "openai-codex/gpt-5.6-sol:xhigh" }),
+			}),
+			makeSession({
+				id: "HR147ColonMode.HR151DismissAction",
+				parentAgentId: "HR147ColonMode",
+				description: "Modal input-action migration specialist",
+				tokenRate: 123.4,
+				progress: makeProgress({
+					id: "HR147ColonMode.HR151DismissAction",
+					resolvedModel: "anthropic/claude-sonnet-4-6:high",
+				}),
+			}),
+			makeSession({
+				id: "HR147ColonMode.HR151DismissAction.DismissSelectors",
+				parentAgentId: "HR147ColonMode.HR151DismissAction",
+				description: "Selector dismissal migration specialist",
+				tokenRate: 1.2,
+				tokenRateStuck: true,
+				progress: makeProgress({
+					id: "HR147ColonMode.HR151DismissAction.DismissSelectors",
+					resolvedModel: "kimi-code/kimi-for-coding:medium",
+				}),
+			}),
+		];
+		const rendered = render(rows, 100)
+			.split("\n")
+			.filter(line => line.includes("["));
+		expect(rendered).toHaveLength(3);
+		expect(rendered[0]).toContain("[OX5.6solxh] HR147ColonMode: Colon-mode UX implementer");
+		expect(rendered[1]).toContain("[AN4.6sonneth] HR151DismissAction: Modal input-action migration specialist");
+		expect(rendered[2]).toContain("[KMkimim] DismissSelectors: Selector dismissal migration specialist");
+		expect(rendered.join("\n")).not.toContain("HR147ColonMode.HR151DismissAction");
+		expect(rendered.map(line => Bun.stringWidth(line))).toEqual([99, 99, 99]);
+		expect(rendered[0]).toMatch(/\s10 t\/s$/);
+		expect(rendered[1]).toMatch(/\s123 t\/s$/);
+		expect(rendered[2]).toMatch(/\s1 t\/s$/);
+	});
+
+	it("keeps long-role rows on one display line at narrow, normal, and wide widths", () => {
+		const row = makeSession({
+			id: "LongRoleWorker",
+			description: `HUD and Hub polish implementer ${"with a deliberately long role ".repeat(20)}`,
+			tokenRate: 123.4,
+			progress: makeProgress({
+				id: "LongRoleWorker",
+				resolvedModel: "openai-codex/gpt-5.6-sol:xhigh",
+			}),
+		});
+		for (const width of [60, 100, 160]) {
+			const rendered = renderSubagentHudLines([row], width).at(-1)!;
+			const plain = Bun.stripANSI(rendered);
+			expect(Bun.stringWidth(plain)).toBe(width - 1);
+			expect(plain).toMatch(/…\s+123 t\/s$/);
+			expect(plain.split("\n")).toHaveLength(1);
+		}
+	});
+
+	it("cache-heavy turn yields output-rate not billing-volume rate", () => {
+		vi.useFakeTimers();
+		const registry = new SessionObserverRegistry();
+		const eventBus = new EventBus();
+		registry.subscribeToEventBus(eventBus);
+		const start = new Date("2025-06-01T00:00:00.000Z");
+		setSystemTime(start);
+		try {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("CacheHeavy", 0, "cache work", true));
+			const progress = (tokens: number, outputTokens: number): SubagentProgressPayload => ({
+				...makeProgressPayload("CacheHeavy", 0, "cache work", true),
+				progress: makeProgress({ id: "CacheHeavy", index: 0, description: "cache work", tokens, outputTokens }),
+			});
+			// Turn 1: 150k total (input+cacheWrite), 100 output
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(150_000, 100));
+			setSystemTime(new Date(start.getTime() + 10_000));
+			// Turn 2: 300k total, 400 output (300 new output tokens in 10s => 30 t/s)
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(300_000, 400));
+
+			const session = registry.getSessions().find(s => s.id === "CacheHeavy");
+			// Rate should be ~30 (output-based), NOT ~15000 (total-based)
+			expect(session?.tokenRate).toBeCloseTo(30, 5);
+			expect(session?.tokenRate).toBeLessThan(100);
+			expect(render(registry.getSessions())).toMatch(/\s30 t\/s$/m);
+		} finally {
+			registry.dispose();
+			vi.useRealTimers();
+		}
+	});
+
+	it("old child without outputTokens falls back to total for rate", () => {
+		vi.useFakeTimers();
+		const registry = new SessionObserverRegistry();
+		const eventBus = new EventBus();
+		registry.subscribeToEventBus(eventBus);
+		const start = new Date("2025-06-01T00:00:00.000Z");
+		setSystemTime(start);
+		try {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("OldChild", 0, "legacy work", true));
+			// Simulate old child that does not send outputTokens
+			const progress = (tokens: number): SubagentProgressPayload => ({
+				...makeProgressPayload("OldChild", 0, "legacy work", true),
+				progress: makeProgress({ id: "OldChild", index: 0, description: "legacy work", tokens }),
+			});
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(500));
+			setSystemTime(new Date(start.getTime() + 10_000));
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(1000));
+
+			const session = registry.getSessions().find(s => s.id === "OldChild");
+			// Falls back to total: (1000-500)/10s = 50 t/s
+			expect(session?.tokenRate).toBeCloseTo(50, 5);
+		} finally {
+			registry.dispose();
+			vi.useRealTimers();
+		}
+	});
+
+	it("stuck detection fires on total-advance stagnation even when outputTokens grows", () => {
+		vi.useFakeTimers();
+		const registry = new SessionObserverRegistry();
+		const eventBus = new EventBus();
+		registry.subscribeToEventBus(eventBus);
+		const start = new Date("2025-06-01T00:00:00.000Z");
+		setSystemTime(start);
+		try {
+			eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, makeLifecycle("StuckWorker", 0, "stuck work", true));
+			const progress = (tokens: number, outputTokens: number): SubagentProgressPayload => ({
+				...makeProgressPayload("StuckWorker", 0, "stuck work", true),
+				progress: makeProgress({ id: "StuckWorker", index: 0, description: "stuck work", tokens, outputTokens }),
+			});
+			// Single progress update, then silence
+			eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progress(1000, 50));
+
+			// After 76s of no new progress events, stuck should fire
+			setSystemTime(new Date(start.getTime() + 76_000));
+			const session = registry.getSessions().find(s => s.id === "StuckWorker");
+			expect(session?.tokenRate).toBe(0);
+			expect(session?.tokenRateStuck).toBe(true);
+		} finally {
+			registry.dispose();
+			vi.useRealTimers();
+		}
 	});
 });

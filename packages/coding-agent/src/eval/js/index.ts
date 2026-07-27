@@ -5,14 +5,14 @@ import {
 	type ExecutorBackendResult,
 	resolveEvalUrlRoots,
 } from "../backend";
-import { namespaceSessionId as sharedNamespace, toExecutorBackendResult } from "../backend-helpers";
 import { executeJs } from "./executor";
 
 const JS_SESSION_PREFIX = "js:";
 
-export function namespaceSessionId(sessionId: string): string {
-	return sharedNamespace(sessionId, JS_SESSION_PREFIX);
+function namespaceSessionId(sessionId: string): string {
+	return sessionId.startsWith(JS_SESSION_PREFIX) ? sessionId : `${JS_SESSION_PREFIX}${sessionId}`;
 }
+
 export default {
 	id: "js",
 	label: "JavaScript",
@@ -28,6 +28,7 @@ export default {
 			idleTimeoutMs: opts.idleTimeoutMs,
 			signal: opts.signal,
 			sessionId: namespaceSessionId(opts.sessionId),
+			ownerId: opts.kernelOwnerId,
 			sessionFile: opts.sessionFile,
 			reset: opts.reset,
 			onChunk: opts.onChunk,
@@ -35,6 +36,17 @@ export default {
 			session: opts.session,
 			localRoots: resolveEvalUrlRoots(opts.session),
 		});
-		return toExecutorBackendResult(result);
+		return {
+			output: result.output,
+			exitCode: result.exitCode,
+			cancelled: result.cancelled,
+			truncated: result.truncated,
+			artifactId: result.artifactId,
+			totalLines: result.totalLines,
+			totalBytes: result.totalBytes,
+			outputLines: result.outputLines,
+			outputBytes: result.outputBytes,
+			displayOutputs: result.displayOutputs,
+		};
 	},
 } satisfies ExecutorBackend;

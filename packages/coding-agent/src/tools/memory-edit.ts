@@ -1,17 +1,17 @@
 import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import memoryEditDescription from "../prompts/tools/memory-edit.md" with { type: "text" };
 import type { ToolSession } from ".";
 
-const memoryEditSchema = type({
-	op: type("'update' | 'forget' | 'invalidate'").describe("memory edit operation"),
-	id: type("string").describe("memory id from recall output"),
-	"content?": type("string").describe("replacement content for update"),
-	"importance?": type("number").describe("replacement importance for update (0–1)"),
-	"replacement_id?": type("string").describe("replacement memory id for invalidate"),
+const memoryEditSchema = z.object({
+	op: z.enum(["update", "forget", "invalidate"]).describe("memory edit operation"),
+	id: z.string().describe("memory id from recall output"),
+	content: z.string().optional().describe("replacement content for update"),
+	importance: z.number().optional().describe("replacement importance for update, clamped to [0, 1]"),
+	replacement_id: z.string().optional().describe("replacement memory id for invalidate"),
 });
 
-export type MemoryEditParams = typeof memoryEditSchema.infer;
+export type MemoryEditParams = z.infer<typeof memoryEditSchema>;
 
 export class MemoryEditTool implements AgentTool<typeof memoryEditSchema> {
 	readonly name = "memory_edit";
@@ -50,9 +50,7 @@ export class MemoryEditTool implements AgentTool<typeof memoryEditSchema> {
 		const text =
 			result.status === "not_found"
 				? `Memory ${params.id} was not found${location}.`
-				: result.status === "not_editable"
-					? `Memory ${params.id} is a read-only fact${location}; it cannot be edited. Read it with memory://${params.id}.`
-					: `Memory ${params.id} ${result.status}${location}.`;
+				: `Memory ${params.id} ${result.status}${location}.`;
 		return {
 			content: [{ type: "text", text }],
 			details: result,

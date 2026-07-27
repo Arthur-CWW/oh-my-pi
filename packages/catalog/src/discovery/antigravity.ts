@@ -1,21 +1,73 @@
-import { type } from "arktype";
-import type { ModelSpec } from "../types";
-import { discoveryFetch, toPositiveNumber } from "../utils";
-import {
-	ANTIGRAVITY_VARIANT_COLLAPSE_TABLE,
-	collapseEffortVariants,
-	type VariantCollapseTable,
-} from "../variant-collapse";
+import { z } from "zod/v4";
+import type { ModelInput, ModelSpec } from "../types";
+import { toPositiveNumber } from "../utils";
+import { ANTIGRAVITY_VARIANT_COLLAPSE_TABLE, collapseEffortVariants } from "../variant-collapse";
 import { getAntigravityUserAgent } from "../wire/gemini-headers";
 
-export const ANTIGRAVITY_PRIMARY_ENDPOINT = "https://daily-cloudcode-pa.googleapis.com";
-export const ANTIGRAVITY_SANDBOX_ENDPOINT = "https://daily-cloudcode-pa.sandbox.googleapis.com";
-const DEFAULT_ANTIGRAVITY_DISCOVERY_ENDPOINTS = [ANTIGRAVITY_PRIMARY_ENDPOINT, ANTIGRAVITY_SANDBOX_ENDPOINT] as const;
+const DEFAULT_ANTIGRAVITY_DISCOVERY_ENDPOINTS = [
+	"https://daily-cloudcode-pa.googleapis.com",
+	"https://daily-cloudcode-pa.sandbox.googleapis.com",
+] as const;
 const FETCH_AVAILABLE_MODELS_PATH = "/v1internal:fetchAvailableModels";
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const DEFAULT_MAX_TOKENS = 64_000;
 const ANTIGRAVITY_DISCOVERY_DENYLIST = new Set(["chat_20706", "chat_23310", "gemini-2.5-pro"]);
+
+/**
+ * Exact Antigravity wire ids with provider-scoped native video proof.
+ *
+ * 2026-07-14 live proof: a 1,685-byte MP4 sent through the production
+ * `streamGoogleGeminiCli` path to `google-antigravity/gemini-3.5-flash`
+ * returned HTTP 200 and exactly "red", with one request and no fallback.
+ * Keep this list explicit: removing an id revokes the override for that
+ * backing deployment, and similarly named models must not inherit it.
+ */
+const ANTIGRAVITY_NATIVE_VIDEO_INPUT_OVERRIDE: ReadonlySet<string> = new Set([
+	"gemini-3.5-flash-extra-low",
+	"gemini-3.5-flash-low",
+	"gemini-3-flash-agent",
+]);
+
+/**
+ * Applies the provider-scoped override to exact raw ids or a collapsed
+ * logical entry whose complete backing route remains inside the proven set.
+ */
+export function applyAntigravityNativeVideoInputOverride<TModel extends ModelSpec>(model: TModel): TModel {
+	if (model.provider !== "google-antigravity" || model.input.includes("video")) {
+		return model;
+	}
+	let proven = ANTIGRAVITY_NATIVE_VIDEO_INPUT_OVERRIDE.has(model.id);
+	if (!proven && model.id === "gemini-3.5-flash") {
+		proven = hasOnlyProvenVideoBackingIds(model);
+	}
+	if (proven) {
+		model.input.push("video");
+	}
+	return model;
+}
+
+function hasOnlyProvenVideoBackingIds(model: ModelSpec): boolean {
+	let foundBackingId = false;
+	if (model.requestModelId !== undefined) {
+		foundBackingId = true;
+		if (!ANTIGRAVITY_NATIVE_VIDEO_INPUT_OVERRIDE.has(model.requestModelId)) {
+			return false;
+		}
+	}
+	const routing = model.thinking?.effortRouting;
+	if (routing !== undefined) {
+		for (const effort in routing) {
+			const target = routing[effort as keyof typeof routing];
+			if (target === undefined) continue;
+			foundBackingId = true;
+			if (!ANTIGRAVITY_NATIVE_VIDEO_INPUT_OVERRIDE.has(target)) {
+				return false;
+			}
+		}
+	}
+	return foundBackingId;
+}
 
 /**
  * Raw model metadata returned by Antigravity's `fetchAvailableModels` endpoint.
@@ -56,78 +108,94 @@ export interface AntigravityDiscoveryApiResponse {
 	models?: Record<string, AntigravityDiscoveryApiModel>;
 	agentModelSorts?: AntigravityDiscoveryAgentModelSort[];
 }
-const AntigravityDiscoveryApiModelSchema = type({
-	"displayName?": type("unknown").pipe(value => (typeof value === "string" ? value : undefined)),
-	"supportsImages?": type("unknown").pipe(value => (typeof value === "boolean" ? value : undefined)),
-	"supportsThinking?": type("unknown").pipe(value => (typeof value === "boolean" ? value : undefined)),
-	"thinkingBudget?": type("unknown").pipe(value =>
-		typeof value === "number" && Number.isFinite(value) ? value : undefined,
-	),
-	"recommended?": type("unknown").pipe(value => (typeof value === "boolean" ? value : undefined)),
-	"maxTokens?": type("unknown").pipe(value =>
-		typeof value === "number" && Number.isFinite(value) ? value : undefined,
-	),
-	"maxOutputTokens?": type("unknown").pipe(value =>
-		typeof value === "number" && Number.isFinite(value) ? value : undefined,
-	),
-	"model?": type("unknown").pipe(value => (typeof value === "string" ? value : undefined)),
-	"apiProvider?": type("unknown").pipe(value => (typeof value === "string" ? value : undefined)),
-	"modelProvider?": type("unknown").pipe(value => (typeof value === "string" ? value : undefined)),
-	"isInternal?": type("unknown").pipe(value => (typeof value === "boolean" ? value : undefined)),
-	"supportsVideo?": type("unknown").pipe(value => (typeof value === "boolean" ? value : undefined)),
-});
+const AntigravityDiscoveryApiModelSchema: z.ZodType<AntigravityDiscoveryApiModel> = z
+	.object({
+		displayName: z.preprocess(value => (typeof value === "string" ? value : undefined), z.string().optional()),
+		supportsImages: z.preprocess(value => (typeof value === "boolean" ? value : undefined), z.boolean().optional()),
+		supportsThinking: z.preprocess(value => (typeof value === "boolean" ? value : undefined), z.boolean().optional()),
+		thinkingBudget: z.preprocess(
+			value => (typeof value === "number" && Number.isFinite(value) ? value : undefined),
+			z.number().optional(),
+		),
+		recommended: z.preprocess(value => (typeof value === "boolean" ? value : undefined), z.boolean().optional()),
+		maxTokens: z.preprocess(
+			value => (typeof value === "number" && Number.isFinite(value) ? value : undefined),
+			z.number().optional(),
+		),
+		maxOutputTokens: z.preprocess(
+			value => (typeof value === "number" && Number.isFinite(value) ? value : undefined),
+			z.number().optional(),
+		),
+		model: z.preprocess(value => (typeof value === "string" ? value : undefined), z.string().optional()),
+		apiProvider: z.preprocess(value => (typeof value === "string" ? value : undefined), z.string().optional()),
+		modelProvider: z.preprocess(value => (typeof value === "string" ? value : undefined), z.string().optional()),
+		isInternal: z.preprocess(value => (typeof value === "boolean" ? value : undefined), z.boolean().optional()),
+		supportsVideo: z.preprocess(value => (typeof value === "boolean" ? value : undefined), z.boolean().optional()),
+	})
+	.loose();
+const AntigravityDiscoveryAgentModelGroupSchema: z.ZodType<AntigravityDiscoveryAgentModelGroup> = z
+	.object({
+		modelIds: z.preprocess(
+			value =>
+				Array.isArray(value)
+					? value.filter((modelId): modelId is string => typeof modelId === "string")
+					: undefined,
+			z.array(z.string()).optional(),
+		),
+	})
+	.loose();
+const AntigravityDiscoveryAgentModelSortSchema: z.ZodType<AntigravityDiscoveryAgentModelSort> = z
+	.object({
+		groups: z.preprocess(
+			value => (Array.isArray(value) ? value : undefined),
+			z
+				.array(z.unknown())
+				.transform(groups =>
+					groups.flatMap(group => {
+						const parsedGroup = AntigravityDiscoveryAgentModelGroupSchema.safeParse(group);
+						return parsedGroup.success ? [parsedGroup.data] : [];
+					}),
+				)
+				.optional(),
+		),
+	})
+	.loose();
+const AntigravityDiscoveryApiResponseSchema: z.ZodType<AntigravityDiscoveryApiResponse> = z
+	.object({
+		models: z.preprocess(
+			value => (typeof value === "object" && value !== null ? value : undefined),
+			z
+				.record(z.string(), z.unknown())
+				.transform(models => {
+					const normalized: Record<string, AntigravityDiscoveryApiModel> = {};
+					for (const [modelId, modelValue] of Object.entries(models)) {
+						if (typeof modelValue !== "object" || modelValue === null) {
+							continue;
+						}
+						const parsedModel = AntigravityDiscoveryApiModelSchema.safeParse(modelValue);
+						if (parsedModel.success) {
+							normalized[modelId] = parsedModel.data;
+						}
+					}
+					return normalized;
+				})
+				.optional(),
+		),
+		agentModelSorts: z.preprocess(
+			value => (Array.isArray(value) ? value : undefined),
+			z
+				.array(z.unknown())
+				.transform(sorts =>
+					sorts.flatMap(sort => {
+						const parsedSort = AntigravityDiscoveryAgentModelSortSchema.safeParse(sort);
+						return parsedSort.success ? [parsedSort.data] : [];
+					}),
+				)
+				.optional(),
+		),
+	})
+	.loose();
 
-const AntigravityDiscoveryAgentModelGroupSchema = type({
-	"modelIds?": type("unknown").pipe(value =>
-		Array.isArray(value) ? value.filter((modelId): modelId is string => typeof modelId === "string") : undefined,
-	),
-});
-
-const AntigravityDiscoveryAgentModelSortSchema = type({
-	"groups?": type("unknown").pipe(value => {
-		if (!Array.isArray(value)) return undefined;
-		const result: AntigravityDiscoveryAgentModelGroup[] = [];
-		for (const group of value) {
-			const parsedGroup = AntigravityDiscoveryAgentModelGroupSchema(group);
-			if (!(parsedGroup instanceof type.errors)) {
-				result.push(parsedGroup);
-			}
-		}
-		return result;
-	}),
-});
-
-const AntigravityDiscoveryApiResponseSchema = type({
-	"models?": type("unknown").pipe(value => {
-		if (typeof value !== "object" || value === null) {
-			return undefined;
-		}
-		const normalized: Record<string, AntigravityDiscoveryApiModel> = {};
-		for (const [modelId, modelValue] of Object.entries(value)) {
-			if (typeof modelValue !== "object" || modelValue === null) {
-				continue;
-			}
-			const parsedModel = AntigravityDiscoveryApiModelSchema(modelValue);
-			if (!(parsedModel instanceof type.errors)) {
-				normalized[modelId] = parsedModel;
-			}
-		}
-		return normalized;
-	}),
-	"agentModelSorts?": type("unknown").pipe(value => {
-		if (!Array.isArray(value)) {
-			return undefined;
-		}
-		const result: AntigravityDiscoveryAgentModelSort[] = [];
-		for (const sort of value) {
-			const parsedSort = AntigravityDiscoveryAgentModelSortSchema(sort);
-			if (!(parsedSort instanceof type.errors)) {
-				result.push(parsedSort);
-			}
-		}
-		return result;
-	}),
-});
 /**
  * Options for fetching Antigravity discovery models.
  */
@@ -144,12 +212,6 @@ export interface FetchAntigravityDiscoveryModelsOptions {
 	signal?: AbortSignal;
 	/** Optional fetch implementation override for tests. */
 	fetcher?: typeof fetch;
-	/**
-	 * Hand collapse table to apply to the discovered list. Defaults to the
-	 * Antigravity (budget-transport) table; `googleGeminiCli` passes the
-	 * level-transport table so cloudcode-pa keeps `thinkingLevel`.
-	 */
-	collapseTable?: VariantCollapseTable;
 }
 
 /**
@@ -161,7 +223,7 @@ export interface FetchAntigravityDiscoveryModelsOptions {
 export async function fetchAntigravityDiscoveryModels(
 	options: FetchAntigravityDiscoveryModelsOptions,
 ): Promise<ModelSpec<"google-gemini-cli">[] | null> {
-	const fetcher = discoveryFetch(options.fetcher);
+	const fetcher = options.fetcher ?? fetch;
 	const endpoints = options.endpoint
 		? [trimTrailingSlashes(options.endpoint)]
 		: DEFAULT_ANTIGRAVITY_DISCOVERY_ENDPOINTS.map(trimTrailingSlashes);
@@ -209,30 +271,34 @@ export async function fetchAntigravityDiscoveryModels(
 				continue;
 			}
 
-			const supportsImages = model.supportsImages === true;
-			models.push({
-				id: modelId,
-				name: model.displayName || modelId,
-				api: "google-gemini-cli",
-				provider: "google-antigravity",
-				baseUrl: endpoint,
-				reasoning: model.supportsThinking === true,
-				input: supportsImages ? ["text", "image"] : ["text"],
-				cost: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-				},
-				contextWindow: toPositiveNumber(model.maxTokens, DEFAULT_CONTEXT_WINDOW),
-				maxTokens: toPositiveNumber(model.maxOutputTokens, DEFAULT_MAX_TOKENS),
-			});
+			const input: ModelInput[] = ["text"];
+			if (model.supportsImages === true) input.push("image");
+			if (model.supportsVideo === true) input.push("video");
+			models.push(
+				applyAntigravityNativeVideoInputOverride({
+					id: modelId,
+					name: model.displayName || modelId,
+					api: "google-gemini-cli",
+					provider: "google-antigravity",
+					baseUrl: endpoint,
+					reasoning: model.supportsThinking === true,
+					input,
+					cost: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+					},
+					contextWindow: toPositiveNumber(model.maxTokens, DEFAULT_CONTEXT_WINDOW),
+					maxTokens: toPositiveNumber(model.maxOutputTokens, DEFAULT_MAX_TOKENS),
+				}),
+			);
 		}
 
 		// Collapse effort-tier variants at the source so runtime discovery,
 		// the gemini-cli re-provision, and the catalog generator all see
 		// logical ids only.
-		const collapsed = collapseEffortVariants(models, options.collapseTable ?? ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
+		const collapsed = collapseEffortVariants(models, ANTIGRAVITY_VARIANT_COLLAPSE_TABLE);
 		collapsed.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 		return collapsed;
 	}
@@ -241,11 +307,11 @@ export async function fetchAntigravityDiscoveryModels(
 }
 
 function parseAntigravityDiscoveryResponse(value: unknown): AntigravityDiscoveryApiResponse | null {
-	const parsed = AntigravityDiscoveryApiResponseSchema(value);
-	if (parsed instanceof type.errors) {
+	const parsed = AntigravityDiscoveryApiResponseSchema.safeParse(value);
+	if (!parsed.success) {
 		return null;
 	}
-	return parsed;
+	return parsed.data;
 }
 
 function trimTrailingSlashes(value: string): string {

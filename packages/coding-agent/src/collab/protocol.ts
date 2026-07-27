@@ -7,103 +7,187 @@
  * control messages that carry no session data.
  */
 
-import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import type {
-	BusChannel,
-	CollabUiRequest,
+	CollabApplicationFrame,
+	CollabAttachFrame,
+	CollabChallengeFrame,
+	CollabDirection,
 	GuestFrame,
+	HostFrame,
+	JsonValue,
 	ParsedCollabLink,
-	Participant,
-	SessionState,
-	AgentSnapshot as WireAgentSnapshot,
+	SecureCollabFrame,
 } from "@oh-my-pi/pi-wire";
 import {
+	COLLAB_PROTO,
 	DEFAULT_RELAY_URL,
 	ENVELOPE_HEADER_LENGTH,
 	ROOM_ID_BYTES,
 	ROOM_KEY_BYTES,
 	WRITE_TOKEN_BYTES,
 } from "@oh-my-pi/pi-wire";
-import type { ContextUsage } from "../extensibility/extensions/types";
-import type { AgentSessionEvent } from "../session/agent-session";
-import type { SessionEntry, SessionHeader } from "../session/session-entries";
 
 export type {
-	CollabPromptDetails,
-	CollabUiRequest,
-	CollabUiRequestDraft,
-	CollabUiResponseValue,
-	CollabUiSelectItem,
+	CollabApplicationFrame,
+	CollabAttachFrame,
+	CollabCapability,
+	CollabChallengeFrame,
+	CollabDirection,
+	CollabRunnerEventDelivery,
+	CollabRunnerSnapshot,
+	GuestFrame,
+	HostFrame,
+	JsonValue,
 	ParsedCollabLink,
-	RelayControlMessage,
-	RelayControlToGuest,
-	RelayControlToHost,
+	SecureCollabFrame,
 } from "@oh-my-pi/pi-wire";
-export { COLLAB_PROMPT_MESSAGE_TYPE, COLLAB_PROTO } from "@oh-my-pi/pi-wire";
+export {
+	COLLAB_PROMPT_MESSAGE_TYPE,
+	COLLAB_PROTO,
+} from "@oh-my-pi/pi-wire";
 export { DEFAULT_RELAY_URL, ENVELOPE_HEADER_LENGTH, ROOM_ID_BYTES };
 
-export type CollabParticipant = Participant;
-export type AgentSnapshot = WireAgentSnapshot;
+export type CollabFrame = CollabApplicationFrame;
 
-/** Debounced footer snapshot broadcast by the host. */
-export type CollabSessionState = SessionState & {
-	/**
-	 * Host model (full catalog object). Guests apply it to their replica
-	 * agent state so model display and context-window math are native.
-	 */
-	model?: Model;
-	/** Host status-line context numbers (guest system prompt/tools differ, so local estimates drift). */
-	contextUsage?: ContextUsage;
-};
+const RECORD = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+const STRING = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+const UINT = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+const POSITIVE_SEQUENCE = (value: unknown): value is number => UINT(value) && value > 0 && value < Number.MAX_SAFE_INTEGER;
 
-/**
- * Encrypted payload frames (inside AES-GCM, JSON). The wire package pins the
- * JSON skeleton (`WireFrame`); host-side frames carry the rich session types
- * that serialize into those shapes.
- */
-export type CollabFrame =
-	// guest -> host (hello/abort/agent-cmd/fetch-transcript/ui-response are taken verbatim from the wire grammar)
-	| Exclude<GuestFrame, { t: "prompt" }>
-	| { t: "prompt"; text: string; images?: ImageContent[] }
-	// host -> guest
-	| {
-			t: "welcome";
-			proto: number;
-			header: SessionHeader;
-			state: CollabSessionState;
-			agents: AgentSnapshot[];
-			/**
-			 * Total number of `SessionEntry` items the host will deliver in the
-			 * `snapshot-chunk` frames that follow. The guest stays in the
-			 * snapshot-loading phase until it has accumulated that many entries
-			 * (or a chunk arrives with `final: true`).
-			 */
-			entryCount: number;
-			/** True when this peer joined through a read-only (view) link. */
-			readOnly?: boolean;
-	  }
-	/**
-	 * Targeted snapshot fragment delivered after `welcome`. Splits a large
-	 * transcript across many small frames so the guest's per-chunk progress
-	 * timeout resets each time the relay delivers another batch; without
-	 * chunking, a multi-MB session has to fit one giant frame inside the
-	 * 30 s first-welcome budget. The last chunk carries `final: true` so the
-	 * guest can finalize the replica session.
-	 */
-	| { t: "snapshot-chunk"; entries: SessionEntry[]; final: boolean }
-	| { t: "entry"; entry: SessionEntry }
-	| { t: "event"; event: AgentSessionEvent }
-	| { t: "state"; state: CollabSessionState }
-	/** Mirrored EventBus traffic (task subagent lifecycle/progress channels only). */
-	| { t: "bus"; channel: BusChannel; data: unknown }
-	/** Full agent-registry snapshot (debounced on registry change). */
-	| { t: "agents"; agents: AgentSnapshot[] }
-	| { t: "ui-request"; request: CollabUiRequest }
-	| { t: "ui-request-end"; reqId: number }
-	/** Targeted reply to fetch-transcript; `error` marks a terminal read failure that guests must surface without hot retrying. */
-	| { t: "transcript"; reqId: number; text: string; newSize: number; error?: string }
-	| { t: "bye"; reason: string }
-	| { t: "error"; message: string };
+function exact(value: Record<string, unknown>, required: readonly string[], optional: readonly string[] = []): void {
+	const allowed = new Set([...required, ...optional]);
+	for (const key of required) if (!(key in value)) throw new Error(`Missing field: ${key}`);
+	for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`Unknown field: ${key}`);
+}
+
+export function isJsonValue(value: unknown): value is JsonValue {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (Array.isArray(value)) return value.every(isJsonValue);
+	if (!RECORD(value)) return false;
+	return Object.values(value).every(isJsonValue);
+}
+
+export function decodeChallengeFrame(input: unknown): CollabChallengeFrame {
+	if (!RECORD(input)) throw new Error("Challenge must be an object");
+	exact(input, ["t", "proto", "challengeId", "challenge"]);
+	if (input.t !== "challenge" || input.proto !== COLLAB_PROTO || !STRING(input.challengeId) || !STRING(input.challenge)) {
+		throw new Error("Invalid collaboration challenge");
+	}
+	return input as unknown as CollabChallengeFrame;
+}
+
+export function decodeAttachFrame(input: unknown): CollabAttachFrame {
+	if (!RECORD(input)) throw new Error("Attach must be an object");
+	exact(input, ["t", "proto", "clientId", "viewId", "requestedCapability", "challengeId", "challengeResponse"], [
+		"writeToken",
+		"afterSequence",
+	]);
+	if (
+		input.t !== "attach" ||
+		input.proto !== COLLAB_PROTO ||
+		!STRING(input.clientId) ||
+		!STRING(input.viewId) ||
+		(input.requestedCapability !== "observer" && input.requestedCapability !== "controller") ||
+		!STRING(input.challengeId) ||
+		!STRING(input.challengeResponse) ||
+		(input.writeToken !== undefined && !STRING(input.writeToken)) ||
+		(input.afterSequence !== undefined && !UINT(input.afterSequence))
+	) {
+		throw new Error("Invalid collaboration attach");
+	}
+	return input as unknown as CollabAttachFrame;
+}
+
+export function decodeApplicationFrame(input: unknown): CollabApplicationFrame {
+	if (!RECORD(input) || !STRING(input.t)) throw new Error("Frame must be a tagged object");
+	const request = () => {
+		if (!STRING(input.requestId)) throw new Error("Invalid request id");
+	};
+	switch (input.t) {
+		case "attach":
+			return decodeAttachFrame(input);
+		case "command":
+			exact(input, ["t", "requestId", "command"]);
+			request();
+			if (!RECORD(input.command) || !isJsonValue(input.command)) throw new Error("Invalid runner command");
+			break;
+		case "acquireController":
+			exact(input, ["t", "requestId"]);
+			request();
+			break;
+		case "releaseController":
+			exact(input, ["t", "requestId", "controllerEpoch"]);
+			request();
+			if (!POSITIVE_SEQUENCE(input.controllerEpoch)) throw new Error("Invalid controller epoch");
+			break;
+		case "detach":
+			exact(input, ["t"]);
+			break;
+		case "resyncRequest":
+			exact(input, ["t", "afterSequence"]);
+			if (!UINT(input.afterSequence)) throw new Error("Invalid resync sequence");
+			break;
+		case "welcome":
+			exact(input, ["t", "connectionId", "viewId", "capability", "snapshot", "sequence"], ["controllerEpoch"]);
+			if (!STRING(input.connectionId) || !STRING(input.viewId) || !POSITIVE_SEQUENCE(input.sequence)) throw new Error("Invalid welcome");
+			if (input.capability !== "observer" && input.capability !== "controller") throw new Error("Invalid capability");
+			if (!decodeSnapshot(input.snapshot)) throw new Error("Invalid snapshot");
+			break;
+		case "delta":
+			exact(input, ["t", "delivery"]);
+			if (!RECORD(input.delivery) || input.delivery.kind !== "event" || !isJsonValue(input.delivery.event)) throw new Error("Invalid delta");
+			break;
+		case "resync":
+			exact(input, ["t", "snapshot", "expectedSequence", "observedSequence"]);
+			if (!decodeSnapshot(input.snapshot) || !POSITIVE_SEQUENCE(input.expectedSequence) || !POSITIVE_SEQUENCE(input.observedSequence)) throw new Error("Invalid resync");
+			break;
+		case "commandResult":
+			exact(input, ["t", "requestId", "ok"], ["receipt", "error"]);
+			request();
+			if (typeof input.ok !== "boolean" || (input.receipt !== undefined && !isJsonValue(input.receipt))) throw new Error("Invalid result");
+			if (input.error !== undefined && (!RECORD(input.error) || !STRING(input.error.code) || !STRING(input.error.message))) throw new Error("Invalid result error");
+			break;
+		case "controllerChanged":
+			exact(input, ["t", "capability"], ["controllerEpoch"]);
+			if (input.capability !== "observer" && input.capability !== "controller") throw new Error("Invalid capability");
+			break;
+		case "bye":
+			exact(input, ["t", "reason"]);
+			if (!STRING(input.reason)) throw new Error("Invalid bye");
+			break;
+		case "error":
+			exact(input, ["t", "code", "message"], ["requestId"]);
+			if (!STRING(input.code) || !STRING(input.message) || (input.requestId !== undefined && !STRING(input.requestId))) throw new Error("Invalid error");
+			break;
+		default:
+			throw new Error(`Unknown collaboration frame: ${input.t}`);
+	}
+	return input as unknown as CollabApplicationFrame;
+}
+
+function decodeSnapshot(value: unknown): boolean {
+	if (!RECORD(value)) return false;
+	try {
+		exact(value, ["revision", "runnerSequence", "sessionRevision", "transcript", "durableInputs", "activeOperations", "workflow", "tools", "todos", "model", "session"]);
+	} catch {
+		return false;
+	}
+	return UINT(value.revision) && UINT(value.runnerSequence) && UINT(value.sessionRevision) && isJsonValue(value);
+}
+
+export function decodeSecureCollabFrame(input: unknown): SecureCollabFrame {
+	if (!RECORD(input)) throw new Error("Secure frame must be an object");
+	exact(input, ["proto", "connectionId", "direction", "sequence", "frame"]);
+	if (
+		input.proto !== COLLAB_PROTO ||
+		!STRING(input.connectionId) ||
+		(input.direction !== "guestToHost" && input.direction !== "hostToGuest") ||
+		!POSITIVE_SEQUENCE(input.sequence)
+	) throw new Error("Invalid secure frame metadata");
+	return { ...input, frame: decodeApplicationFrame(input.frame) } as SecureCollabFrame;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Wire envelope: [4B uint32 BE peerId][sealed payload]
@@ -138,10 +222,6 @@ const BARE_LINK_RE = /^([A-Za-z0-9_-]{10,64})[#.]([A-Za-z0-9_-]+)$/;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 const LOCAL_HOSTNAMES: Record<string, true> = { localhost: true, "127.0.0.1": true, "::1": true, "[::1]": true };
 
-function isLocalHostname(hostname: string): boolean {
-	return LOCAL_HOSTNAMES[hostname] === true;
-}
-
 export function generateRoomId(): string {
 	const bytes = new Uint8Array(ROOM_ID_BYTES);
 	crypto.getRandomValues(bytes);
@@ -169,7 +249,7 @@ function normalizeRelayOrigin(relayUrl: string): { origin: string } | { error: s
 		default:
 			return { error: `Unsupported relay URL scheme: ${url.protocol}` };
 	}
-	if (scheme === "ws:" && !isLocalHostname(url.hostname)) {
+	if (scheme === "ws:" && !LOCAL_HOSTNAMES[url.hostname]) {
 		return { error: "relay link must be wss:// (plain ws:// is only allowed for localhost)" };
 	}
 	const port = url.port ? `:${url.port}` : "";
@@ -204,48 +284,24 @@ export function formatCollabLink(relayUrl: string, roomId: string, key: Uint8Arr
 	return `${compact}/r/${roomId}.${keyText}`;
 }
 
-function normalizeCollabWebBaseUrl(relayUrl: string, webUrl?: string): string {
-	const explicitWebUrl = webUrl?.trim();
-	if (!explicitWebUrl) {
-		const normalized = normalizeRelayOrigin(relayUrl);
-		if ("error" in normalized) throw new Error(normalized.error);
-		return normalized.origin.startsWith("wss://")
-			? `https://${normalized.origin.slice("wss://".length)}`
-			: `http://${normalized.origin.slice("ws://".length)}`;
-	}
-
-	let url: URL;
-	try {
-		url = new URL(explicitWebUrl);
-	} catch {
-		throw new Error("collab.webUrl must start with http:// or https://");
-	}
-	if (url.protocol !== "http:" && url.protocol !== "https:") {
-		throw new Error("collab.webUrl must start with http:// or https://");
-	}
-	if (url.protocol === "http:" && !isLocalHostname(url.hostname)) {
-		throw new Error("collab.webUrl must use https:// unless it targets localhost");
-	}
-	if (url.search || url.hash) {
-		throw new Error("collab.webUrl must not include a query string or fragment");
-	}
-	const path = url.pathname.replace(/\/+$/, "");
-	return `${url.origin}${path}`;
-}
-
 /**
- * Render the browser deep link. The browser UI may be hosted separately from
- * the relay; the fragment always carries the relay-specific collab link, so
- * room secrets stay out of HTTP path and query bytes.
+ * Render the browser deep link: `http(s)://<relay-host>/#<collab-link>`. The
+ * relay serves the web client at `/`, and the whole collab link (including the
+ * room key) rides in the fragment, so it never appears in any HTTP request.
+ * Terminals auto-link the https form, making it click-to-join.
  */
 export function formatCollabWebLink(
 	relayUrl: string,
 	roomId: string,
 	key: Uint8Array,
 	writeToken?: Uint8Array,
-	webUrl?: string,
 ): string {
-	return `${normalizeCollabWebBaseUrl(relayUrl, webUrl)}/#${formatCollabLink(relayUrl, roomId, key, writeToken)}`;
+	const normalized = normalizeRelayOrigin(relayUrl);
+	if ("error" in normalized) throw new Error(normalized.error);
+	const httpOrigin = normalized.origin.startsWith("wss://")
+		? `https://${normalized.origin.slice("wss://".length)}`
+		: `http://${normalized.origin.slice("ws://".length)}`;
+	return `${httpOrigin}/#${formatCollabLink(relayUrl, roomId, key, writeToken)}`;
 }
 
 export function parseCollabLink(link: string): ParsedCollabLink | { error: string } {
@@ -263,20 +319,15 @@ export function parseCollabLink(link: string): ParsedCollabLink | { error: strin
 	} catch {
 		return { error: `Invalid collab link: ${link}` };
 	}
-	if ((url.protocol === "http:" || url.protocol === "https:") && url.hash) {
-		const inner = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
-		const parsed = parseCollabLink(inner);
-		if (!("error" in parsed)) return parsed;
-	}
 	const normalized = normalizeRelayOrigin(url.origin);
 	if ("error" in normalized) return normalized;
 	const match = ROOM_PATH_RE.exec(url.pathname);
 	if (!match) {
-		// Non-http(s) deep links may also carry a complete collab link in the
-		// fragment. http(s) links are handled once above so invalid fragments
-		// fall through to direct relay validation instead of double-recursing.
+		// Web deep link: `http(s)://<relay>/#<collab-link>` — the fragment holds
+		// the whole link, so recurse on it. The recursion terminates because
+		// the inner text is a strict suffix of the input.
 		const inner = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
-		if (inner && url.protocol !== "http:" && url.protocol !== "https:") return parseCollabLink(inner);
+		if (inner) return parseCollabLink(inner);
 		return { error: "Collab link must contain a /r/<roomId> path" };
 	}
 	const roomId = match[1]!;

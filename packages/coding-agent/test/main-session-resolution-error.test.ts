@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from "bun:test";
 import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createSessionManager, SessionResolutionError, writeStartupNotice } from "@oh-my-pi/pi-coding-agent/main";
+import { createSessionManager, SessionResolutionError } from "@oh-my-pi/pi-coding-agent/main";
 import * as sessionListingModule from "@oh-my-pi/pi-coding-agent/session/session-listing";
 
 function buildResumeArgs(resume: string): Args {
@@ -32,56 +32,25 @@ function buildForkArgs(fork: string, noSession = false): Args {
 	};
 }
 
-const stubSettings = { get: () => undefined } as unknown as Settings;
-
-const ORIGINAL_STDOUT_WRITE = process.stdout.write.bind(process.stdout);
-const ORIGINAL_STDERR_WRITE = process.stderr.write.bind(process.stderr);
-
-function captureProcessOutput(): { read: () => { stdout: string; stderr: string }; restore: () => void } {
-	let stdout = "";
-	let stderr = "";
-	process.stdout.write = ((chunk: string | Uint8Array): boolean => {
-		stdout += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-		return true;
-	}) as typeof process.stdout.write;
-	process.stderr.write = ((chunk: string | Uint8Array): boolean => {
-		stderr += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-		return true;
-	}) as typeof process.stderr.write;
+function buildInteractiveArgs(noSession = false): Args {
 	return {
-		read: () => ({ stdout, stderr }),
-		restore: () => {
-			process.stdout.write = ORIGINAL_STDOUT_WRITE;
-			process.stderr.write = ORIGINAL_STDERR_WRITE;
-		},
+		noSession: noSession || undefined,
+		messages: [],
+		fileArgs: [],
+		unknownFlags: new Map(),
+		unrecognizedFlags: [],
 	};
 }
 
-describe("writeStartupNotice", () => {
-	it("writes notices to stdout outside JSON mode", () => {
-		const capture = captureProcessOutput();
-		try {
-			writeStartupNotice({}, "hello\n");
-			expect(capture.read()).toEqual({ stdout: "hello\n", stderr: "" });
-		} finally {
-			capture.restore();
-		}
-	});
-
-	it("keeps JSON mode stdout clean by writing notices to stderr", () => {
-		const capture = captureProcessOutput();
-		try {
-			writeStartupNotice({ mode: "json" }, "hello\n");
-			expect(capture.read()).toEqual({ stdout: "", stderr: "hello\n" });
-		} finally {
-			capture.restore();
-		}
-	});
-});
+const stubSettings = { get: () => undefined } as unknown as Settings;
 
 describe("createSessionManager — missing session (#2084)", () => {
 	it("rejects --resume with SessionResolutionError carrying a usage hint", async () => {
-		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(undefined);
+		vi.spyOn(sessionListingModule, "resolveResumableSessionWithDiagnostics").mockResolvedValue({
+			match: undefined,
+			skippedFiles: [],
+			searchedLocations: ["/sessions/-current-project", "/sessions"],
+		});
 		try {
 			await expect(
 				createSessionManager(
@@ -91,7 +60,8 @@ describe("createSessionManager — missing session (#2084)", () => {
 				),
 			).rejects.toMatchObject({
 				name: "SessionResolutionError",
-				message: 'Session "019ea530-0000-7000-0000-000000000000" not found.',
+				message:
+					'Session "019ea530-0000-7000-0000-000000000000" not found. Looked in /sessions/-current-project and recursively under /sessions.',
 				hint: expect.stringContaining("omp --resume"),
 			});
 
@@ -108,7 +78,11 @@ describe("createSessionManager — missing session (#2084)", () => {
 	});
 
 	it("rejects --fork with SessionResolutionError carrying a usage hint", async () => {
-		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(undefined);
+		vi.spyOn(sessionListingModule, "resolveResumableSessionWithDiagnostics").mockResolvedValue({
+			match: undefined,
+			skippedFiles: [],
+			searchedLocations: ["/sessions/-current-project", "/sessions"],
+		});
 		try {
 			await expect(
 				createSessionManager(
@@ -118,7 +92,8 @@ describe("createSessionManager — missing session (#2084)", () => {
 				),
 			).rejects.toMatchObject({
 				name: "SessionResolutionError",
-				message: 'Session "019ea530-0000-7000-0000-000000000000" not found.',
+				message:
+					'Session "019ea530-0000-7000-0000-000000000000" not found. Looked in /sessions/-current-project and recursively under /sessions.',
 				hint: expect.stringContaining("omp --resume"),
 			});
 		} finally {
@@ -133,6 +108,34 @@ describe("createSessionManager — missing session (#2084)", () => {
 			name: "SessionResolutionError",
 			message: "--fork requires session persistence",
 			hint: undefined,
+		});
+	});
+
+	it("creates a durable manager when the interactive runner requires persistence", async () => {
+		const manager = await createSessionManager(
+			buildInteractiveArgs(),
+			"/current/project",
+			stubSettings,
+			undefined,
+			undefined,
+			true,
+		);
+		expect(manager?.getSessionFile()).toBeDefined();
+	});
+
+	it("rejects --no-session when the interactive runner requires persistence", async () => {
+		await expect(
+			createSessionManager(
+				buildInteractiveArgs(true),
+				"/current/project",
+				stubSettings,
+				undefined,
+				undefined,
+				true,
+			),
+		).rejects.toMatchObject({
+			name: "SessionResolutionError",
+			message: "Interactive mode requires session persistence; --no-session is not supported",
 		});
 	});
 });

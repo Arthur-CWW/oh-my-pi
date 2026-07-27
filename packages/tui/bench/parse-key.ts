@@ -1,7 +1,6 @@
 import { parseKey as nativeParseKey } from "@oh-my-pi/pi-natives";
 import * as native from "../src/keys";
 import * as js from "./_jskey";
-import { makeBench } from "./_harness";
 
 const ITERATIONS = 2000;
 
@@ -57,7 +56,16 @@ const samples = [
 	{ name: "symbol /", data: "/", expected: "/" },
 ];
 
-const bench = makeBench(ITERATIONS);
+function bench(name: string, fn: () => void): number {
+	const start = Bun.nanoseconds();
+	for (let i = 0; i < ITERATIONS; i++) {
+		fn();
+	}
+	const elapsed = (Bun.nanoseconds() - start) / 1e6;
+	const perOp = (elapsed / ITERATIONS).toFixed(6);
+	console.log(`${name}: ${elapsed.toFixed(2)}ms total (${perOp}ms/op)`);
+	return elapsed;
+}
 
 // Set to legacy mode for consistent comparison
 js.setKittyProtocolActive(true);

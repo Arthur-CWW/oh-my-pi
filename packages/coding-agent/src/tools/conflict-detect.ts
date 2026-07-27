@@ -554,7 +554,7 @@ const PREVIEW_SIDE_LINES = 6;
  *     - theirs = feature/x
  *     NOTICE: …
  *
- *     ──── #1  L42-48 ────
+ *     Conflict #1  L42-48
  *     <<< ours
  *     …ours body…
  *     === base ≡ ours
@@ -617,7 +617,7 @@ export function formatConflictWarning(
 	for (const entry of entries) {
 		const range = entry.startLine === entry.endLine ? `L${entry.startLine}` : `L${entry.startLine}-${entry.endLine}`;
 		out.push("");
-		out.push(`──── #${entry.id}  ${range} ────`);
+		out.push(`Conflict #${entry.id}  ${range}`);
 
 		const baseEqualsOurs = entry.baseLines !== undefined && sectionsEqual(entry.baseLines, entry.oursLines);
 		const baseEqualsTheirs = entry.baseLines !== undefined && sectionsEqual(entry.baseLines, entry.theirsLines);

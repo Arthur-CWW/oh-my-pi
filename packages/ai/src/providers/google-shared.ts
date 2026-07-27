@@ -4,9 +4,8 @@
 
 import { scheduler } from "node:timers/promises";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
-import { readSseJson } from "@oh-my-pi/pi-utils";
-import { renderDemotedThinking } from "../dialect/demotion";
-import * as AIError from "../error";
+import { extractHttpStatusFromError, readSseJson } from "@oh-my-pi/pi-utils";
+import { ProviderHttpError } from "../errors";
 import type {
 	Api,
 	AssistantMessage,
@@ -14,7 +13,6 @@ import type {
 	FetchImpl,
 	ImageContent,
 	Model,
-	ServiceTier,
 	StopReason,
 	StreamOptions,
 	TextContent,
@@ -22,10 +20,10 @@ import type {
 	Tool,
 	ToolCall,
 } from "../types";
-import { shouldSendServiceTier } from "../types";
+import { assertContextVideoInputSupported } from "../video-input";
 import { normalizeSystemPrompts } from "../utils";
 import { AssistantMessageEventStream } from "../utils/event-stream";
-import type { RawHttpRequestDump } from "../utils/http-inspector";
+import { finalizeErrorMessage, type RawHttpRequestDump } from "../utils/http-inspector";
 import { normalizeSchemaForCCA, normalizeSchemaForGoogle, toolWireSchema } from "../utils/schema";
 import type {
 	Content,
@@ -49,6 +47,11 @@ export type {
 	ThinkingConfig,
 } from "./google-types";
 export { normalizeSchemaForGoogle };
+
+/** Non-2xx response (or in-stream error chunk) from the Google Generative Language / Vertex API. */
+export class GoogleApiError extends ProviderHttpError {
+	override readonly name = "GoogleApiError";
+}
 
 type GoogleApiType = "google-generative-ai" | "google-gemini-cli" | "google-vertex";
 
@@ -75,23 +78,6 @@ export interface GoogleSharedStreamOptions extends StreamOptions {
 		budgetTokens?: number;
 		level?: GoogleThinkingLevel;
 	};
-	/** Request that Google omit human-readable thought summaries while still allowing internal reasoning. */
-	hideThinkingSummary?: boolean;
-	/** Gemini/Vertex serving tier (`flex`/`priority`); other values are omitted. */
-	serviceTier?: ServiceTier;
-	/**
-	 * Continues a Gemini Interactions API conversation from a stored interaction.
-	 * When set on the direct Google provider, the request uses `/interactions`
-	 * with `previous_interaction_id` instead of the legacy generateContent stream.
-	 */
-	previousInteractionId?: string;
-	/**
-	 * Uses the Gemini Interactions API for direct Google requests, storing the
-	 * returned interaction id on the assistant response for follow-up turns.
-	 */
-	useInteractionsApi?: boolean;
-	/** Overrides Interactions API request storage; default is the API default (`true`). */
-	storeInteraction?: boolean;
 }
 
 /**
@@ -145,9 +131,11 @@ function resolveThoughtSignature(isSameProviderAndModel: boolean, signature: str
 	return isSameProviderAndModel && isValidThoughtSignature(signature) ? signature : undefined;
 }
 
-function supportsFunctionPartId<T extends GoogleApiType>(model: Model<T>): boolean {
-	if (model.api === "google-vertex") return false;
-	return model.id.startsWith("claude-") || (model.api === "google-generative-ai" && isGemini3Model(model.id));
+/**
+ * Claude models via Google APIs require explicit tool call IDs in function calls/responses.
+ */
+export function requiresToolCallId(modelId: string): boolean {
+	return modelId.startsWith("claude-");
 }
 
 function getGeminiMajorVersion(modelId: string): number | undefined {
@@ -172,10 +160,10 @@ function isGemini3Model(modelId: string): boolean {
  * Convert internal messages to Gemini Content[] format.
  */
 export function convertMessages<T extends GoogleApiType>(model: Model<T>, context: Context): Content[] {
+	assertContextVideoInputSupported(model, context);
 	const contents: Content[] = [];
-	const emittedToolCallNames = new Map<string, string>();
-
 	const normalizeToolCallId = (id: string): string => {
+		if (!requiresToolCallId(model.id)) return id;
 		return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 	};
 
@@ -211,15 +199,24 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 						const text = item.text.toWellFormed();
 						if (text.trim().length === 0) continue;
 						parts.push({ text });
-					} else if (supportsImages) {
+					} else if (item.type === "image") {
+						if (supportsImages) {
+							parts.push({
+								inlineData: {
+									mimeType: item.mimeType,
+									data: item.data,
+								},
+							});
+						} else {
+							omittedImages = true;
+						}
+					} else if (item.type === "video") {
 						parts.push({
 							inlineData: {
 								mimeType: item.mimeType,
 								data: item.data,
 							},
 						});
-					} else {
-						omittedImages = true;
 					}
 				}
 				if (omittedImages) {
@@ -248,20 +245,21 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 				} else if (block.type === "thinking") {
 					// Skip empty thinking blocks
 					if (!block.thinking || block.thinking.trim() === "") continue;
-					const thoughtSignature = resolveThoughtSignature(isSameProviderAndModel, block.thinkingSignature);
-					if (thoughtSignature) {
+					// Only keep as thinking block if same provider AND same model
+					// Otherwise convert to plain text (no tags to avoid model mimicking them)
+					if (isSameProviderAndModel) {
+						const thoughtSignature = resolveThoughtSignature(isSameProviderAndModel, block.thinkingSignature);
 						parts.push({
 							thought: true,
 							text: block.thinking.toWellFormed(),
-							thoughtSignature,
+							...(thoughtSignature && { thoughtSignature }),
 						});
 					} else {
 						parts.push({
-							text: renderDemotedThinking(model.id, block.thinking),
+							text: block.thinking.toWellFormed(),
 						});
 					}
 				} else if (block.type === "toolCall") {
-					emittedToolCallNames.set(block.id, block.name);
 					const thoughtSignature = resolveThoughtSignature(isSameProviderAndModel, block.thoughtSignature);
 					const effectiveSignature =
 						thoughtSignature || (isGemini3Model(model.id) ? SKIP_THOUGHT_SIGNATURE : undefined);
@@ -270,11 +268,11 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 						functionCall: {
 							name: block.name,
 							args: block.arguments ?? {},
-							...(supportsFunctionPartId(model) ? { id: block.id } : {}),
+							...(requiresToolCallId(model.id) ? { id: block.id } : {}),
 						},
 					};
 					if (model.provider === "google-vertex" && part?.functionCall?.id) {
-						delete part.functionCall.id; // Vertex AI GenerateContent rejects 'id' in functionCall parts.
+						delete part.functionCall.id; // Vertex AI does not support 'id' in functionCall
 					}
 					if (effectiveSignature) {
 						part.thoughtSignature = effectiveSignature;
@@ -320,11 +318,10 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 				},
 			}));
 
-			const includeId = supportsFunctionPartId(model);
-			const emittedName = emittedToolCallNames.get(msg.toolCallId);
+			const includeId = requiresToolCallId(model.id);
 			const functionResponsePart: Part = {
 				functionResponse: {
-					name: emittedName ?? msg.toolName,
+					name: msg.toolName,
 					response: msg.isError ? { error: responseValue } : { output: responseValue },
 					...(hasImages && modelSupportsMultimodalFunctionResponse && { parts: imageParts }),
 					...(includeId ? { id: msg.toolCallId } : {}),
@@ -332,7 +329,7 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 			};
 
 			if (model.provider === "google-vertex" && functionResponsePart.functionResponse?.id) {
-				delete functionResponsePart.functionResponse.id; // Vertex AI GenerateContent rejects 'id' in functionResponse parts.
+				delete functionResponsePart.functionResponse.id; // Vertex AI does not support 'id' in functionResponse
 			}
 
 			// Cloud Code Assist API requires all function responses to be in a single user turn.
@@ -434,7 +431,7 @@ export function mapStopReason(reason: FinishReason): StopReason {
 		case "NO_IMAGE":
 			return "error";
 		default: {
-			throw new AIError.ConfigurationError(`Unhandled stop reason: ${reason satisfies never}`);
+			throw new Error(`Unhandled stop reason: ${reason satisfies never}`);
 		}
 	}
 }
@@ -550,24 +547,6 @@ export function pushToolCallEvents(
  * inject its `ensureStarted()` first-token side effect into the canonical event order.
  */
 export function startTextOrThinkingBlock(
-	isThinking: true,
-	output: AssistantMessage,
-	stream: AssistantMessageEventStream,
-	onBeforeStartEvent?: () => void,
-): ThinkingContent;
-export function startTextOrThinkingBlock(
-	isThinking: false,
-	output: AssistantMessage,
-	stream: AssistantMessageEventStream,
-	onBeforeStartEvent?: () => void,
-): TextContent;
-export function startTextOrThinkingBlock(
-	isThinking: boolean,
-	output: AssistantMessage,
-	stream: AssistantMessageEventStream,
-	onBeforeStartEvent?: () => void,
-): TextContent | ThinkingContent;
-export function startTextOrThinkingBlock(
 	isThinking: boolean,
 	output: AssistantMessage,
 	stream: AssistantMessageEventStream,
@@ -629,14 +608,13 @@ export async function consumeGoogleStream<T extends GoogleApiType>(args: {
 			const detail = chunk.error.message || chunk.error.status || "unknown error";
 			const message = `Google API stream error: ${detail}`;
 			throw typeof chunk.error.code === "number" && chunk.error.code >= 400
-				? new AIError.GoogleApiError(message, chunk.error.code)
-				: new AIError.ProviderResponseError(message, { provider: model.provider, kind: "output" });
+				? new GoogleApiError(message, chunk.error.code)
+				: new Error(message);
 		}
 		if (!chunk.candidates?.length && chunk.promptFeedback?.blockReason) {
 			const detail = chunk.promptFeedback.blockReasonMessage;
-			throw new AIError.ProviderResponseError(
+			throw new Error(
 				`Request blocked by Google (${chunk.promptFeedback.blockReason})${detail ? `: ${detail}` : ""}`,
-				{ provider: model.provider, kind: "content-blocked" },
 			);
 		}
 		const candidate = chunk.candidates?.[0];
@@ -767,21 +745,15 @@ export async function consumeGoogleStream<T extends GoogleApiType>(args: {
 	flushCurrent();
 
 	if (options?.signal?.aborted) {
-		throw new AIError.AbortError();
+		throw new Error("Request was aborted");
 	}
 
 	if (!sawFinishReason) {
-		throw new AIError.ProviderResponseError(
-			"Google API stream ended without a finish reason (connection dropped or response truncated)",
-			{ provider: model.provider, kind: "incomplete-stream" },
-		);
+		throw new Error("Google API stream ended without a finish reason (connection dropped or response truncated)");
 	}
 
 	if (output.stopReason === "aborted" || output.stopReason === "error") {
-		throw new AIError.ProviderResponseError(output.errorMessage ?? "An unknown error occurred", {
-			provider: model.provider,
-			kind: "output",
-		});
+		throw new Error(output.errorMessage ?? "An unknown error occurred");
 	}
 }
 
@@ -829,23 +801,12 @@ export function buildGoogleGenerateContentParams<T extends "google-generative-ai
 		...(context.tools && context.tools.length > 0 && { tools: convertTools(context.tools, model) }),
 	};
 
-	// Gemini API (google-generative-ai) reads the tier from the request body;
-	// Vertex AI ignores a body field and requires the
-	// `X-Vertex-AI-LLM-Shared-Request-Type` header instead (added in
-	// streamGoogleVertex), so only emit the body field for the direct API.
-	if (model.provider === "google" && shouldSendServiceTier(options.serviceTier, model.provider)) {
-		config.serviceTier = options.serviceTier;
-	}
-
 	if (context.tools && context.tools.length > 0 && options.toolChoice) {
 		const choice = options.toolChoice;
 		if (typeof choice === "string") {
-			const mode = mapToolChoice(choice);
-			if (mode !== "AUTO") {
-				config.toolConfig = {
-					functionCallingConfig: { mode },
-				};
-			}
+			config.toolConfig = {
+				functionCallingConfig: { mode: mapToolChoice(choice) },
+			};
 		} else {
 			// Named-tool routing — `mode: "ANY"` plus an explicit allow-list. The
 			// caller is responsible for ensuring the names exist in `context.tools`.
@@ -861,7 +822,7 @@ export function buildGoogleGenerateContentParams<T extends "google-generative-ai
 	}
 
 	if (options.thinking?.enabled && model.reasoning) {
-		const cfg: ThinkingConfig = { includeThoughts: !options.hideThinkingSummary };
+		const cfg: ThinkingConfig = { includeThoughts: true };
 		if (options.thinking.level !== undefined) {
 			// GoogleThinkingLevel mirrors the SDK's `ThinkingLevel` string enum values 1:1.
 			cfg.thinkingLevel = options.thinking.level as ThinkingLevel;
@@ -873,7 +834,7 @@ export function buildGoogleGenerateContentParams<T extends "google-generative-ai
 
 	if (options.signal) {
 		if (options.signal.aborted) {
-			throw new AIError.AbortError("Request aborted");
+			throw new Error("Request aborted");
 		}
 		config.abortSignal = options.signal;
 	}
@@ -898,8 +859,6 @@ export interface GoogleGenAIRequestPlan {
 	url: string;
 	headers: Record<string, string>;
 	fetch?: FetchImpl;
-	/** Optional URL retried once when {@link url} returns 404 (regional Vertex endpoint missing a global-only model). */
-	fallbackUrl?: string;
 }
 
 export function streamGoogleGenAI<T extends "google-generative-ai" | "google-vertex">(args: {
@@ -913,7 +872,7 @@ export function streamGoogleGenAI<T extends "google-generative-ai" | "google-ver
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const startTime = performance.now();
+		const startTime = Date.now();
 		let firstTokenTime: number | undefined;
 
 		const output: AssistantMessage = {
@@ -954,8 +913,8 @@ export function streamGoogleGenAI<T extends "google-generative-ai" | "google-ver
 
 			const bodyJson = JSON.stringify(paramsToWireBody(params));
 			const fetchImpl = plan.fetch ?? options?.fetch ?? (globalThis.fetch.bind(globalThis) as FetchImpl);
-			const openStreamAt = async (requestUrl: string): Promise<ReadableStream<Uint8Array>> => {
-				const response = await fetchImpl(requestUrl, {
+			const openStream = async (): Promise<ReadableStream<Uint8Array>> => {
+				const response = await fetchImpl(plan.url, {
 					method: "POST",
 					headers: { ...plan.headers, "Content-Type": "application/json", Accept: "text/event-stream" },
 					body: bodyJson,
@@ -963,33 +922,16 @@ export function streamGoogleGenAI<T extends "google-generative-ai" | "google-ver
 				});
 				if (!response.ok) {
 					const errorText = await response.text().catch(() => "");
-					throw new AIError.GoogleApiError(
+					throw new GoogleApiError(
 						`Google API error (${response.status}): ${extractGoogleErrorMessage(errorText)}`,
 						response.status,
 						{ headers: response.headers },
 					);
 				}
 				if (!response.body) {
-					throw new AIError.ProviderResponseError("Google API returned an empty response body", {
-						provider: model.provider,
-						kind: "empty-body",
-					});
+					throw new Error("Google API returned an empty response body");
 				}
 				return response.body as ReadableStream<Uint8Array>;
-			};
-			// A regional Vertex endpoint 404s for models published only on the
-			// global endpoint; retry global once so a stale/ambient region never
-			// breaks a request that worked before regional routing existed.
-			const openStream = async (): Promise<ReadableStream<Uint8Array>> => {
-				if (!plan.fallbackUrl) return openStreamAt(plan.url);
-				try {
-					return await openStreamAt(plan.url);
-				} catch (error) {
-					if (error instanceof AIError.GoogleApiError && error.status === 404) {
-						return openStreamAt(plan.fallbackUrl);
-					}
-					throw error;
-				}
 			};
 
 			let body = await openStream();
@@ -1010,37 +952,39 @@ export function streamGoogleGenAI<T extends "google-generative-ai" | "google-ver
 					options,
 					retainTextSignature,
 					onFirstToken: () => {
-						firstTokenTime = performance.now();
+						firstTokenTime = Date.now();
 					},
 				});
 
 				if (output.stopReason !== "stop" || hasMeaningfulGoogleContent(output)) break;
 				if (emptyAttempt >= MAX_EMPTY_STREAM_RETRIES) {
-					throw new AIError.ProviderResponseError(
+					throw new Error(
 						`Google API returned an empty response (finishReason STOP with no content) after ${MAX_EMPTY_STREAM_RETRIES + 1} attempts`,
-						{ provider: model.provider, kind: "empty-body" },
 					);
 				}
 				try {
 					await scheduler.wait(EMPTY_STREAM_BASE_DELAY_MS * 2 ** emptyAttempt, { signal: options?.signal });
 				} catch {
-					throw new AIError.AbortError();
+					throw new Error("Request was aborted");
 				}
 				resetGoogleStreamOutputForRetry(output);
 				body = await openStream();
 			}
 
-			output.duration = performance.now() - startTime;
+			output.duration = Date.now() - startTime;
 			if (firstTokenTime) output.ttft = firstTokenTime - startTime;
 			stream.push({ type: "done", reason: output.stopReason as "length" | "stop" | "toolUse", message: output });
 			stream.end();
 		} catch (error) {
-			const result = await AIError.finalize(error, { api: model.api, signal: options?.signal, rawRequestDump });
-			output.stopReason = result.stopReason;
-			output.errorStatus = result.status;
-			output.errorId = result.id;
-			output.errorMessage = result.message;
-			output.duration = performance.now() - startTime;
+			for (const block of output.content) {
+				if ("index" in block) {
+					delete (block as { index?: number }).index;
+				}
+			}
+			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+			output.errorStatus = extractHttpStatusFromError(error);
+			output.errorMessage = await finalizeErrorMessage(error, rawRequestDump);
+			output.duration = Date.now() - startTime;
 			if (firstTokenTime) output.ttft = firstTokenTime - startTime;
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
@@ -1069,7 +1013,6 @@ function paramsToWireBody(params: GenerateContentParameters): Record<string, unk
 	if (config.toolConfig !== undefined) body.toolConfig = config.toolConfig;
 	if (config.safetySettings !== undefined) body.safetySettings = config.safetySettings;
 	if (config.cachedContent !== undefined) body.cachedContent = config.cachedContent;
-	if (config.serviceTier !== undefined) body.serviceTier = config.serviceTier;
 
 	const gen: Record<string, unknown> = {};
 	if (config.temperature !== undefined) gen.temperature = config.temperature;

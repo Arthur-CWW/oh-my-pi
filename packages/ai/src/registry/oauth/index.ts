@@ -2,7 +2,6 @@
 // High-level API
 // ============================================================================
 
-import * as AIError from "../../error";
 import { getProviderDefinition, PROVIDER_REGISTRY } from "../registry";
 import type {
 	OAuthCredentials,
@@ -12,7 +11,6 @@ import type {
 	OAuthProviderInterface,
 } from "./types";
 
-export * from "./device-code";
 export type * from "./types";
 
 const builtInOAuthProviders: OAuthProviderInfo[] = PROVIDER_REGISTRY.filter(
@@ -21,7 +19,6 @@ const builtInOAuthProviders: OAuthProviderInfo[] = PROVIDER_REGISTRY.filter(
 	id: provider.id,
 	name: provider.name,
 	available: provider.available ?? true,
-	storeCredentialsAs: provider.storeCredentialsAs,
 }));
 
 const customOAuthProviders = new Map<string, OAuthProviderInterface>();
@@ -60,17 +57,11 @@ export async function refreshOAuthToken(
 	credentials: OAuthCredentials,
 ): Promise<OAuthCredentials> {
 	if (!credentials) {
-		throw new AIError.OAuthError(`No OAuth credentials found for ${provider}`, {
-			kind: "validation",
-			provider,
-		});
+		throw new Error(`No OAuth credentials found for ${provider}`);
 	}
 	const def = getProviderDefinition(provider);
 	if (!def?.login) {
-		throw new AIError.OAuthError(`Unknown OAuth provider: ${provider}`, {
-			kind: "validation",
-			provider,
-		});
+		throw new Error(`Unknown OAuth provider: ${provider}`);
 	}
 	// Providers without a real refresher (static bearer tokens / API keys that
 	// don't expire) return the credentials unchanged.
@@ -139,20 +130,15 @@ export async function getOAuthApiKey(
 				return { newCredentials: fallbackCredentials, apiKey: fallbackCredentials.access };
 			}
 		}
-		throw new AIError.OAuthError(
+		throw new Error(
 			`OAuth credential for ${provider} is expired and must be refreshed via AuthStorage before getOAuthApiKey is called`,
-			{ kind: "validation", provider },
 		);
 	}
 	// For providers that need request-time credential metadata, return JSON.
 	const needsStructuredApiKey =
-		provider === "github-copilot" ||
-		provider === "google-gemini-cli" ||
-		provider === "google-antigravity" ||
-		provider === "alibaba-coding-plan";
+		provider === "github-copilot" || provider === "google-gemini-cli" || provider === "google-antigravity";
 	const apiKey = needsStructuredApiKey
 		? JSON.stringify({
-				apiEndpoint: creds.apiEndpoint,
 				token: creds.access,
 				enterpriseUrl: creds.enterpriseUrl,
 				projectId: creds.projectId,
@@ -173,7 +159,6 @@ export function getOAuthProviders(): OAuthProviderInfo[] {
 		id: provider.id,
 		name: provider.name,
 		available: true,
-		storeCredentialsAs: provider.storeCredentialsAs,
 	}));
 	return [...builtInOAuthProviders, ...customProviders];
 }

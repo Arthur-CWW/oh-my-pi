@@ -1,9 +1,9 @@
-import { type } from "arktype";
+import { z } from "zod/v4";
 import type { CustomTool } from "../../../extensibility/custom-tools/types";
 import * as git from "../../../utils/git";
 
-const recentCommitsSchema = type({
-	"count?": type("1 <= number <= 50").describe("commit count"),
+const recentCommitsSchema = z.object({
+	count: z.number().min(1).max(50).describe("commit count").optional(),
 });
 
 interface RecentCommitStats {

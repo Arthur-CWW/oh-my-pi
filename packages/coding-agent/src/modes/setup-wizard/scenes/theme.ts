@@ -1,12 +1,12 @@
 import {
 	padding,
-	routeSelectListMouse,
 	type SelectItem,
 	SelectList,
 	type SgrMouseEvent,
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
+import { keyHint } from "../../components/keybinding-hints";
 import {
 	enableAutoTheme,
 	getAvailableThemes,
@@ -19,6 +19,7 @@ import {
 	setSymbolPreset,
 	theme,
 } from "../../theme/theme";
+import { matchesUiDismiss } from "../../utils/keybinding-matchers";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
 type ThemeMode = "curated" | "all";
@@ -118,6 +119,10 @@ class ThemeSceneController implements SetupSceneController {
 	}
 
 	handleInput(data: string): void {
+		if (matchesUiDismiss(data)) {
+			this.#dismiss();
+			return;
+		}
 		const quickIndex = data >= "1" && data <= "9" ? Number(data) - 1 : -1;
 		if (quickIndex >= 0) {
 			this.#selectList.setSelectedIndex(quickIndex);
@@ -129,19 +134,26 @@ class ThemeSceneController implements SetupSceneController {
 
 	/** Wheel moves the highlight (live preview); hover lights the row under the pointer; click confirms it. */
 	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
-		// Mirror the pre-helper flow: wheel/motion are always processed, but a
-		// hidden list (#listRowStart < 0, e.g. while loading all themes) must
-		// never hit-test a row — route through a line that resolves to undefined.
-		const listLine = this.#listRowStart >= 0 ? line - this.#listRowStart : Number.NEGATIVE_INFINITY;
-		routeSelectListMouse(this.#selectList, event, listLine);
+		if (event.wheel !== null) {
+			this.#selectList.handleWheel(event.wheel);
+			return;
+		}
+		const index = this.#listRowStart >= 0 ? this.#selectList.hitTest(line - this.#listRowStart) : undefined;
+		if (event.motion) {
+			this.#selectList.setHoverIndex(index ?? null);
+			return;
+		}
+		if (event.leftClick && index !== undefined) {
+			this.#selectList.clickItem(index);
+		}
 	}
 
 	render(width: number): readonly string[] {
 		const lines = [
 			theme.fg("muted", "Theme changes preview live. Nothing is saved until you press Enter."),
 			this.#mode === "all"
-				? theme.fg("dim", "Browsing all themes · Esc returns to curated choices")
-				: theme.fg("dim", "Esc skips this step"),
+				? theme.fg("dim", "Browsing all themes · ") + keyHint("ui.dismiss", "returns to curated choices")
+				: keyHint("ui.dismiss", "skips this step"),
 			"",
 			...renderThemePreview(width),
 			"",
@@ -159,6 +171,17 @@ class ThemeSceneController implements SetupSceneController {
 		return lines;
 	}
 
+	#dismiss(): void {
+		if (this.#mode === "all") {
+			this.#mode = "curated";
+			this.#selectList = this.#createSelectList(CURATED_ITEMS, this.#currentCuratedIndex());
+			this.host.requestRender();
+			return;
+		}
+		this.#restorePreview();
+		this.host.finish("skipped");
+	}
+
 	#createSelectList(items: readonly SelectItem[], selectedIndex: number): SelectList {
 		const list = new SelectList(items, Math.min(10, Math.max(1, items.length)), getSelectListTheme());
 		list.setSelectedIndex(selectedIndex);
@@ -167,16 +190,6 @@ class ThemeSceneController implements SetupSceneController {
 		};
 		list.onSelect = item => {
 			void this.#select(item.value);
-		};
-		list.onCancel = () => {
-			if (this.#mode === "all") {
-				this.#mode = "curated";
-				this.#selectList = this.#createSelectList(CURATED_ITEMS, this.#currentCuratedIndex());
-				this.host.requestRender();
-				return;
-			}
-			this.#restorePreview();
-			this.host.finish("skipped");
 		};
 		return list;
 	}
@@ -256,7 +269,7 @@ class ThemeSceneController implements SetupSceneController {
 		} else {
 			this.host.ctx.settings.set("theme.dark", themeName);
 		}
-		await previewTheme(themeName, { ephemeral: false });
+		await previewTheme(themeName);
 	}
 
 	async #preview(value: string): Promise<void> {
@@ -270,7 +283,7 @@ class ThemeSceneController implements SetupSceneController {
 		let result: { success: boolean; error?: string } = { success: true };
 		if (value === "auto") {
 			await this.#applyPreviewPresentation(this.#originalSymbolPreset, this.#originalColorBlindMode);
-			enableAutoTheme({ ephemeral: true });
+			enableAutoTheme();
 		} else if (value === "colorblind") {
 			await this.#applyPreviewPresentation(this.#originalSymbolPreset, true);
 		} else if (value === "ansi") {

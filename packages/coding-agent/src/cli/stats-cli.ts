@@ -4,7 +4,6 @@
  * Handles `omp stats` subcommand for viewing AI usage statistics.
  */
 
-import { truncateToWidth } from "@oh-my-pi/pi-tui/utils";
 import { APP_NAME, formatDuration, formatNumber, formatPercent } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import { openPath } from "../utils/open";
@@ -33,7 +32,7 @@ function createSyncProgressReporter(): {
 			const counter = chalk.cyan(`[${event.current}/${event.total}]`);
 			const line = `${counter} ${pct}%  ${label}`;
 			const columns = stream.columns ?? 120;
-			const trimmed = truncateToWidth(line, columns - 1);
+			const trimmed = truncateToColumns(line, columns - 1);
 			stream.write(`\r${trimmed.padEnd(lastWidth)}`);
 			lastWidth = trimmed.length;
 		},
@@ -51,6 +50,16 @@ function shortenSessionFile(p: string): string {
 	return idx >= 0 ? p.slice(idx + marker.length) : p;
 }
 
+function truncateToColumns(s: string, max: number): string {
+	if (max <= 0) return "";
+	const width = Bun.stringWidth(s, { countAnsiEscapeCodes: false });
+	if (width <= max) return s;
+	// Cheap right-trim with an ellipsis - we don't need ANSI-aware slicing
+	// because the colored prefix is short and the truncated tail is the
+	// dim filename, where dropping bytes is fine.
+	return `${s.slice(0, Math.max(0, max - 1))}\u2026`;
+}
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -59,6 +68,20 @@ export interface StatsCommandArgs {
 	port: number;
 	json: boolean;
 	summary: boolean;
+}
+
+export function validateStatsPort(port: number): number {
+	if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+		throw new Error(`Invalid stats port "${String(port)}"; expected an integer from 1 to 65535`);
+	}
+	return port;
+}
+
+function parseStatsPort(value: string | undefined): number {
+	if (!value || !/^\d+$/.test(value)) {
+		throw new Error(`Invalid stats port "${value ?? ""}"; expected an integer from 1 to 65535`);
+	}
+	return validateStatsPort(Number(value));
 }
 
 // =============================================================================
@@ -86,10 +109,10 @@ export function parseStatsArgs(args: string[]): StatsCommandArgs | undefined {
 			result.json = true;
 		} else if (arg === "--summary" || arg === "-s") {
 			result.summary = true;
-		} else if ((arg === "--port" || arg === "-p") && i + 1 < args.length) {
-			result.port = parseInt(args[++i], 10);
+		} else if (arg === "--port" || arg === "-p") {
+			result.port = parseStatsPort(args[++i]);
 		} else if (arg.startsWith("--port=")) {
-			result.port = parseInt(arg.split("=")[1], 10);
+			result.port = parseStatsPort(arg.slice("--port=".length));
 		}
 	}
 
@@ -111,49 +134,92 @@ function normalizePremiumRequests(n: number): number {
 // =============================================================================
 
 export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
-	// Lazy import to avoid loading stats module when not needed
-	const { getDashboardStats, syncAllSessions, getTotalMessageCount, startServer, closeDb } = await import(
-		"@oh-my-pi/omp-stats"
-	);
+	validateStatsPort(cmd.port);
+	const { getDashboardStats, syncAllSessions, getTotalMessageCount, startServer, closeDb, waitForStatsHealth } =
+		await import("@oh-my-pi/omp-stats");
 
-	// Sync session files first
 	const progress = createSyncProgressReporter();
 	process.stderr.write("Syncing session files...\n");
-	const { processed, files } = await syncAllSessions({ onProgress: progress.onProgress });
-	progress.finish();
+	let syncResult: Awaited<ReturnType<typeof syncAllSessions>>;
+	try {
+		syncResult = await syncAllSessions({ onProgress: progress.onProgress });
+	} catch (error) {
+		throw new Error(`Unable to sync stats sessions: ${error instanceof Error ? error.message : String(error)}`, {
+			cause: error,
+		});
+	} finally {
+		progress.finish();
+	}
 	const total = await getTotalMessageCount();
-	console.log(`Synced ${processed} new entries from ${files} files (${total} total)\n`);
+	console.log(`Synced ${syncResult.processed} new entries from ${syncResult.files} files (${total} total)\n`);
 
 	if (cmd.json) {
-		const stats = await getDashboardStats();
-		console.log(JSON.stringify(stats, null, 2));
+		try {
+			const stats = await getDashboardStats();
+			console.log(JSON.stringify(stats, null, 2));
+		} finally {
+			closeDb();
+		}
 		return;
 	}
 
 	if (cmd.summary) {
-		await printStatsSummary();
+		try {
+			await printStatsSummary();
+		} finally {
+			closeDb();
+		}
 		return;
 	}
 
-	// Start the dashboard server
-	const { port } = await startServer(cmd.port);
-	console.log(chalk.green(`Dashboard available at: http://localhost:${port}`));
+	let server: Awaited<ReturnType<typeof startServer>>;
+	try {
+		server = await startServer(cmd.port);
+	} catch (error) {
+		closeDb();
+		throw new Error(
+			`Unable to launch the stats dashboard on port ${cmd.port}: ${error instanceof Error ? error.message : String(error)}`,
+			{ cause: error },
+		);
+	}
 
-	// Open browser
-	const url = `http://localhost:${port}`;
+	const url = `http://localhost:${server.port}`;
+	try {
+		await waitForStatsHealth(url);
+	} catch (error) {
+		await server.stop();
+		throw new Error(
+			`Stats dashboard startup failed: ${error instanceof Error ? error.message : String(error)}`,
+			{ cause: error },
+		);
+	}
+
+	console.log(chalk.green(`Dashboard available at: ${url}`));
 	openPath(url);
-
 	console.log("Press Ctrl+C to stop\n");
 
-	// Keep process running
-	process.on("SIGINT", () => {
-		console.log("\nShutting down...");
-		closeDb();
-		process.exit(0);
+	await new Promise<void>((resolve, reject) => {
+		let shuttingDown = false;
+		const shutdown = async () => {
+			if (shuttingDown) return;
+			shuttingDown = true;
+			process.off("SIGINT", shutdown);
+			process.off("SIGTERM", shutdown);
+			console.log("\nShutting down...");
+			try {
+				await server.stop();
+				resolve();
+			} catch (error) {
+				reject(
+					new Error(`Unable to shut down the stats dashboard cleanly: ${error instanceof Error ? error.message : String(error)}`, {
+						cause: error,
+					}),
+				);
+			}
+		};
+		process.once("SIGINT", shutdown);
+		process.once("SIGTERM", shutdown);
 	});
-
-	// Keep the process alive
-	await new Promise(() => {});
 }
 
 async function printStatsSummary(): Promise<void> {

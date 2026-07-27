@@ -7,7 +7,6 @@ import {
 	loadLegacyPiModule,
 } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/legacy-pi-compat";
 import { Type as TypeBoxShimType } from "@oh-my-pi/pi-coding-agent/extensibility/typebox";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 // The remap installs a Bun.plugin onResolve hook plus an explicit
 // rewrite branch inside `rewriteBareImportsForLegacyExtension` that
@@ -20,7 +19,7 @@ const tempRoots: string[] = [];
 
 afterAll(async () => {
 	for (const dir of tempRoots) {
-		await removeWithRetries(dir);
+		await fs.rm(dir, { recursive: true, force: true });
 	}
 });
 
@@ -32,7 +31,7 @@ async function writeFixtureExtension(source: string): Promise<string> {
 	return entry;
 }
 
-describe("legacy-pi TypeBox remap", () => {
+describe("legacy-pi @sinclair/typebox remap", () => {
 	it("redirects bare @sinclair/typebox imports inside legacy extensions to the in-repo shim", async () => {
 		const entry = await writeFixtureExtension(
 			[
@@ -50,24 +49,5 @@ describe("legacy-pi TypeBox remap", () => {
 		expect(loaded.probe).toBe(TypeBoxShimType);
 		expect(loaded.objectSchema.safeParse({ name: "ok" }).success).toBe(true);
 		expect(loaded.objectSchema.safeParse({ name: "ok", extra: 1 }).success).toBe(false);
-	});
-
-	it("redirects bare typebox imports inside legacy extensions to the in-repo shim", async () => {
-		const entry = await writeFixtureExtension(
-			[
-				'import { Type } from "typebox";',
-				"export const probe = Type;",
-				"export const enumSchema = Type.Enum(['upstream', 'downstream']);",
-			].join("\n"),
-		);
-
-		const loaded = (await loadLegacyPiModule(entry)) as {
-			probe: typeof TypeBoxShimType;
-			enumSchema: { safeParse: (input: unknown) => { success: boolean } };
-		};
-
-		expect(loaded.probe).toBe(TypeBoxShimType);
-		expect(loaded.enumSchema.safeParse("upstream").success).toBe(true);
-		expect(loaded.enumSchema.safeParse("sideways").success).toBe(false);
 	});
 });

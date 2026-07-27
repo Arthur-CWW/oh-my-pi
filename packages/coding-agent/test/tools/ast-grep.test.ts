@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createTools, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 function createTestSession(cwd = "/tmp/test", overrides: Partial<ToolSession> = {}): ToolSession {
 	return {
@@ -30,7 +29,7 @@ describe("ast_grep parse errors", () => {
 
 			const result = await tool!.execute("ast-grep-parse", {
 				pat: "someUnlikelyCall($A)",
-				path: filePath,
+				paths: [filePath],
 			});
 
 			const text = result.content.find(content => content.type === "text")?.text ?? "";
@@ -44,7 +43,7 @@ describe("ast_grep parse errors", () => {
 			expect(details?.parseErrors?.[0]).not.toContain("someUnlikelyCall($A):");
 			expect(text.match(/parse error \(syntax tree contains error nodes\)/g)?.length ?? 0).toBe(1);
 		} finally {
-			await removeWithRetries(tempDir);
+			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
 	it("caps parseErrors at PARSE_ERRORS_LIMIT and records the original total", async () => {
@@ -61,7 +60,7 @@ describe("ast_grep parse errors", () => {
 
 			const result = await tool!.execute("ast-grep-parse-cap", {
 				pat: "someUnlikelyCall($A)",
-				path: tempDir,
+				paths: [tempDir],
 			});
 
 			const text = result.content.find(content => content.type === "text")?.text ?? "";
@@ -74,7 +73,7 @@ describe("ast_grep parse errors", () => {
 			expect(details?.parseErrorsTotal).toBe(fileCount);
 			expect(text).toContain(`Parse issues (20 / ${fileCount}):`);
 		} finally {
-			await removeWithRetries(tempDir);
+			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
 	it("combines globbing from path and glob parameters", async () => {
@@ -95,7 +94,7 @@ describe("ast_grep parse errors", () => {
 
 			const result = await tool!.execute("ast-grep-glob", {
 				pat: "providerOptions",
-				path: `${packagesDir}/pkg-*/src/**/*.ts`,
+				paths: [`${packagesDir}/pkg-*/src/**/*.ts`],
 			});
 
 			const text = result.content.find(content => content.type === "text")?.text ?? "";
@@ -110,42 +109,7 @@ describe("ast_grep parse errors", () => {
 			expect(details?.matchCount).toBe(2);
 			expect(details?.fileCount).toBe(2);
 		} finally {
-			await removeWithRetries(tempDir);
-		}
-	});
-
-	it("keeps multi-target paging globally ordered without truncating match totals", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ast-grep-multi-page-"));
-		try {
-			const earlyDir = path.join(tempDir, "a");
-			const lateDir = path.join(tempDir, "z");
-			await fs.mkdir(earlyDir, { recursive: true });
-			await fs.mkdir(lateDir, { recursive: true });
-			await Bun.write(path.join(earlyDir, "early.ts"), 'marker("early");\n');
-			for (let index = 0; index < 60; index++) {
-				await Bun.write(path.join(lateDir, `late-${index.toString().padStart(2, "0")}.ts`), 'marker("late");\n');
-			}
-
-			const tools = await createTools(createTestSession(tempDir));
-			const tool = tools.find(entry => entry.name === "ast_grep");
-			expect(tool).toBeDefined();
-
-			const result = await tool!.execute("ast-grep-multi-page", {
-				pat: "marker($A)",
-				path: `${lateDir}; ${earlyDir}`,
-			});
-
-			const text = result.content.find(content => content.type === "text")?.text ?? "";
-			const details = result.details as
-				| { matchCount?: number; fileCount?: number; limitReached?: boolean }
-				| undefined;
-
-			expect(text).toMatch(/^## early\.ts#[0-9A-F]{4}/m);
-			expect(details?.matchCount).toBe(61);
-			expect(details?.fileCount).toBe(61);
-			expect(details?.limitReached).toBe(true);
-		} finally {
-			await removeWithRetries(tempDir);
+			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
 
@@ -164,7 +128,7 @@ describe("ast_grep parse errors", () => {
 
 			const result = await tool!.execute("ast-grep-tlaplus", {
 				pat: "Inc",
-				path: filePath,
+				paths: [filePath],
 			});
 
 			const text = result.content.find(content => content.type === "text")?.text ?? "";
@@ -174,7 +138,7 @@ describe("ast_grep parse errors", () => {
 			expect(details?.matchCount).toBe(1);
 			expect(details?.parseErrors).toBeUndefined();
 		} finally {
-			await removeWithRetries(tempDir);
+			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
 });

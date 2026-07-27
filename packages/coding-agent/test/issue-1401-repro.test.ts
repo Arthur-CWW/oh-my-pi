@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { processFileArguments } from "@oh-my-pi/pi-coding-agent/cli/file-processor";
-import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
 function createPdfWithText(text: string): string {
 	const chunks: string[] = [];
@@ -48,7 +47,7 @@ describe("processFileArguments", () => {
 	});
 
 	afterEach(() => {
-		removeSyncWithRetries(testDir);
+		fs.rmSync(testDir, { recursive: true, force: true });
 	});
 
 	it("converts PDF file arguments before adding them to the prompt", async () => {
@@ -57,7 +56,7 @@ describe("processFileArguments", () => {
 
 		const result = await processFileArguments([pdfPath], { autoResizeImages: false });
 
-		expect(result.images).toEqual([]);
+		expect(result.attachments).toEqual([]);
 		expect(result.text).toContain("Hello PDF from issue 1401");
 		expect(result.text).not.toContain("%PDF-1.4");
 		expect(result.text).not.toContain("stream");

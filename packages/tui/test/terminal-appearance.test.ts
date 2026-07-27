@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { extractPrintableText } from "@oh-my-pi/pi-tui/keys";
+import { Editor } from "@oh-my-pi/pi-tui/components/editor";
+import { defaultEditorTheme } from "./test-themes";
 import { ProcessTerminal } from "@oh-my-pi/pi-tui/terminal";
 import {
 	type CellDimensions,
@@ -7,7 +9,6 @@ import {
 	getTerminalInfo,
 	setCellDimensions,
 } from "@oh-my-pi/pi-tui/terminal-capabilities";
-import { setTerminalHeadless } from "@oh-my-pi/pi-utils";
 
 const stdinIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
 const stdoutIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
@@ -17,10 +18,6 @@ const stdoutRowsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "ro
 const stdinSetRawModeDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "setRawMode");
 const originalWslDistroName = Bun.env.WSL_DISTRO_NAME;
 const originalWslInterop = Bun.env.WSL_INTEROP;
-
-// These suites drive the real ProcessTerminal start()/probe pipeline, so they
-// opt out of the test-default headless suppression and restore it per case.
-let previousHeadless = false;
 
 function restoreProperty(target: object, key: string, descriptor: PropertyDescriptor | undefined): void {
 	if (descriptor) {
@@ -43,13 +40,11 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
 		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
 		Object.defineProperty(process.stdin, "setRawMode", { value: vi.fn(), configurable: true });
-		previousHeadless = setTerminalHeadless(false);
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
-		setTerminalHeadless(previousHeadless);
 		restoreProperty(process.stdin, "isTTY", stdinIsTtyDescriptor);
 		restoreProperty(process.stdout, "isTTY", stdoutIsTtyDescriptor);
 		restoreProperty(process.stdin, "setRawMode", stdinSetRawModeDescriptor);
@@ -58,7 +53,7 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		restoreEnv("WSL_DISTRO_NAME", originalWslDistroName);
 	});
 
-	function setupTerminal() {
+	function setupTerminal(onInput?: (data: string) => void) {
 		const writes: string[] = [];
 		const received: string[] = [];
 		vi.spyOn(process, "kill").mockReturnValue(true);
@@ -72,7 +67,10 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 
 		const terminal = new ProcessTerminal();
 		terminal.start(
-			data => received.push(data),
+			data => {
+				received.push(data);
+				onInput?.(data);
+			},
 			() => {},
 		);
 
@@ -144,24 +142,6 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		terminal.stop();
 	});
 
-	it("replays already detected OSC 11 appearance to late subscribers", () => {
-		const { terminal } = setupTerminal();
-
-		process.stdin.emit("data", "\x1b]11;rgb:ffff/ffff/ffff\x07");
-		process.stdin.emit("data", "\x1b[?1;2c");
-
-		const appearances: string[] = [];
-		terminal.onAppearanceChange(a => appearances.push(a));
-		const detected = terminal.appearance;
-
-		// Stop before asserting: a failing expect must not leak a live terminal
-		// (stdin listeners, kitty push) into subsequent tests.
-		terminal.stop();
-
-		expect(detected).toBe("light");
-		expect(appearances).toEqual(["light"]);
-	});
-
 	it("2-digit hex OSC 11 response is correctly normalized", () => {
 		const { terminal } = setupTerminal();
 
@@ -208,31 +188,72 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		terminal.stop();
 	});
 
-	it("does not periodically re-query OSC 11 once startup probes complete (#3297)", () => {
+	it("poll timer self-disables when Mode 2031 fires outside WSL", () => {
 		vi.useFakeTimers();
 		const { terminal, queryCount } = setupTerminal();
 
-		// Drain the startup OSC 11 + DA1 (keyboard probe + OSC 11 sentinels).
+		// Complete initial OSC 11 + DA1 cycle. Two DA1 sentinels are in flight at
+		// startup (keyboard probe + OSC 11), so emit two DA1 replies.
 		process.stdin.emit("data", "\x1b]11;rgb:ffff/ffff/ffff\x07");
 		process.stdin.emit("data", "\x1b[?1;2c");
 		process.stdin.emit("data", "\x1b[?1;2c");
 
 		const afterInitial = queryCount();
 
-		// Advance well past the previous 30 s poll interval. Earlier builds
-		// fired an OSC 11 + DA1 probe every 30 s here, which wiped the user's
-		// active text selection on several terminals (Terminal.app, Warp, VS
-		// Code, older Alacritty/WezTerm) — the report in #3297. No periodic
-		// query may fire now; mid-session theme tracking is delegated entirely
-		// to Mode 2031 push notifications.
-		vi.advanceTimersByTime(10 * 60_000);
+		// Advance one poll interval — poll should fire and send another query
+		vi.advanceTimersByTime(30_000);
+		expect(queryCount()).toBe(afterInitial + 1);
 
-		expect(queryCount()).toBe(afterInitial);
+		// Complete poll's OSC 11 + DA1 (only one DA1 sentinel — keyboard probe is one-shot)
+		process.stdin.emit("data", "\x1b]11;rgb:ffff/ffff/ffff\x07");
+		process.stdin.emit("data", "\x1b[?1;2c");
+		// Send Mode 2031 notification — this activates push mode and stops polling
+		process.stdin.emit("data", "\x1b[?997;1n");
+		vi.advanceTimersByTime(100);
+
+		// Complete Mode 2031's re-query
+		process.stdin.emit("data", "\x1b]11;rgb:0000/0000/0000\x07");
+		process.stdin.emit("data", "\x1b[?1;2c");
+
+		const afterMode2031 = queryCount();
+
+		// Advance two more poll intervals — no additional poll queries should fire
+		vi.advanceTimersByTime(60_000);
+		expect(queryCount()).toBe(afterMode2031);
 
 		terminal.stop();
 	});
 
-	it("does not periodically re-query OSC 11 under WSL either (#3297)", () => {
+	it("poll timer stops once DECRQM confirms Mode 2031 support", () => {
+		vi.useFakeTimers();
+		const { terminal, queryCount } = setupTerminal();
+
+		// Complete initial OSC 11 + DA1 cycle (keyboard + OSC 11 sentinels).
+		process.stdin.emit("data", "\x1b]11;rgb:ffff/ffff/ffff\x07");
+		process.stdin.emit("data", "\x1b[?1;2c");
+		process.stdin.emit("data", "\x1b[?1;2c");
+
+		// Poll fires at the first interval while Mode 2031 support is still unknown.
+		const afterInitial = queryCount();
+		vi.advanceTimersByTime(30_000);
+		expect(queryCount()).toBe(afterInitial + 1);
+		// Drain the poll's OSC 11 reply so it is no longer pending.
+		process.stdin.emit("data", "\x1b]11;rgb:ffff/ffff/ffff\x07");
+
+		// DECRQM confirms Mode 2031 support — push notifications supersede polling,
+		// so the poll must stop (its repeated OSC 11/DA1 writes otherwise clobber
+		// the user's active text selection on every poll).
+		process.stdin.emit("data", "\x1b[?2031;3$y");
+		const afterConfirm = queryCount();
+
+		// Advance well past several poll intervals — no further OSC 11 queries fire.
+		vi.advanceTimersByTime(90_000);
+		expect(queryCount()).toBe(afterConfirm);
+
+		terminal.stop();
+	});
+
+	it("does not start the OSC 11 poll timer under WSL", () => {
 		vi.useFakeTimers();
 		Object.defineProperty(process, "platform", { value: "linux", configurable: true });
 		Bun.env.WSL_INTEROP = "/run/WSL/1_interop";
@@ -243,12 +264,33 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		process.stdin.emit("data", "\x1b[?1;2c");
 		const afterInitial = queryCount();
 
-		vi.advanceTimersByTime(10 * 60_000);
+		vi.advanceTimersByTime(90_000);
 
 		expect(queryCount()).toBe(afterInitial);
 
 		terminal.stop();
 	});
+
+	for (const [name, terminator] of [
+		["BEL", "\x07"],
+		["ST", "\x1b\\"],
+	] as const) {
+		it(`reassembles a legitimate split OSC 11 reply terminated by ${name}`, () => {
+			vi.useFakeTimers();
+			const { terminal, received } = setupTerminal();
+			const appearances: string[] = [];
+			terminal.onAppearanceChange(appearance => appearances.push(appearance));
+
+			process.stdin.emit("data", "\x1b]11;rgb:ff");
+			vi.advanceTimersByTime(51);
+			process.stdin.emit("data", `/ff/ff${terminator}`);
+
+			expect(terminal.appearance).toBe("light");
+			expect(appearances).toEqual(["light"]);
+			expect(received).toEqual([]);
+			terminal.stop();
+		});
+	}
 
 	it("partial OSC 11 buffer does not swallow unrelated input", () => {
 		vi.useFakeTimers();
@@ -267,6 +309,30 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		expect(received).toContain("\x1b[A");
 
 		terminal.stop();
+	});
+
+	it("keeps the prompt editable after a busy loop flushes a partial OSC reply without leaking resources", () => {
+		vi.useFakeTimers();
+		const stdinDataListeners = process.stdin.listenerCount("data");
+		const stdoutResizeListeners = process.stdout.listenerCount("resize");
+		const editor = new Editor(defaultEditorTheme);
+		const { terminal, writes } = setupTerminal(data => editor.handleInput(data));
+
+		// Streaming/render work can keep Bun busy long enough for StdinBuffer to
+		// flush a terminal capability reply before its tail reaches the TUI.
+		process.stdin.emit("data", "\x1b]11;rgb:ff");
+		vi.advanceTimersByTime(51);
+		process.stdin.emit("data", "queue");
+
+		expect(editor.getText()).toBe("queue");
+		expect(writes).toContain("\x1b]11;?\x07");
+
+		terminal.stop();
+		expect(process.stdin.listenerCount("data")).toBe(stdinDataListeners);
+		expect(process.stdout.listenerCount("resize")).toBe(stdoutResizeListeners);
+		const writesAfterStop = writes.length;
+		vi.advanceTimersByTime(60_000);
+		expect(writes).toHaveLength(writesAfterStop);
 	});
 
 	it("DA1 from old query does not cancel new queued query", () => {
@@ -373,12 +439,9 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		expect(writes.some(w => w.includes("\x1b[>31u"))).toBe(false);
 		expect(writes).toContain("\x1b[?u\x1b[c");
 
-		// Seven DA1 sentinels are in flight at startup: keyboard probe, OSC 11, and
-		// the DECRQM probes for DEC 2026, 2048, 2031, 1010, and 1011 (each rides the
-		// shared FIFO). Consume them in send-order and verify none leaks to the input
-		// handler.
-		process.stdin.emit("data", "\x1b[?1;2c");
-		process.stdin.emit("data", "\x1b[?1;2c");
+		// Five DA1 sentinels are in flight at startup: keyboard probe, OSC 11, and
+		// the DECRQM probes for DEC 2026, 2048, and 2031 (each rides the shared
+		// FIFO). Consume them in send-order and verify none leaks to the input handler.
 		process.stdin.emit("data", "\x1b[?1;2c");
 		process.stdin.emit("data", "\x1b[?1;2c");
 		process.stdin.emit("data", "\x1b[?1;2c");
@@ -386,7 +449,8 @@ describe("ProcessTerminal OSC 11 appearance detection", () => {
 		process.stdin.emit("data", "\x1b[?1;2c");
 		expect(received).toEqual([]);
 
-		// An eighth stray DA1 has no owner and must reach the input handler — it is
+		// A sixth stray DA1 has no owner and must reach the input handler — it is
+		// no longer ours to swallow.
 		process.stdin.emit("data", "\x1b[?1;2c");
 		expect(received).toEqual(["\x1b[?1;2c"]);
 
@@ -433,13 +497,11 @@ describe("ProcessTerminal DECRQM + in-band resize (DEC 2026/2048)", () => {
 		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
 		Object.defineProperty(process.stdin, "setRawMode", { value: vi.fn(), configurable: true });
 		originalCellDims = { ...getCellDimensions() };
-		previousHeadless = setTerminalHeadless(false);
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
-		setTerminalHeadless(previousHeadless);
 		restoreProperty(process.stdin, "isTTY", stdinIsTtyDescriptor);
 		restoreProperty(process.stdout, "isTTY", stdoutIsTtyDescriptor);
 		restoreProperty(process.stdin, "setRawMode", stdinSetRawModeDescriptor);
@@ -474,13 +536,11 @@ describe("ProcessTerminal DECRQM + in-band resize (DEC 2026/2048)", () => {
 		return { terminal, writes, received, reports, resizeCount: () => resizeCount };
 	}
 
-	it("queries DECRQM for DEC 2026, 2048, 2031, and xterm scroll-to-bottom modes at startup", () => {
+	it("queries DECRQM for DEC 2026, 2048, and 2031 at startup", () => {
 		const { terminal, writes } = setup();
 		expect(writes.some(w => w.includes("\x1b[?2026$p"))).toBe(true);
 		expect(writes.some(w => w.includes("\x1b[?2048$p"))).toBe(true);
 		expect(writes.some(w => w.includes("\x1b[?2031$p"))).toBe(true);
-		expect(writes.some(w => w.includes("\x1b[?1010$p"))).toBe(true);
-		expect(writes.some(w => w.includes("\x1b[?1011$p"))).toBe(true);
 		terminal.stop();
 	});
 
@@ -521,36 +581,6 @@ describe("ProcessTerminal DECRQM + in-band resize (DEC 2026/2048)", () => {
 		expect(writes).toContain("\x1b[?2048h");
 		terminal.stop();
 		expect(writes).toContain("\x1b[?2048l");
-	});
-
-	it("disables xterm scroll-to-bottom modes while active and restores them on stop", () => {
-		const { terminal, writes, reports } = setup();
-		process.stdin.emit("data", "\x1b[?1010;1$y");
-		process.stdin.emit("data", "\x1b[?1011;3$y");
-		expect(reports).toContainEqual({ mode: 1010, supported: true });
-		expect(reports).toContainEqual({ mode: 1011, supported: true });
-		expect(writes).toContain("\x1b[?1010l");
-		expect(writes).toContain("\x1b[?1011l");
-
-		terminal.stop();
-
-		expect(writes).toContain("\x1b[?1010h");
-		expect(writes).toContain("\x1b[?1011h");
-	});
-
-	it("leaves already-reset xterm scroll-to-bottom modes unchanged", () => {
-		const { terminal, writes, reports } = setup();
-		process.stdin.emit("data", "\x1b[?1010;2$y");
-		process.stdin.emit("data", "\x1b[?1011;4$y");
-		expect(reports).toContainEqual({ mode: 1010, supported: true });
-		expect(reports).toContainEqual({ mode: 1011, supported: false });
-		expect(writes).not.toContain("\x1b[?1010l");
-		expect(writes).not.toContain("\x1b[?1011l");
-
-		terminal.stop();
-
-		expect(writes).not.toContain("\x1b[?1010h");
-		expect(writes).not.toContain("\x1b[?1011h");
 	});
 
 	it("does not enable DEC 2048 when reported unsupported", () => {
@@ -596,30 +626,6 @@ describe("ProcessTerminal DECRQM + in-band resize (DEC 2026/2048)", () => {
 		expect(terminal.columns).toBe(120);
 		expect(getCellDimensions()).toEqual({ widthPx: 10, heightPx: 20 });
 		expect(resizeCount()).toBe(1);
-		expect(received).toEqual([]);
-		terminal.stop();
-	});
-
-	it("applies a grow-back report whose fields carry colon subparameters (#4748)", () => {
-		// iOS soft keyboard dismissed under tmux-over-SSH: the pane grows back and
-		// the terminal reports the restored geometry in-band with a spec-permitted
-		// `:`-subparameter appended to a field. Mode 2048 allows subparameters on
-		// any field and requires clients to IGNORE them — dropping the whole
-		// report instead pins `rows` at the keyboard-present height, because no
-		// OS resize event accompanies the report to reconcile cached geometry.
-		Object.defineProperty(process.stdout, "columns", { value: 100, configurable: true });
-		Object.defineProperty(process.stdout, "rows", { value: 40, configurable: true });
-		const { terminal, received, resizeCount } = setup();
-		process.stdin.emit("data", "\x1b[?2048;1$y"); // in-band active
-		process.stdin.emit("data", "\x1b[48;20;100;400;1000t"); // keyboard appears: shrink
-		expect(terminal.rows).toBe(20);
-		expect(resizeCount()).toBe(1);
-
-		process.stdin.emit("data", "\x1b[48;40;100;800;1000:0t"); // keyboard dismissed: grow back
-
-		expect(terminal.rows).toBe(40);
-		expect(terminal.columns).toBe(100);
-		expect(resizeCount()).toBe(2);
 		expect(received).toEqual([]);
 		terminal.stop();
 	});
@@ -697,29 +703,6 @@ describe("ProcessTerminal DECRQM + in-band resize (DEC 2026/2048)", () => {
 		expect(received).toEqual([]);
 		expect(terminal.rows).toBe(40);
 		expect(terminal.columns).toBe(125);
-		terminal.stop();
-	});
-
-	it("reassembles a split grow-back report with colon subparameters without dropping or leaking it", () => {
-		// Same grow-back report, fragmented by the StdinBuffer flush window right
-		// after the subparameter colon. The partial pattern must accept `:`, or
-		// the prefix is rejected as garbage, the report never applies, and the
-		// `0t` tail leaks into the editor as literal keystrokes.
-		vi.useFakeTimers();
-		Object.defineProperty(process.stdout, "columns", { value: 100, configurable: true });
-		Object.defineProperty(process.stdout, "rows", { value: 40, configurable: true });
-		const { terminal, received, resizeCount } = setup();
-		process.stdin.emit("data", "\x1b[?2048;1$y"); // in-band active
-		process.stdin.emit("data", "\x1b[48;20;100;400;1000t"); // keyboard appears: shrink
-		expect(terminal.rows).toBe(20);
-
-		process.stdin.emit("data", "\x1b[48;40;100;800;1000:");
-		vi.advanceTimersByTime(50); // flush window elapses mid-report
-		process.stdin.emit("data", "0t");
-
-		expect(received).toEqual([]);
-		expect(terminal.rows).toBe(40);
-		expect(resizeCount()).toBe(2);
 		terminal.stop();
 	});
 

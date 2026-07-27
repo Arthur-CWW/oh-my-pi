@@ -14,7 +14,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { isSqliteBusyError, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-storage";
-import { removeWithRetries } from "../../utils/src/temp";
 
 interface SqliteBusyShape extends Error {
 	code: string;
@@ -56,7 +55,7 @@ describe("SqliteAuthCredentialStore.open SQLITE_BUSY handling", () => {
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		if (tempDir) {
-			await removeWithRetries(tempDir);
+			await fs.rm(tempDir, { recursive: true, force: true });
 			tempDir = "";
 		}
 	});

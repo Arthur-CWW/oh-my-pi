@@ -6,8 +6,14 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ModelSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
 import { SessionSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/session-selector";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { matchesAppInterrupt, matchesUiDismiss } from "@oh-my-pi/pi-coding-agent/modes/utils/keybinding-matchers";
 import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
-import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
+import {
+	KeybindingsManager as TuiKeybindingsManager,
+	setKeybindings,
+	TUI_KEYBINDINGS,
+	type TUI,
+} from "@oh-my-pi/pi-tui";
 
 beforeAll(() => {
 	initTheme();
@@ -34,9 +40,28 @@ function createSession(id: string, title: string): SessionInfo {
 }
 
 describe("component escape bindings", () => {
-	it("uses app.interrupt for session selector cancel without changing Ctrl+C exit", () => {
+	it("keeps isolated-registry interrupt and dismissal fallbacks separate", () => {
+		setKeybindings(new TuiKeybindingsManager(TUI_KEYBINDINGS));
+
+		expect(matchesAppInterrupt("\x11")).toBe(true);
+		expect(matchesAppInterrupt("\x1b")).toBe(false);
+		expect(matchesUiDismiss("\x1b")).toBe(true);
+		expect(matchesUiDismiss("\x11")).toBe(false);
+	});
+
+	it("respects an explicitly disabled ui.dismiss binding", () => {
+		setKeybindings(
+			KeybindingsManager.inMemory({
+				"ui.dismiss": [],
+			}),
+		);
+
+		expect(matchesUiDismiss("\x1b")).toBe(false);
+	});
+
+	it("keeps session selector ui.dismiss independent with only app.interrupt=ctrl+q configured", () => {
 		const keybindings = KeybindingsManager.inMemory({
-			"app.interrupt": "alt+x",
+			"app.interrupt": "ctrl+q",
 		});
 		setKeybindings(keybindings);
 
@@ -49,19 +74,19 @@ describe("component escape bindings", () => {
 			onExit,
 		);
 
-		selector.handleInput("\x1b");
+		selector.handleInput("\x11");
 		expect(onCancel).not.toHaveBeenCalled();
 
-		selector.handleInput("\x1bx");
+		selector.handleInput("\x1b");
 		expect(onCancel).toHaveBeenCalledTimes(1);
 
 		selector.handleInput("\x03");
 		expect(onExit).toHaveBeenCalledTimes(1);
 	});
 
-	it("uses tui.select.cancel for model selector cancellation", async () => {
+	it("uses ui.dismiss=ctrl+g for model selector independently of Escape", async () => {
 		const keybindings = KeybindingsManager.inMemory({
-			"tui.select.cancel": "ctrl+g",
+			"ui.dismiss": "ctrl+g",
 		});
 		setKeybindings(keybindings);
 
@@ -78,6 +103,7 @@ describe("component escape bindings", () => {
 		const modelRegistry = {
 			getAll: () => [model],
 			getDiscoverableProviders: () => [],
+			getCanonicalModelSelections: () => [],
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),
@@ -97,6 +123,13 @@ describe("component escape bindings", () => {
 		await Bun.sleep(0);
 
 		selector.handleInput("\x1b");
+		expect(onCancel).not.toHaveBeenCalled();
+
+		selector.handleInput("\r");
+		const renderedMenu = Bun.stripANSI(selector.render(100).join("\n"));
+		expect(renderedMenu).toContain("ctrl+g: cancel");
+
+		selector.handleInput("\x07");
 		expect(onCancel).not.toHaveBeenCalled();
 
 		selector.handleInput("\x07");

@@ -11,7 +11,7 @@ import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { getSessionsDir, removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { getSessionsDir, Snowflake } from "@oh-my-pi/pi-utils";
 
 function createTtsrRule(name: string): Rule {
 	return {
@@ -78,7 +78,7 @@ describe("createAgentSession session storage isolation", () => {
 
 	afterEach(async () => {
 		for (const tempDir of tempDirs.splice(0)) {
-			removeSyncWithRetries(tempDir);
+			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
@@ -147,8 +147,9 @@ describe("createAgentSession session storage isolation", () => {
 			await session.dispose();
 		}
 	});
-	it("loads obfuscator only when secrets exist", async () => {
+	it("shows redaction guidance only when secrets are actually loaded", async () => {
 		await withClearedSecretEnv(async () => {
+			const redactionGuidance = "redacted as `#XXXX#` tokens";
 			const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-sdk-secrets-${Snowflake.next()}-`));
 			tempDirs.push(tempDir);
 			const cwd = path.join(tempDir, "project");
@@ -171,7 +172,7 @@ describe("createAgentSession session storage isolation", () => {
 
 			const withoutSecrets = await createAgentSession(commonOptions);
 			try {
-				expect(withoutSecrets.session.obfuscator?.hasSecrets()).toBeFalsy();
+				expect(withoutSecrets.session.systemPrompt.join("\n")).not.toContain(redactionGuidance);
 			} finally {
 				await withoutSecrets.session.dispose();
 			}
@@ -181,7 +182,7 @@ describe("createAgentSession session storage isolation", () => {
 
 			const withSecrets = await createAgentSession(commonOptions);
 			try {
-				expect(withSecrets.session.obfuscator?.hasSecrets()).toBe(true);
+				expect(withSecrets.session.systemPrompt.join("\n")).toContain(redactionGuidance);
 			} finally {
 				await withSecrets.session.dispose();
 			}

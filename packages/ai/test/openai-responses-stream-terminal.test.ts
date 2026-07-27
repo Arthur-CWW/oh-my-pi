@@ -8,8 +8,8 @@
 //    input on the stored content block and drop the transient `partialJson`
 //    accumulation buffer, mirroring the function_call branch.
 import { describe, expect, test } from "bun:test";
+import { processResponsesStream } from "@oh-my-pi/pi-ai/providers/openai-responses-shared";
 import type { ResponseStreamEvent } from "@oh-my-pi/pi-ai/providers/openai-responses-wire";
-import { processResponsesStream } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
@@ -161,7 +161,7 @@ describe("processResponsesStream: terminal events", () => {
 		if (block?.type !== "toolCall") throw new Error("expected a toolCall block");
 		expect(block.customWireName).toBe("apply_patch");
 		expect(block.arguments).toEqual({ input: patch });
-		expect((block as unknown as Record<string, unknown>).partialJson).toBeUndefined();
+		expect("partialJson" in block).toBe(false);
 
 		const end = emitted.find(e => e.type === "toolcall_end") as
 			| { toolCall: { arguments: Record<string, unknown> } }
@@ -288,13 +288,7 @@ describe("processResponsesStream: lost output_item.added recovery", () => {
 				{
 					type: "response.output_item.done",
 					output_index: 0,
-					item: {
-						type: "reasoning",
-						summary: [
-							{ type: "summary_text", text: "Plan" },
-							{ type: "summary_text", text: "Planning details" },
-						],
-					},
+					item: { type: "reasoning", summary: [{ type: "summary_text", text: "first" }] },
 				},
 				{
 					type: "response.output_item.done",
@@ -311,53 +305,10 @@ describe("processResponsesStream: lost output_item.added recovery", () => {
 		expect(output.content).toHaveLength(2);
 		const [first, second] = output.content;
 		if (first?.type !== "thinking" || second?.type !== "thinking") throw new Error("expected thinking blocks");
-		expect(first.thinking).toBe("Plan\n\nPlanning details");
+		expect(first.thinking).toBe("first");
 		expect(second.thinking).toBe("second");
 		expect(first.thinkingSignature).toBeDefined();
 		expect(second.thinkingSignature).toBeDefined();
-	});
-
-	test("preserves streamed reasoning when the done item has no summary text", async () => {
-		const output = makeOutput();
-		const stream = { push: () => {}, end: () => {} } as never;
-
-		await processResponsesStream(
-			makeStream([
-				{
-					type: "response.output_item.added",
-					output_index: 0,
-					item: { type: "reasoning", id: "rs_1", summary: [] },
-				},
-				{
-					type: "response.reasoning_summary_part.added",
-					output_index: 0,
-					item_id: "rs_1",
-					summary_index: 0,
-					part: { type: "summary_text", text: "" },
-				},
-				{
-					type: "response.reasoning_summary_text.delta",
-					output_index: 0,
-					item_id: "rs_1",
-					summary_index: 0,
-					delta: "streamed thinking",
-				},
-				{
-					type: "response.output_item.done",
-					output_index: 0,
-					item: { type: "reasoning", id: "rs_1", summary: [] },
-				},
-				{ type: "response.completed", response: { id: "resp_reasoning", status: "completed" } },
-			]),
-			output,
-			stream,
-			makeModel(),
-		);
-
-		const block = output.content[0];
-		if (block?.type !== "thinking") throw new Error("expected a thinking block");
-		expect(block.thinking).toBe("streamed thinking");
-		expect(block.thinkingSignature).toBeDefined();
 	});
 
 	test("treats content_filter incomplete responses as errors, not length", async () => {

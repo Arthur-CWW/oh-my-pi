@@ -4,10 +4,9 @@
  * Converts MCP tool definitions to CustomTool format for the agent.
  */
 import type { AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import type { TSchema } from "@oh-my-pi/pi-ai";
+import type { ImageContent, TextContent, TSchema } from "@oh-my-pi/pi-ai";
 import { normalizeSchemaForMCP } from "@oh-my-pi/pi-ai/utils/schema";
 import { untilAborted } from "@oh-my-pi/pi-utils";
-import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import type { SourceMeta } from "../capability/types";
 import type {
 	CustomTool,
@@ -16,8 +15,8 @@ import type {
 	RenderResultOptions,
 } from "../extensibility/custom-tools/types";
 import type { Theme } from "../modes/theme/theme";
-import type { OutputMeta } from "../tools/output-meta";
 import { ToolAbortError, throwIfAborted } from "../tools/tool-errors";
+import { formatMCPServerSource, type ToolOrigin } from "../tools/tool-origin";
 import { callTool } from "./client";
 import { renderMCPCall, renderMCPResult } from "./render";
 import type { MCPContent, MCPServerConnection, MCPToolCallParams, MCPToolCallResult, MCPToolDefinition } from "./types";
@@ -59,60 +58,6 @@ function normalizeToolArgs(value: unknown): MCPToolArgs {
 	return value as MCPToolArgs;
 }
 
-function isUnusedOptionalPlaceholder(value: unknown): boolean {
-	return (
-		value === undefined ||
-		value === "" ||
-		(typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0)
-	);
-}
-
-function omitUnusedOptionalArgs(args: MCPToolArgs, inputSchema: MCPToolDefinition["inputSchema"]): MCPToolArgs {
-	const properties = inputSchema.properties;
-	if (!properties) return args;
-
-	let cleaned: MCPToolArgs | undefined;
-	const required = new Set(inputSchema.required ?? []);
-	for (const [key, value] of Object.entries(args)) {
-		if (required.has(key) || !Object.hasOwn(properties, key) || !isUnusedOptionalPlaceholder(value)) {
-			continue;
-		}
-		cleaned ??= { ...args };
-		delete cleaned[key];
-	}
-
-	return cleaned ?? args;
-}
-
-/**
- * Drop the harness-internal intent field (`INTENT_FIELD`) before forwarding
- * args to an MCP server. The harness injects `i` into every tool's wire
- * schema; the direct model tool-call path strips it via `extractIntent`, but
- * the `eval` `tool.*` bridge and any other in-process caller forwards args
- * verbatim. Strict-schema servers (Linear, anything with
- * `additionalProperties:false` / Zod `.strict()`) reject every call that
- * carries `i`. The MCP boundary is the authoritative guard so callers don't
- * have to pre-strip.
- *
- * Leaves `i` in place when the server's own `inputSchema.properties` declares
- * it, so a server that legitimately uses `i` as a parameter is unaffected.
- */
-function stripHarnessIntent(args: MCPToolArgs, inputSchema: MCPToolDefinition["inputSchema"]): MCPToolArgs {
-	if (!Object.hasOwn(args, INTENT_FIELD)) return args;
-	if (inputSchema.properties && Object.hasOwn(inputSchema.properties, INTENT_FIELD)) return args;
-	const { [INTENT_FIELD]: _intent, ...rest } = args;
-	return rest;
-}
-
-/**
- * Normalize raw tool params into the outbound `tools/call` arguments: strip
- * the harness intent field, then drop optional empty placeholders the server
- * declares but doesn't require.
- */
-function prepareOutboundArgs(params: unknown, inputSchema: MCPToolDefinition["inputSchema"]): MCPToolArgs {
-	return omitUnusedOptionalArgs(stripHarnessIntent(normalizeToolArgs(params), inputSchema), inputSchema);
-}
-
 /** Details included in MCP tool results for rendering */
 export interface MCPToolDetails {
 	/** Server name */
@@ -127,9 +72,47 @@ export interface MCPToolDetails {
 	provider?: string;
 	/** Provider display name (e.g., "Claude Code", "MCP Config") */
 	providerName?: string;
-	/** Structured output metadata (set by the spill wrapper when output is truncated to an artifact). */
-	meta?: OutputMeta;
 }
+
+function parseSerializedImage(text: string): ImageContent | undefined {
+	if (text[0] !== "{" || text.at(-1) !== "}") {
+		return undefined;
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		return undefined;
+	}
+
+	const envelope = parsed as Record<string, unknown>;
+	if (
+		envelope.type !== "image" ||
+		typeof envelope.data !== "string" ||
+		envelope.data.length === 0 ||
+		typeof envelope.mimeType !== "string" ||
+		!/^image\/\S+$/.test(envelope.mimeType)
+	) {
+		return undefined;
+	}
+
+	return { type: "image", data: envelope.data, mimeType: envelope.mimeType };
+}
+
+function appendText(content: (TextContent | ImageContent)[], text: string): void {
+	const previous = content.at(-1);
+	if (previous?.type === "text") {
+		previous.text += `\n\n${text}`;
+		return;
+	}
+	content.push({ type: "text", text });
+}
+
 /**
  * Format MCP content for LLM consumption.
  */
@@ -138,9 +121,11 @@ function formatMCPContent(content: MCPContent[]): string {
 
 	for (const item of content) {
 		switch (item.type) {
-			case "text":
-				parts.push(item.text);
+			case "text": {
+				const image = parseSerializedImage(item.text);
+				parts.push(image ? `[Image: ${image.mimeType}]` : item.text);
 				break;
+			}
 			case "image":
 				parts.push(`[Image: ${item.mimeType}]`);
 				break;
@@ -165,7 +150,6 @@ function buildResult(
 	provider?: string,
 	providerName?: string,
 ): CustomToolResult<MCPToolDetails> {
-	const text = formatMCPContent(result.content);
 	const details: MCPToolDetails = {
 		serverName,
 		mcpToolName,
@@ -174,12 +158,45 @@ function buildResult(
 		provider,
 		providerName,
 	};
-	const contentText = result.isError ? `Error: ${text}` : text;
-	const toolResult: CustomToolResult<MCPToolDetails> = { content: [{ type: "text", text: contentText }], details };
 	if (result.isError) {
-		toolResult.isError = true;
+		const toolResult: CustomToolResult<MCPToolDetails> = {
+			content: [{ type: "text", text: `Error: ${formatMCPContent(result.content)}` }],
+			details,
+			isError: true,
+		};
+		return toolResult;
 	}
-	return toolResult;
+
+	const content: (TextContent | ImageContent)[] = [];
+	for (const item of result.content) {
+		switch (item.type) {
+			case "text": {
+				const image = parseSerializedImage(item.text);
+				if (image) {
+					content.push(image);
+				} else {
+					appendText(content, item.text);
+				}
+				break;
+			}
+			case "image":
+				content.push({ type: "image", data: item.data, mimeType: item.mimeType });
+				break;
+			case "resource":
+				appendText(
+					content,
+					item.resource.text
+						? `[Resource: ${item.resource.uri}]\n${item.resource.text}`
+						: `[Resource: ${item.resource.uri}]`,
+				);
+				break;
+		}
+	}
+	if (content.length === 0) {
+		content.push({ type: "text", text: "" });
+	}
+
+	return { content, details };
 }
 
 /** Build an error CustomToolResult from a caught exception. */
@@ -278,6 +295,7 @@ export class MCPTool implements CustomTool<TSchema, MCPToolDetails> {
 	readonly mcpToolName: string;
 	/** Server name */
 	readonly mcpServerName: string;
+	readonly origin: ToolOrigin;
 	readonly approval = "write" as const;
 	/** Render completed MCP calls with the result header replacing the pending call header. */
 	readonly mergeCallAndResult = true;
@@ -298,6 +316,11 @@ export class MCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		this.parameters = normalizeSchemaForMCP(tool.inputSchema) as TSchema;
 		this.mcpToolName = tool.name;
 		this.mcpServerName = connection.name;
+		this.origin = {
+			kind: "mcp",
+			source: formatMCPServerSource(connection.name, connection.config),
+			registeredBy: connection._source?.path,
+		};
 	}
 
 	renderCall(args: unknown, _options: RenderResultOptions, theme: Theme) {
@@ -316,7 +339,7 @@ export class MCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		signal?: AbortSignal,
 	): Promise<CustomToolResult<MCPToolDetails>> {
 		throwIfAborted(signal);
-		const args = prepareOutboundArgs(params, this.tool.inputSchema);
+		const args = normalizeToolArgs(params);
 		const provider = this.connection._source?.provider;
 		const providerName = this.connection._source?.providerName;
 
@@ -364,6 +387,7 @@ export class DeferredMCPTool implements CustomTool<TSchema, MCPToolDetails> {
 	readonly mcpToolName: string;
 	/** Server name */
 	readonly mcpServerName: string;
+	readonly origin: ToolOrigin;
 	readonly approval = "write" as const;
 	/** Render completed MCP calls with the result header replacing the pending call header. */
 	readonly mergeCallAndResult = true;
@@ -378,8 +402,9 @@ export class DeferredMCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		getConnection: () => Promise<MCPServerConnection>,
 		source?: SourceMeta,
 		reconnect?: MCPReconnect,
+		config?: MCPServerConnection["config"],
 	): DeferredMCPTool[] {
-		return tools.map(tool => new DeferredMCPTool(serverName, tool, getConnection, source, reconnect));
+		return tools.map(tool => new DeferredMCPTool(serverName, tool, getConnection, source, reconnect, config));
 	}
 
 	constructor(
@@ -388,6 +413,7 @@ export class DeferredMCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		private readonly getConnection: () => Promise<MCPServerConnection>,
 		source?: SourceMeta,
 		private readonly reconnect?: MCPReconnect,
+		config?: MCPServerConnection["config"],
 	) {
 		this.name = createMCPToolName(serverName, tool.name);
 		this.label = `${serverName}/${tool.name}`;
@@ -397,6 +423,11 @@ export class DeferredMCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		this.mcpServerName = serverName;
 		this.#fallbackProvider = source?.provider;
 		this.#fallbackProviderName = source?.providerName;
+		this.origin = {
+			kind: "mcp",
+			source: formatMCPServerSource(serverName, config ?? { type: "stdio", command: "pending discovery" }),
+			registeredBy: source?.path,
+		};
 	}
 
 	renderCall(args: unknown, _options: RenderResultOptions, theme: Theme) {
@@ -415,7 +446,7 @@ export class DeferredMCPTool implements CustomTool<TSchema, MCPToolDetails> {
 		signal?: AbortSignal,
 	): Promise<CustomToolResult<MCPToolDetails>> {
 		throwIfAborted(signal);
-		const args = prepareOutboundArgs(params, this.tool.inputSchema);
+		const args = normalizeToolArgs(params);
 		const provider = this.#fallbackProvider;
 		const providerName = this.#fallbackProviderName;
 

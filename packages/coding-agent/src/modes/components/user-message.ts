@@ -1,4 +1,4 @@
-import { Container, Markdown } from "@oh-my-pi/pi-tui";
+import { Container, Markdown, Text } from "@oh-my-pi/pi-tui";
 import { getMarkdownTheme, theme } from "../../modes/theme/theme";
 import { imageReferenceHyperlink, renderPlaceholders } from "../image-references";
 import { highlightMagicKeywords } from "../magic-keywords";
@@ -20,9 +20,34 @@ export class UserMessageComponent extends Container {
 	// never mutates the container's cached array.
 	#zoneSource: readonly string[] | undefined;
 	#zoneLines: string[] | undefined;
+	#text: string;
+	#synthetic: boolean;
+	#imageLinks: readonly (string | undefined)[] | undefined;
+	#rich: boolean;
 
-	constructor(text: string, synthetic = false, imageLinks?: readonly (string | undefined)[]) {
+	constructor(text: string, synthetic = false, imageLinks?: readonly (string | undefined)[], rich = true) {
 		super();
+		this.#text = text;
+		this.#synthetic = synthetic;
+		this.#imageLinks = imageLinks;
+		this.#rich = rich;
+		this.#rebuild();
+	}
+
+	setRichRendering(rich: boolean): void {
+		if (this.#rich === rich) return;
+		this.#rich = rich;
+		this.#rebuild();
+		this.invalidate();
+	}
+
+	#rebuild(): void {
+		this.clear();
+		this.#zoneSource = undefined;
+		this.#zoneLines = undefined;
+		const text = this.#text;
+		const synthetic = this.#synthetic;
+		const imageLinks = this.#imageLinks;
 		const bgColor = (value: string) => theme.bg("userMessageBg", value);
 		// Paint the magic keywords ("ultrathink"/"orchestrate"/"workflowz") inside the rendered
 		// bubble too — matching the live editor glow. The Markdown component routes code spans and
@@ -42,12 +67,14 @@ export class UserMessageComponent extends Container {
 						? imageReferenceHyperlink(label, index, imageLinks, imageLabel)
 						: theme.fg("accent", `\x1b[1m${label}\x1b[22m`),
 			});
-		const md = new Markdown(text, 1, 1, getMarkdownTheme(), {
-			bgColor,
-			color,
-		});
-		md.setIgnoreTight(true);
-		this.addChild(md);
+		this.addChild(
+			this.#rich
+				? new Markdown(text, 1, 1, getMarkdownTheme(), {
+						bgColor,
+						color,
+					})
+				: new Text(color(text), 1, 1),
+		);
 	}
 
 	override render(width: number): readonly string[] {

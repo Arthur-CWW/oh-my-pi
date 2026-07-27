@@ -1,10 +1,4 @@
-import * as crypto from "node:crypto";
-import * as fsSync from "node:fs";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-import { scheduler } from "node:timers/promises";
-import { isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
-import type { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { Effort, THINKING_EFFORTS, type ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import { isVertexExpressOpenAIUrl, isVertexRawPredictUrl } from "@oh-my-pi/pi-catalog/hosts";
 import {
 	mapEffortToAnthropicAdaptiveEffort,
@@ -14,19 +8,14 @@ import {
 	resolveWireModelId,
 } from "@oh-my-pi/pi-catalog/model-thinking";
 import { CATALOG_PROVIDERS, type ProviderCatalogEntry } from "@oh-my-pi/pi-catalog/provider-models";
-import { CODEX_BASE_URL } from "@oh-my-pi/pi-catalog/wire/codex";
-import { $env, $pickenv, getConfigRootDir, isEnoent, logger, withExtraCaFetch } from "@oh-my-pi/pi-utils";
+import { $env, $pickenv, extractHttpStatusFromError } from "@oh-my-pi/pi-utils";
 import { getCustomApi } from "./api-registry";
 import { AUTH_RETRY_STEPS, isApiKeyResolver, resolveRetryKey } from "./auth-retry";
-import * as AIError from "./error";
-import { ProviderHttpError } from "./error";
-import { isUsageLimitOutcome } from "./error/rate-limit";
+import { ProviderHttpError } from "./errors";
 import type { BedrockOptions } from "./providers/amazon-bedrock";
 import type { AnthropicOptions } from "./providers/anthropic";
 import type { CursorOptions } from "./providers/cursor";
-import type { DevinOptions } from "./providers/devin";
 import { isGitLabDuoModel, streamGitLabDuo } from "./providers/gitlab-duo";
-import { type GitLabDuoWorkflowOptions, streamGitLabDuoWorkflow } from "./providers/gitlab-duo-workflow";
 import type { GoogleOptions } from "./providers/google";
 import { getVertexAccessToken } from "./providers/google-auth";
 import type { GoogleGeminiCliOptions } from "./providers/google-gemini-cli";
@@ -48,7 +37,6 @@ import {
 	streamAzureOpenAIResponses,
 	streamBedrock,
 	streamCursor,
-	streamDevin,
 	streamGoogle,
 	streamGoogleGeminiCli,
 	streamGoogleVertex,
@@ -58,6 +46,8 @@ import {
 	streamOpenAIResponses,
 } from "./providers/register-builtins";
 import { isSyntheticModel, streamSynthetic } from "./providers/synthetic";
+import { streamXAIResponses } from "./providers/xai-responses";
+import { isUsageLimitError } from "./rate-limit-utils";
 import { PROVIDER_REGISTRY } from "./registry";
 import type {
 	Api,
@@ -72,12 +62,10 @@ import type {
 	ThinkingBudgets,
 	ToolChoice,
 } from "./types";
+import { assertContextVideoInputSupported } from "./video-input";
 import { AssistantMessageEventStream } from "./utils/event-stream";
-import { isFoundryEnabled } from "./utils/foundry";
-import { wrapLeakedThinkingStream } from "./utils/leaked-thinking-stream";
-import { wrapFetchForProxy } from "./utils/proxy";
+import { isTransientNetworkError } from "./utils/network-error";
 import { withRequestDebugFetch } from "./utils/request-debug";
-import { withGeminiThinkingLoopGuard } from "./utils/thinking-loop";
 
 function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
 	return (
@@ -85,521 +73,6 @@ function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
 		((model.api === "openai-completions" && isVertexExpressOpenAIUrl(model.baseUrl)) ||
 			(model.api === "anthropic-messages" && isVertexRawPredictUrl(model.baseUrl)))
 	);
-}
-
-/**
- * Whether {@link model} is an official first-party endpoint whose stream needs
- * no leaked-thinking healing — the official Anthropic API and the official
- * OpenAI / OpenAI-Codex endpoints return structured thinking blocks and never
- * leak reasoning idioms into the visible text channel.
- *
- * The gate is provider id **and** official endpoint URL: pointing
- * `provider: "anthropic"` (or `openai`) at a custom proxy via `models.yml`
- * still routes through {@link wrapLeakedThinkingStream}, since a third-party
- * gateway may well leak. URL checks are strict (exact origin / path boundary
- * or parsed hostname) — a substring match would accept lookalikes like
- * `https://api.openai.com.evil/`. Anthropic Foundry (`CLAUDE_CODE_USE_FOUNDRY`)
- * redirects an empty `baseUrl` to `FOUNDRY_BASE_URL`, so the check runs against
- * that effective endpoint — exempt only when it resolves to the official host.
- */
-function isLeakedThinkingHealExempt(model: Model<Api>): boolean {
-	switch (model.provider) {
-		case "anthropic":
-			// Mirror resolveAnthropicBaseUrl: Foundry redirects an empty baseUrl to
-			// FOUNDRY_BASE_URL, so exempt only when the effective endpoint is official.
-			return isOfficialAnthropicApiUrl((isFoundryEnabled() && $env.FOUNDRY_BASE_URL?.trim()) || model.baseUrl);
-		case "openai":
-			return isOfficialOpenAIApiUrl(model.baseUrl);
-		case "openai-codex":
-			return isOfficialCodexApiUrl(model.baseUrl);
-		default:
-			return false;
-	}
-}
-
-/** Strict official-OpenAI endpoint check; missing baseUrl defaults to `api.openai.com`. */
-function isOfficialOpenAIApiUrl(baseUrl: string | undefined): boolean {
-	if (!baseUrl) return true;
-	try {
-		return new URL(baseUrl).hostname === "api.openai.com";
-	} catch {
-		return false;
-	}
-}
-
-/** Strict official-Codex endpoint check; exact origin or a path boundary after {@link CODEX_BASE_URL}. */
-function isOfficialCodexApiUrl(baseUrl: string | undefined): boolean {
-	if (!baseUrl) return true;
-	const lower = baseUrl.toLowerCase().replace(/\/+$/, "");
-	return lower === CODEX_BASE_URL || lower.startsWith(`${CODEX_BASE_URL}/`);
-}
-
-/**
- * Apply live leaked-thinking healing unless {@link model} is an official
- * first-party endpoint ({@link isLeakedThinkingHealExempt}), which emits
- * structured thinking and needs no healing.
- */
-function healLeakedThinking(model: Model<Api>, inner: AssistantMessageEventStream): AssistantMessageEventStream {
-	return isLeakedThinkingHealExempt(model) ? inner : wrapLeakedThinkingStream(inner);
-}
-
-type ProviderInFlightLease = {
-	path: string;
-	heartbeat: NodeJS.Timeout;
-	flushHeartbeat: () => Promise<void>;
-};
-
-type ProviderInFlightLeaseInfo = {
-	pid: number;
-	timestamp: number;
-	token: string;
-};
-type ProviderInFlightStaleLock = { token: string } | { mtimeMs: number };
-type ProviderInFlightLockIdentity = { dev: number; ino: number; birthtimeMs: number };
-
-const PROVIDER_INFLIGHT_LOCK_STALE_MS = 10_000;
-const PROVIDER_INFLIGHT_LEASE_STALE_MS = 30_000;
-const PROVIDER_INFLIGHT_HEARTBEAT_MS = 5_000;
-const PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS = 250;
-
-let configuredProviderMaxInFlightRequests: Record<string, number> = {};
-let providerInFlightRootOverride: string | undefined;
-
-export function configureProviderMaxInFlightRequests(limits: Record<string, number> | undefined): void {
-	configuredProviderMaxInFlightRequests = limits ?? {};
-}
-
-function resolveProviderInFlightLimit(
-	provider: string,
-	options?: Pick<StreamOptions, "maxInFlightRequests">,
-): number | undefined {
-	const limits = options?.maxInFlightRequests ?? configuredProviderMaxInFlightRequests;
-	const value = limits[provider];
-	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
-	return Math.max(1, Math.floor(value));
-}
-
-function providerInFlightRoot(): string {
-	if (providerInFlightRootOverride) return providerInFlightRootOverride;
-	return path.join(getConfigRootDir(), "run", "provider-inflight");
-}
-
-function providerInFlightSegment(provider: string): string {
-	return crypto.createHash("sha256").update(provider).digest("base64url");
-}
-
-function providerInFlightDir(provider: string): string {
-	return path.join(providerInFlightRoot(), providerInFlightSegment(provider));
-}
-
-function providerInFlightSignalPath(provider: string): string {
-	return path.join(providerInFlightDir(provider), ".wakeup");
-}
-
-function providerInFlightLockDir(provider: string): string {
-	return `${providerInFlightDir(provider)}.lock`;
-}
-
-// `process.kill(pid, 0)` may throw for permission/sandbox reasons even when a
-// process exists. Treat non-ESRCH failures as alive; timestamp expiry still
-// reaps leases whose heartbeat stopped.
-function isProcessAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code !== "ESRCH";
-	}
-}
-
-async function readProviderInFlightInfo(infoPath: string): Promise<ProviderInFlightLeaseInfo | null> {
-	try {
-		const content = await fs.readFile(infoPath, "utf-8");
-		const parsed = JSON.parse(content) as Partial<ProviderInFlightLeaseInfo>;
-		if (typeof parsed.pid !== "number" || typeof parsed.timestamp !== "number" || typeof parsed.token !== "string") {
-			return null;
-		}
-		return { pid: parsed.pid, timestamp: parsed.timestamp, token: parsed.token };
-	} catch {
-		return null;
-	}
-}
-
-async function writeProviderInFlightInfo(dir: string, token: string): Promise<void> {
-	const info: ProviderInFlightLeaseInfo = { pid: process.pid, timestamp: Date.now(), token };
-	const infoPath = path.join(dir, "info.json");
-	const tempPath = path.join(dir, `.info-${process.pid}-${crypto.randomUUID()}.tmp`);
-	try {
-		await Bun.write(tempPath, JSON.stringify(info));
-		await fs.rename(tempPath, infoPath);
-	} catch (error) {
-		await fs.rm(tempPath, { force: true }).catch(() => {});
-		throw error;
-	}
-}
-
-async function isProviderInFlightDirStale(dir: string, staleMs: number): Promise<boolean> {
-	const info = await readProviderInFlightInfo(path.join(dir, "info.json"));
-	if (info) {
-		if (!isProcessAlive(info.pid)) return true;
-		return Date.now() - info.timestamp > staleMs;
-	}
-
-	try {
-		const stat = await fs.stat(path.join(dir, "info.json"));
-		return Date.now() - stat.mtimeMs > staleMs;
-	} catch (error) {
-		if (!isEnoent(error)) throw error;
-	}
-
-	try {
-		const stat = await fs.stat(dir);
-		return Date.now() - stat.mtimeMs > staleMs;
-	} catch (error) {
-		if (isEnoent(error)) return false;
-		throw error;
-	}
-}
-
-async function readProviderInFlightStaleLock(lockDir: string): Promise<ProviderInFlightStaleLock | null> {
-	const infoPath = path.join(lockDir, "info.json");
-	const info = await readProviderInFlightInfo(infoPath);
-	if (info) return isProcessAlive(info.pid) ? null : { token: info.token };
-
-	try {
-		const stat = await fs.stat(lockDir);
-		return Date.now() - stat.mtimeMs > PROVIDER_INFLIGHT_LOCK_STALE_MS ? { mtimeMs: stat.mtimeMs } : null;
-	} catch (error) {
-		if (isEnoent(error)) return null;
-		throw error;
-	}
-}
-
-async function readProviderInFlightLockIdentity(lockDir: string): Promise<ProviderInFlightLockIdentity> {
-	const stat = await fs.stat(lockDir);
-	return { dev: stat.dev, ino: stat.ino, birthtimeMs: stat.birthtimeMs };
-}
-
-function isSameProviderInFlightLock(
-	current: ProviderInFlightLockIdentity,
-	expected: ProviderInFlightLockIdentity,
-): boolean {
-	if (current.dev !== expected.dev) return false;
-	if (current.ino !== 0 || expected.ino !== 0) return current.ino === expected.ino;
-	return current.birthtimeMs === expected.birthtimeMs;
-}
-
-async function releaseProviderInFlightStaleLock(lockDir: string, stale: ProviderInFlightStaleLock): Promise<void> {
-	if ("token" in stale) {
-		await releaseProviderInFlightLock(lockDir, stale.token);
-		return;
-	}
-
-	const infoPath = path.join(lockDir, "info.json");
-	if (await readProviderInFlightInfo(infoPath)) return;
-	try {
-		const stat = await fs.stat(lockDir);
-		if (stat.mtimeMs !== stale.mtimeMs || Date.now() - stat.mtimeMs <= PROVIDER_INFLIGHT_LOCK_STALE_MS) return;
-		await fs.rm(lockDir, { recursive: true, force: true });
-	} catch {}
-}
-
-// Best-effort token-checked release. A token mismatch means another process has
-// already replaced the lock, so the fresh lock must be left intact.
-async function releaseProviderInFlightLock(lockDir: string, token: string): Promise<void> {
-	try {
-		const info = await readProviderInFlightInfo(path.join(lockDir, "info.json"));
-		if (!info || info.token !== token) return;
-		await fs.rm(lockDir, { recursive: true, force: true });
-	} catch {}
-}
-
-async function releaseProviderInFlightLockDirIfSame(
-	lockDir: string,
-	identity: ProviderInFlightLockIdentity,
-): Promise<void> {
-	try {
-		if (await readProviderInFlightInfo(path.join(lockDir, "info.json"))) return;
-		const current = await readProviderInFlightLockIdentity(lockDir);
-		if (!isSameProviderInFlightLock(current, identity)) return;
-		await fs.rm(lockDir, { recursive: true, force: true });
-	} catch {}
-}
-
-async function acquireProviderInFlightLock(provider: string, signal?: AbortSignal): Promise<() => Promise<void>> {
-	const lockDir = providerInFlightLockDir(provider);
-	await fs.mkdir(path.dirname(lockDir), { recursive: true });
-
-	while (true) {
-		if (signal?.aborted) throw signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch");
-		try {
-			await fs.mkdir(lockDir);
-			const lockIdentity = await readProviderInFlightLockIdentity(lockDir);
-			const token = crypto.randomUUID();
-			try {
-				await writeProviderInFlightInfo(lockDir, token);
-			} catch (error) {
-				await releaseProviderInFlightLockDirIfSame(lockDir, lockIdentity);
-				throw error;
-			}
-			return async () => {
-				await releaseProviderInFlightLock(lockDir, token);
-			};
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-		}
-
-		const staleLock = await readProviderInFlightStaleLock(lockDir);
-		if (staleLock) {
-			await releaseProviderInFlightStaleLock(lockDir, staleLock);
-			await signalProviderInFlightWaiters(provider);
-			continue;
-		}
-
-		await waitForProviderInFlightSignal(provider, signal);
-	}
-}
-
-async function cleanupProviderInFlightLeases(providerDir: string): Promise<number> {
-	let active = 0;
-	let entries: string[];
-	try {
-		entries = await fs.readdir(providerDir);
-	} catch (error) {
-		if (isEnoent(error)) return 0;
-		throw error;
-	}
-
-	for (const entry of entries) {
-		const leaseDir = path.join(providerDir, entry);
-		let isDirectory = false;
-		try {
-			isDirectory = (await fs.stat(leaseDir)).isDirectory();
-		} catch (error) {
-			if (isEnoent(error)) continue;
-			throw error;
-		}
-		if (!isDirectory) continue;
-		if (await isProviderInFlightDirStale(leaseDir, PROVIDER_INFLIGHT_LEASE_STALE_MS)) {
-			await fs.rm(leaseDir, { recursive: true, force: true });
-			continue;
-		}
-		active++;
-	}
-	return active;
-}
-
-async function tryAcquireProviderInFlightLease(
-	provider: string,
-	limit: number,
-	signal?: AbortSignal,
-): Promise<ProviderInFlightLease | null> {
-	const releaseLock = await acquireProviderInFlightLock(provider, signal);
-	try {
-		const dir = providerInFlightDir(provider);
-		await fs.mkdir(dir, { recursive: true });
-		const active = await cleanupProviderInFlightLeases(dir);
-		if (active >= limit) return null;
-
-		const leaseDir = path.join(dir, `${process.pid}-${Date.now()}-${crypto.randomUUID()}`);
-		const token = crypto.randomUUID();
-		try {
-			await fs.mkdir(leaseDir);
-			await writeProviderInFlightInfo(leaseDir, token);
-		} catch (error) {
-			await removeProviderInFlightLeaseDir(leaseDir).catch(() => {});
-			throw error;
-		}
-		let heartbeatFlush = Promise.resolve();
-		const touchHeartbeat = () => {
-			heartbeatFlush = heartbeatFlush
-				.then(
-					() => writeProviderInFlightInfo(leaseDir, token),
-					() => writeProviderInFlightInfo(leaseDir, token),
-				)
-				.catch(() => {});
-		};
-		const heartbeat = setInterval(touchHeartbeat, PROVIDER_INFLIGHT_HEARTBEAT_MS);
-		heartbeat.unref?.();
-		return { path: leaseDir, heartbeat, flushHeartbeat: () => heartbeatFlush };
-	} finally {
-		await releaseLock();
-	}
-}
-
-async function signalProviderInFlightWaitersInDir(dir: string): Promise<void> {
-	try {
-		await fs.mkdir(dir, { recursive: true });
-		await Bun.write(path.join(dir, ".wakeup"), String(Date.now()));
-	} catch {}
-}
-
-async function signalProviderInFlightWaiters(provider: string): Promise<void> {
-	await signalProviderInFlightWaitersInDir(providerInFlightDir(provider));
-}
-
-function waitForProviderInFlightSignal(provider: string, signal?: AbortSignal): Promise<void> {
-	if (signal?.aborted)
-		return Promise.reject(signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch"));
-	const signalPath = providerInFlightSignalPath(provider);
-	const waitStarted = Date.now();
-	const { promise, resolve, reject } = Promise.withResolvers<void>();
-	let settled = false;
-	let watcher: fsSync.FSWatcher | undefined;
-	const timer = setTimeout(() => finish(resolve), PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS);
-	const finish = (settle: () => void) => {
-		if (settled) return;
-		settled = true;
-		clearTimeout(timer);
-		watcher?.close();
-		signal?.removeEventListener("abort", onAbort);
-		settle();
-	};
-	const onAbort = () => {
-		finish(() => reject(signal?.reason ?? new AIError.AbortError("Provider request aborted before dispatch")));
-	};
-	signal?.addEventListener("abort", onAbort, { once: true });
-	try {
-		watcher = fsSync.watch(providerInFlightDir(provider), (_event, filename) => {
-			if (filename === ".wakeup" || filename === null) {
-				finish(resolve);
-			}
-		});
-		void fs.stat(signalPath).then(
-			stat => {
-				if (stat.mtimeMs >= waitStarted) finish(resolve);
-			},
-			error => {
-				if (!isEnoent(error)) finish(resolve);
-			},
-		);
-	} catch {
-		// Filesystem notifications are best-effort across platforms; the fallback
-		// timer keeps stale-lock/lease cleanup progressing if an event is dropped.
-	}
-	return promise;
-}
-
-async function removeProviderInFlightLeaseDir(leasePath: string): Promise<void> {
-	for (let attempt = 0; attempt < 3; attempt++) {
-		try {
-			await fs.rm(leasePath, { recursive: true, force: true });
-			return;
-		} catch (error) {
-			if (isEnoent(error)) return;
-			const code = (error as NodeJS.ErrnoException).code;
-			if (attempt < 2 && (code === "EBUSY" || code === "ENOTEMPTY" || code === "EPERM")) {
-				await Bun.sleep(25);
-				continue;
-			}
-			throw error;
-		}
-	}
-}
-
-// Signal into the lease's OWN provider directory (derived from `lease.path`)
-// rather than recomputing it from the current root. A release that lands after
-// the in-flight root has been repointed (only the test seam does that) must not
-// write `.wakeup` into an unrelated provider directory.
-async function releaseProviderInFlightLease(lease: ProviderInFlightLease): Promise<void> {
-	clearInterval(lease.heartbeat);
-	await lease.flushHeartbeat();
-	await removeProviderInFlightLeaseDir(lease.path);
-	await signalProviderInFlightWaitersInDir(path.dirname(lease.path));
-}
-
-async function acquireProviderInFlightSlot(
-	provider: string,
-	limit: number | undefined,
-	signal?: AbortSignal,
-): Promise<() => Promise<void>> {
-	if (limit === undefined) return async () => {};
-	let loggedWait = false;
-	while (true) {
-		if (signal?.aborted) throw signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch");
-		const lease = await tryAcquireProviderInFlightLease(provider, limit, signal);
-		if (lease) return () => releaseProviderInFlightLease(lease);
-		if (!loggedWait) {
-			loggedWait = true;
-			logger.debug("Provider in-flight limit blocked request", { provider, limit });
-		}
-		await waitForProviderInFlightSignal(provider, signal);
-	}
-}
-
-export const __providerInFlightForTesting = {
-	setRoot(root: string | undefined): void {
-		providerInFlightRootOverride = root;
-	},
-	providerDir(provider: string): string {
-		return providerInFlightDir(provider);
-	},
-	lockDir(provider: string): string {
-		return providerInFlightLockDir(provider);
-	},
-	async captureStaleLockRelease(provider: string): Promise<(() => Promise<void>) | null> {
-		const lockDir = providerInFlightLockDir(provider);
-		const stale = await readProviderInFlightStaleLock(lockDir);
-		if (!stale) return null;
-		return () => releaseProviderInFlightStaleLock(lockDir, stale);
-	},
-	async captureLockDirRelease(provider: string): Promise<(() => Promise<void>) | null> {
-		const lockDir = providerInFlightLockDir(provider);
-		try {
-			const identity = await readProviderInFlightLockIdentity(lockDir);
-			return () => releaseProviderInFlightLockDirIfSame(lockDir, identity);
-		} catch {
-			return null;
-		}
-	},
-};
-
-function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal" | "maxInFlightRequests">>(
-	model: Model<Api>,
-	options: TOptions | undefined,
-	dispatch: () => AssistantMessageEventStream,
-): AssistantMessageEventStream {
-	// Leaked-thinking healing folds in here — the one shared provider-dispatch
-	// chokepoint — so the loop guard (which wraps this) sees healed events and all
-	// provider exits are covered by one wrap. Official first-party providers are
-	// exempt (see `healLeakedThinking`); healing is otherwise idempotent.
-	const limit = resolveProviderInFlightLimit(model.provider, options);
-	if (limit === undefined) return healLeakedThinking(model, dispatch());
-
-	const outer = new AssistantMessageEventStream();
-	void (async () => {
-		let release: (() => Promise<void>) | undefined;
-		let released = false;
-		const releaseOnce = async () => {
-			if (!release || released) return;
-			released = true;
-			await release();
-		};
-		try {
-			const startedWaitingAt = Date.now();
-			release = await acquireProviderInFlightSlot(model.provider, limit, options?.signal);
-			if (Date.now() - startedWaitingAt >= PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS) {
-				logger.debug("Provider in-flight limit wait completed", { provider: model.provider, limit });
-			}
-			if (options?.signal?.aborted) {
-				throw options.signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch");
-			}
-			const inner = healLeakedThinking(model, dispatch());
-			try {
-				for await (const event of inner) {
-					outer.push(event);
-					if (outer.done) return;
-				}
-				if (!outer.done) outer.end(await inner.result());
-			} finally {
-				await releaseOnce();
-			}
-		} catch (error) {
-			await releaseOnce();
-			if (!outer.done) outer.fail(error);
-		}
-	})();
-	return outer;
 }
 
 function createVertexAuthenticatedFetch(options: StreamOptions | undefined): FetchImpl {
@@ -689,11 +162,10 @@ type KeyResolver = string | (() => string | undefined);
 const LEGACY_ENV_KEYS: Record<string, KeyResolver> = {
 	// Non-provider / search-tool keys and API-name keys not modeled as registry provider defs.
 	"azure-openai-responses": "AZURE_OPENAI_API_KEY",
+	"llama.cpp": "LLAMA_CPP_API_KEY",
 	exa: "EXA_API_KEY",
 	jina: "JINA_API_KEY",
 	brave: "BRAVE_API_KEY",
-	tinyfish: "TINYFISH_API_KEY",
-	firecrawl: "FIRECRAWL_API_KEY",
 };
 
 /**
@@ -758,22 +230,10 @@ export function stream<TApi extends Api>(
 	context: Context,
 	options?: OptionsForApi<TApi>,
 ): AssistantMessageEventStream {
-	return withGeminiThinkingLoopGuard(model, options, opts =>
-		withProviderInFlightLimit(model, opts, () => streamDispatch(model, context, opts)),
-	);
-}
-
-function streamDispatch<TApi extends Api>(
-	model: Model<TApi>,
-	context: Context,
-	options?: OptionsForApi<TApi>,
-): AssistantMessageEventStream {
-	const baseOptions = (options || {}) as StreamOptions;
-	const debugOptions = withExtraCaFetch(withRequestDebugFetch(baseOptions));
-	const requestOptions = {
-		...debugOptions,
-		fetch: wrapFetchForProxy(debugOptions.fetch ?? (globalThis.fetch as FetchImpl), model.provider),
-	} as OptionsForApi<TApi>;
+	assertContextVideoInputSupported(model, context);
+	const requestOptions = withRequestDebugFetch(options as StreamOptions | undefined) as
+		| OptionsForApi<TApi>
+		| undefined;
 
 	// Check custom API registry first (extension-provided APIs like "vertex-claude-api")
 	const customApiProvider = getCustomApi(model.api);
@@ -782,25 +242,14 @@ function streamDispatch<TApi extends Api>(
 	}
 
 	if (isGitLabDuoModel(model)) {
-		const apiKey = requestOptions.apiKey || getEnvApiKey(model.provider);
-		if (!apiKey) {
-			throw new AIError.MissingApiKeyError(model.provider);
-		}
-		return streamGitLabDuo(model, context, {
-			...(requestOptions as SimpleStreamOptions),
-			apiKey,
-		});
-	}
-
-	if (model.api === "gitlab-duo-agent") {
 		const apiKey = (requestOptions as StreamOptions | undefined)?.apiKey || getEnvApiKey(model.provider);
 		if (!apiKey) {
-			throw new AIError.MissingApiKeyError(model.provider);
+			throw new Error(`No API key for provider: ${model.provider}`);
 		}
-		return streamGitLabDuoWorkflow(model as Model<"gitlab-duo-agent">, context, {
-			...(requestOptions as StreamOptions | undefined),
+		return streamGitLabDuo(model, context, {
+			...(requestOptions as SimpleStreamOptions | undefined),
 			apiKey,
-		} as GitLabDuoWorkflowOptions);
+		});
 	}
 
 	// Vertex AI uses Application Default Credentials, not API keys
@@ -808,18 +257,22 @@ function streamDispatch<TApi extends Api>(
 		return streamGoogleVertex(model as Model<"google-vertex">, context, requestOptions as GoogleVertexOptions);
 	} else if (model.api === "bedrock-converse-stream") {
 		// Bedrock doesn't have any API keys instead it sources credentials from standard AWS env variables or from given AWS profile.
-		return streamBedrock(model as Model<"bedrock-converse-stream">, context, requestOptions as BedrockOptions);
+		return streamBedrock(
+			model as Model<"bedrock-converse-stream">,
+			context,
+			(requestOptions || {}) as BedrockOptions,
+		);
 	}
 
-	const apiKey = requestOptions.apiKey || getEnvApiKey(model.provider);
+	const apiKey = requestOptions?.apiKey || getEnvApiKey(model.provider);
 	if (!apiKey) {
-		throw new AIError.MissingApiKeyError(model.provider);
+		throw new Error(`No API key for provider: ${model.provider}`);
 	}
 	const providerOptions = isGoogleVertexAuthenticatedModel(model)
 		? {
 				...requestOptions,
 				apiKey: "vertex-adc",
-				fetch: createVertexAuthenticatedFetch(requestOptions),
+				fetch: createVertexAuthenticatedFetch(requestOptions as StreamOptions | undefined),
 			}
 		: { ...requestOptions, apiKey };
 
@@ -833,49 +286,21 @@ function streamDispatch<TApi extends Api>(
 			});
 		}
 
-		case "openrouter": {
-			const useResponses = $env.PI_OPENROUTER_RESPONSES !== "0";
-			if (useResponses) {
-				return streamOpenAIResponses(
-					model as Model<"openai-responses">,
-					context,
-					providerOptions as OptionsForApi<"openai-responses">,
-				);
+		case "openai-completions":
+			return streamOpenAICompletions(model as Model<"openai-completions">, context, providerOptions as any);
+
+		case "openai-responses": {
+			if (model.provider === "xai-oauth") {
+				return streamXAIResponses(model as Model<"openai-responses">, context, providerOptions as any);
 			}
-			return streamOpenAICompletions(
-				model as Model<"openai-completions">,
-				context,
-				providerOptions as OptionsForApi<"openai-completions">,
-			);
+			return streamOpenAIResponses(model as Model<"openai-responses">, context, providerOptions as any);
 		}
 
-		case "openai-completions":
-			return streamOpenAICompletions(
-				model as Model<"openai-completions">,
-				context,
-				providerOptions as OptionsForApi<"openai-completions">,
-			);
-
-		case "openai-responses":
-			return streamOpenAIResponses(
-				model as Model<"openai-responses">,
-				context,
-				providerOptions as OptionsForApi<"openai-responses">,
-			);
-
 		case "azure-openai-responses":
-			return streamAzureOpenAIResponses(
-				model as Model<"azure-openai-responses">,
-				context,
-				providerOptions as OptionsForApi<"azure-openai-responses">,
-			);
+			return streamAzureOpenAIResponses(model as Model<"azure-openai-responses">, context, providerOptions as any);
 
 		case "openai-codex-responses":
-			return streamOpenAICodexResponses(
-				model as Model<"openai-codex-responses">,
-				context,
-				providerOptions as OptionsForApi<"openai-codex-responses">,
-			);
+			return streamOpenAICodexResponses(model as Model<"openai-codex-responses">, context, providerOptions as any);
 
 		case "google-generative-ai":
 			return streamGoogle(model as Model<"google-generative-ai">, context, providerOptions);
@@ -893,53 +318,9 @@ function streamDispatch<TApi extends Api>(
 		case "cursor-agent":
 			return streamCursor(model as Model<"cursor-agent">, context, providerOptions as CursorOptions);
 
-		case "devin-agent":
-			return streamDevin(model as Model<"devin-agent">, context, providerOptions as DevinOptions);
-
 		default:
-			throw new AIError.ConfigurationError(`Unhandled API: ${api}`);
+			throw new Error(`Unhandled API: ${api}`);
 	}
-}
-
-/** Thinking-loop re-samples spent before {@link resolveWithThinkingLoopCook} cooks. */
-const THINKING_LOOP_MAX_ABORTS = 3;
-const THINKING_LOOP_RETRY_BASE_DELAY_MS = 500;
-const THINKING_LOOP_RETRY_MAX_DELAY_MS = 8_000;
-
-/**
- * Resolve a completion, re-sampling a thinking-loop stall up to
- * {@link THINKING_LOOP_MAX_ABORTS} times before letting it cook. The loop guard
- * raises an empty `stopReason: "error"` stall on each guarded attempt; this
- * result-path consumer re-dispatches a fresh request per stall and, once the abort
- * budget is spent, runs one final pass with the guard disabled so a stubborn loop
- * returns the model's raw output instead of a fatal stall. Non-stall results —
- * including genuine errors — return immediately; a caller abort during backoff
- * propagates so cancellation surfaces as an abort, never a stale stall result.
- */
-async function resolveWithThinkingLoopCook(
-	signal: AbortSignal | undefined,
-	dispatch: () => AssistantMessageEventStream,
-	cook: () => AssistantMessageEventStream,
-): Promise<AssistantMessage> {
-	let message = await dispatch().result();
-	let thinkingLoopRetry = AIError.is(message.errorId, AIError.Flag.ThinkingLoop);
-	for (let attempt = 0; thinkingLoopRetry && attempt < THINKING_LOOP_MAX_ABORTS - 1; attempt += 1) {
-		// A caller abort surfaces as a thrown abort (never the stall, which would
-		// misclassify as a 502): throwIfAborted before backoff, and scheduler.wait
-		// rejects if the abort lands mid-delay.
-		signal?.throwIfAborted();
-		const delay = Math.min(THINKING_LOOP_RETRY_BASE_DELAY_MS * 2 ** attempt, THINKING_LOOP_RETRY_MAX_DELAY_MS);
-		await scheduler.wait(delay, { signal });
-		message = await dispatch().result();
-		thinkingLoopRetry =
-			message.stopReason === "error" &&
-			message.content.length === 0 &&
-			AIError.is(message.errorId, AIError.Flag.ThinkingLoop);
-	}
-	if (!thinkingLoopRetry) return message;
-	signal?.throwIfAborted();
-	// Abort budget spent and still looping: let it cook with the guard disabled.
-	return cook().result();
 }
 
 export async function complete<TApi extends Api>(
@@ -947,11 +328,8 @@ export async function complete<TApi extends Api>(
 	context: Context,
 	options?: OptionsForApi<TApi>,
 ): Promise<AssistantMessage> {
-	return resolveWithThinkingLoopCook(
-		options?.signal,
-		() => stream(model, context, options),
-		() => stream(model, context, { ...options, loopGuard: { ...options?.loopGuard, enabled: false } }),
-	);
+	const s = stream(model, context, options);
+	return s.result();
 }
 
 type AuthRetryFailure = {
@@ -963,32 +341,26 @@ type AuthRetryFailure = {
 function extractStatusFromAssistantError(message: AssistantMessage): number | undefined {
 	if (message.errorStatus !== undefined) return message.errorStatus;
 	if (!message.errorMessage) return undefined;
-	return AIError.status({ message: message.errorMessage });
+	return extractHttpStatusFromError({ message: message.errorMessage });
 }
 
 function isRetryableUpstreamError(error: unknown, status: number | undefined, message: string | undefined): boolean {
+	const networkError = error instanceof Error ? error : message;
+	if (networkError !== undefined && isTransientNetworkError(networkError)) return false;
 	// 401 means the credential is bad. Usage-limit phrasing (Codex's
 	// "You have hit your ChatGPT usage limit", Anthropic's "usage_limit_reached",
-	// Google's "resource_exhausted", OpenAI's "insufficient_quota") and 429s
-	// without transient rate-limit wording mean this account is parked but a
-	// sibling credential can usually pick the request up. Both are rotatable
-	// via `onAuthError` — the auth-gateway maps the former to
-	// `invalidateCredentialMatching` and the latter to
-	// `markUsageLimitReached`. Transient 429s ("Too many requests",
-	// per-minute caps) classify as RATE_LIMIT_EXCEEDED in
-	// `parseRateLimitReason` and stay in the provider's own backoff layer
-	// instead of burning siblings.
+	// Google's "resource_exhausted") means this account is parked but a
+	// sibling credential can usually pick the request up. Both are
+	// rotatable via `onAuthError` — the auth-gateway maps the former to
+	// `invalidateCredentialMatching` and the latter to `markUsageLimitReached`.
 	if (status === 401) return true;
-	void error;
-	return isUsageLimitOutcome(status, message);
+	return !!message && isUsageLimitError(message);
 }
 
 function createAssistantAuthError(message: AssistantMessage): Error {
 	const text = message.errorMessage ?? "Provider authentication failed";
 	const status = extractStatusFromAssistantError(message);
-	return status === undefined
-		? new AIError.ProviderResponseError(text, { kind: "runtime" })
-		: new ProviderHttpError(text, status);
+	return status === undefined ? new Error(text) : new ProviderHttpError(text, status);
 }
 
 function emitBufferedEvents(stream: AssistantMessageEventStream, events: AssistantMessageEvent[]): void {
@@ -1002,12 +374,8 @@ export function streamSimple<TApi extends Api>(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
-	const baseOptions = (options || {}) as SimpleStreamOptions;
-	const debugOptions = withExtraCaFetch(withRequestDebugFetch(baseOptions));
-	const requestOptions = {
-		...debugOptions,
-		fetch: wrapFetchForProxy(debugOptions.fetch ?? (globalThis.fetch as FetchImpl), model.provider),
-	} as SimpleStreamOptions;
+	assertContextVideoInputSupported(model, context);
+	const requestOptions = withRequestDebugFetch(options);
 	const apiKeyResolver = isApiKeyResolver(requestOptions?.apiKey) ? requestOptions.apiKey : undefined;
 	if (apiKeyResolver) {
 		const outer = new AssistantMessageEventStream();
@@ -1057,7 +425,7 @@ export function streamSimple<TApi extends Api>(
 					captureAuthFailure &&
 					isRetryableUpstreamError(
 						error,
-						AIError.status(error),
+						extractHttpStatusFromError(error),
 						error instanceof Error ? error.message : undefined,
 					)
 				) {
@@ -1085,7 +453,7 @@ export function streamSimple<TApi extends Api>(
 				// A thrown resolver is a broker/OAuth/network failure, not a missing
 				// key — surface the cause instead of masking it as "No API key".
 				outer.fail(
-					new AIError.ConfigurationError(
+					new Error(
 						`Failed to resolve API key for provider ${model.provider}: ${error instanceof Error ? error.message : String(error)}`,
 						{ cause: error },
 					),
@@ -1093,7 +461,7 @@ export function streamSimple<TApi extends Api>(
 				return;
 			}
 			if (lastKey === undefined) {
-				outer.fail(new AIError.MissingApiKeyError(model.provider));
+				outer.fail(new Error(`No API key for provider: ${model.provider}`));
 				return;
 			}
 			let failure = await runAttempt(lastKey, true);
@@ -1106,13 +474,7 @@ export function streamSimple<TApi extends Api>(
 				// Caller aborted between attempts: don't mint a fresh token or fire
 				// another doomed request — emit the captured failure instead.
 				if (signal?.aborted) break;
-				const nextKey = await resolveRetryKey(
-					apiKeyResolver,
-					AUTH_RETRY_STEPS[step]!,
-					failure.error,
-					signal,
-					lastKey,
-				);
+				const nextKey = await resolveRetryKey(apiKeyResolver, AUTH_RETRY_STEPS[step]!, failure.error, signal);
 				if (nextKey === undefined || nextKey === lastKey) continue;
 				lastKey = nextKey;
 				const isLastStep = step === AUTH_RETRY_STEPS.length - 1;
@@ -1132,17 +494,13 @@ export function streamSimple<TApi extends Api>(
 	// extension-registered APIs can't accidentally override a configured
 	// pi-native transport.
 	if (model.transport === "pi-native") {
-		return withGeminiThinkingLoopGuard(model, requestOptions, opts =>
-			withProviderInFlightLimit(model, opts, () => streamPiNative(model, context, opts)),
-		);
+		return streamPiNative(model, context, requestOptions);
 	}
 
 	// Check custom API registry (extension-provided APIs)
 	const customApiProvider = getCustomApi(model.api);
 	if (customApiProvider) {
-		return withGeminiThinkingLoopGuard(model, requestOptions, opts =>
-			withProviderInFlightLimit(model, opts, () => customApiProvider.streamSimple(model, context, opts)),
-		);
+		return customApiProvider.streamSimple(model, context, requestOptions);
 	}
 
 	// Vertex AI uses Application Default Credentials, not API keys
@@ -1160,53 +518,35 @@ export function streamSimple<TApi extends Api>(
 	const apiKey =
 		(typeof requestOptions?.apiKey === "string" ? requestOptions.apiKey : undefined) || getEnvApiKey(model.provider);
 	if (!apiKey) {
-		throw new AIError.MissingApiKeyError(model.provider);
+		throw new Error(`No API key for provider: ${model.provider}`);
 	}
 
 	// GitLab Duo - wraps Anthropic/OpenAI behind GitLab AI Gateway direct access tokens
 	if (isGitLabDuoModel(model)) {
-		return withProviderInFlightLimit(model, requestOptions, () =>
-			streamGitLabDuo(model, context, {
-				...requestOptions,
-				apiKey,
-			}),
-		);
-	}
-
-	// GitLab Duo Workflow - IDE workflow protocol + WebSocket action bridge
-	if (model.api === "gitlab-duo-agent") {
-		// Does not route through withProviderInFlightLimit, so heal explicitly.
-		return healLeakedThinking(
-			model,
-			streamGitLabDuoWorkflow(model as Model<"gitlab-duo-agent">, context, {
-				...requestOptions,
-				apiKey,
-			}),
-		);
+		return streamGitLabDuo(model, context, {
+			...requestOptions,
+			apiKey,
+		});
 	}
 
 	// Kimi Code - route to dedicated handler that wraps OpenAI or Anthropic API
 	if (isKimiModel(model)) {
 		// Pass raw SimpleStreamOptions - streamKimi handles mapping internally
-		return withProviderInFlightLimit(model, requestOptions, () =>
-			streamKimi(model as Model<"openai-completions">, context, {
-				...requestOptions,
-				apiKey,
-				format: requestOptions?.kimiApiFormat ?? "anthropic",
-			}),
-		);
+		return streamKimi(model as Model<"openai-completions">, context, {
+			...requestOptions,
+			apiKey,
+			format: requestOptions?.kimiApiFormat ?? "anthropic",
+		});
 	}
 
 	// Synthetic - route to dedicated handler that wraps OpenAI or Anthropic API
 	if (isSyntheticModel(model)) {
 		// Pass raw SimpleStreamOptions - streamSynthetic handles mapping internally
-		return withProviderInFlightLimit(model, requestOptions, () =>
-			streamSynthetic(model as Model<"openai-completions">, context, {
-				...requestOptions,
-				apiKey,
-				format: requestOptions?.syntheticApiFormat ?? "openai", // Default to OpenAI format
-			}),
-		);
+		return streamSynthetic(model as Model<"openai-completions">, context, {
+			...requestOptions,
+			apiKey,
+			format: requestOptions?.syntheticApiFormat ?? "openai", // Default to OpenAI format
+		});
 	}
 	const providerOptions = mapOptionsForApi(model, requestOptions, apiKey);
 	return stream(model, context, providerOptions);
@@ -1217,11 +557,8 @@ export async function completeSimple<TApi extends Api>(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): Promise<AssistantMessage> {
-	return resolveWithThinkingLoopCook(
-		options?.signal,
-		() => streamSimple(model, context, options),
-		() => streamSimple(model, context, { ...options, loopGuard: { ...options?.loopGuard, enabled: false } }),
-	);
+	const s = streamSimple(model, context, options);
+	return s.result();
 }
 
 const MIN_OUTPUT_TOKENS = 1024;
@@ -1238,31 +575,28 @@ function maxTokensWithThinkingBudget(
 export const OUTPUT_FALLBACK_BUFFER = 4000;
 const ANTHROPIC_USE_INTERLEAVED_THINKING = Bun.env.PI_NO_INTERLEAVED_THINKING !== "1";
 
-export const ANTHROPIC_THINKING: Record<Effort, number> = {
+export const ANTHROPIC_THINKING: Partial<Record<Effort, number>> = {
 	minimal: 1024,
 	low: 4096,
 	medium: 8192,
 	high: 16384,
 	xhigh: 32768,
-	max: 32768,
 };
 
-const GOOGLE_THINKING: Record<Effort, number> = {
+const GOOGLE_THINKING: Partial<Record<Effort, number>> = {
 	minimal: 1024,
 	low: 4096,
 	medium: 8192,
 	high: 16384,
 	xhigh: 24575,
-	max: 32768,
 };
 
-const BEDROCK_CLAUDE_THINKING: Record<Effort, number> = {
+const BEDROCK_CLAUDE_THINKING: Partial<Record<Effort, number>> = {
 	minimal: 1024,
 	low: 2048,
 	medium: 8192,
 	high: 16384,
 	xhigh: 16384,
-	max: 32768,
 };
 
 function resolveBedrockThinkingBudget(
@@ -1270,8 +604,8 @@ function resolveBedrockThinkingBudget(
 	options?: SimpleStreamOptions,
 ): { budget: number; level: Effort } | null {
 	if (!options?.reasoning || !model.reasoning) return null;
-	const level = requireSupportedEffort(model, options.reasoning);
-	const budget = options.thinkingBudgets?.[level] ?? BEDROCK_CLAUDE_THINKING[level];
+	const level = requireKnownEffort(model, options.reasoning);
+	const budget = options.thinkingBudgets?.[level] ?? BEDROCK_CLAUDE_THINKING[level] ?? 0;
 	return { budget, level };
 }
 
@@ -1330,50 +664,36 @@ function mapOpenAiToolChoice(choice?: ToolChoice): OpenAICompletionsOptions["too
 	return undefined;
 }
 
-type ReasoningEffortMapCompat = {
-	reasoningEffortMap?: Partial<Record<Effort, string>>;
-};
-
-function getCompatReasoningEffortMap<TApi extends Api>(
-	model: Model<TApi>,
-): Partial<Record<Effort, string>> | undefined {
-	const compat = model.compat;
-	if (compat === undefined || typeof compat !== "object" || !("reasoningEffortMap" in compat)) {
-		return undefined;
-	}
-	return (compat as ReasoningEffortMapCompat).reasoningEffortMap;
-}
-
-function resolveSupportedMappedReasoningEffort<TApi extends Api>(
-	model: Model<TApi>,
-	reasoning: Effort,
-): Effort | undefined {
-	const mapped = getCompatReasoningEffortMap(model)?.[reasoning];
-	if (!mapped) return undefined;
-	const mappedEffort = mapped as Effort;
-	return model.thinking?.efforts.includes(mappedEffort) ? mappedEffort : undefined;
-}
-
 function resolveOpenAiReasoningEffort<TApi extends Api>(
 	model: Model<TApi>,
 	options?: SimpleStreamOptions,
-): Effort | undefined {
+): ReasoningEffort | undefined {
 	const reasoning = options?.reasoning;
 	if (!reasoning || !model.reasoning) return undefined;
 	// Models that reason natively but expose no effort dial carry
 	// `thinking: undefined` (baked at build time from
 	// `compat.supportsReasoningEffort: false` on openai-responses*). The
-	// wire-side omitReasoningEffort gate (stream.ts) is the actual strip; returning
-	// undefined here avoids a redundant requireSupportedEffort throw that would
-	// defeat the gate and surface a confusing "Compaction failed: Thinking effort
-	// high is not supported by..." to the user.
+	// wire-side omitReasoningEffort gate (providers/xai-responses.ts:78) is the
+	// actual strip; returning undefined here avoids a redundant
+	// requireSupportedEffort throw that would defeat the gate and surface a
+	// confusing "Compaction failed: Thinking effort high is not supported
+	// by..." to the user.
 	if (!model.thinking) return undefined;
-	if (model.thinking.efforts.includes(reasoning)) return reasoning;
-	const mappedReasoning = resolveSupportedMappedReasoningEffort(model, reasoning);
-	if (mappedReasoning) return mappedReasoning;
-	if (getCompatReasoningEffortMap(model)?.[reasoning] !== undefined) return reasoning;
-	if (model.thinking.effortMap?.[reasoning] !== undefined) return reasoning;
 	return requireSupportedEffort(model, reasoning);
+}
+
+function resolveCompatibleOpenAiReasoningEffort<TApi extends Api>(
+	model: Model<TApi>,
+	options?: SimpleStreamOptions,
+): OpenAICompletionsOptions["reasoning"] {
+	const effort = resolveOpenAiReasoningEffort(model, options);
+	return effort as OpenAICompletionsOptions["reasoning"];
+}
+
+function requireKnownEffort<TApi extends Api>(model: Model<TApi>, effort: ReasoningEffort): Effort {
+	const validated = requireSupportedEffort(model, effort);
+	if (THINKING_EFFORTS.includes(validated as Effort)) return validated as Effort;
+	throw new Error(`Model ${model.provider}/${model.id} advertises an effort unsupported by its ${model.api} transport: ${validated}`);
 }
 
 const castApi = <TApi extends Api>(api: OptionsForApi<TApi>): OptionsForApi<Api> => api as OptionsForApi<Api>;
@@ -1432,16 +752,11 @@ function mapOptionsForApi<TApi extends Api>(
 		streamFirstEventTimeoutMs: options?.streamFirstEventTimeoutMs,
 		streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
 		providerSessionState: options?.providerSessionState,
-		useInteractionsApi: options?.useInteractionsApi,
-		storeInteraction: options?.storeInteraction,
-		previousInteractionId: options?.previousInteractionId,
-		maxInFlightRequests: options?.maxInFlightRequests,
 		onPayload: options?.onPayload,
 		onResponse: options?.onResponse,
 		onSseEvent: options?.onSseEvent,
 		execHandlers: options?.execHandlers,
 		fetch: options?.fetch,
-		fallbacks: options?.fallbacks,
 	};
 
 	switch (model.api) {
@@ -1452,14 +767,14 @@ function mapOptionsForApi<TApi extends Api>(
 				return castApi<"anthropic-messages">({
 					...base,
 					requestModelId: resolveWireModelId(model, undefined),
-					thinkingEnabled: false,
 					toolChoice: mapAnthropicToolChoice(options?.toolChoice),
 					thinkingDisplay: options?.hideThinkingSummary ? "omitted" : undefined,
 					serviceTier: options?.serviceTier,
 				});
 			}
 
-			let thinkingBudget = options.thinkingBudgets?.[reasoning] ?? ANTHROPIC_THINKING[reasoning];
+			const effort = requireKnownEffort(model, reasoning);
+			let thinkingBudget = options.thinkingBudgets?.[effort] ?? ANTHROPIC_THINKING[effort] ?? 0;
 			if (thinkingBudget <= 0) {
 				return castApi<"anthropic-messages">({
 					...base,
@@ -1471,20 +786,15 @@ function mapOptionsForApi<TApi extends Api>(
 				});
 			}
 
-			const thinkingMode = model.thinking?.mode;
-			const effort =
-				thinkingMode === "anthropic-adaptive" || thinkingMode === "anthropic-budget-effort"
-					? mapEffortToAnthropicAdaptiveEffort(model, reasoning)
-					: undefined;
-
 			// For Opus 4.6+ and Sonnet 4.6+: use adaptive thinking with effort level
 			// For older models: use budget-based thinking
-			if (thinkingMode === "anthropic-adaptive") {
+			if (model.thinking?.mode === "anthropic-adaptive") {
+				const adaptiveEffort = mapEffortToAnthropicAdaptiveEffort(model, effort) as AnthropicOptions["effort"];
 				return castApi<"anthropic-messages">({
 					...base,
-					requestModelId: resolveWireModelId(model, reasoning),
+					requestModelId: resolveWireModelId(model, effort),
 					thinkingEnabled: true,
-					effort,
+					effort: adaptiveEffort,
 					toolChoice: mapAnthropicToolChoice(options?.toolChoice),
 					thinkingDisplay: options?.hideThinkingSummary ? "omitted" : undefined,
 					serviceTier: options?.serviceTier,
@@ -1494,10 +804,9 @@ function mapOptionsForApi<TApi extends Api>(
 			if (ANTHROPIC_USE_INTERLEAVED_THINKING) {
 				return castApi<"anthropic-messages">({
 					...base,
-					requestModelId: resolveWireModelId(model, reasoning),
+					requestModelId: resolveWireModelId(model, effort),
 					thinkingEnabled: true,
 					thinkingBudgetTokens: thinkingBudget,
-					effort,
 					toolChoice: mapAnthropicToolChoice(options?.toolChoice),
 					thinkingDisplay: options?.hideThinkingSummary ? "omitted" : undefined,
 					serviceTier: options?.serviceTier,
@@ -1526,10 +835,9 @@ function mapOptionsForApi<TApi extends Api>(
 				return castApi<"anthropic-messages">({
 					...base,
 					maxTokens,
-					requestModelId: resolveWireModelId(model, reasoning),
+					requestModelId: resolveWireModelId(model, effort),
 					thinkingEnabled: true,
 					thinkingBudgetTokens: thinkingBudget,
-					effort,
 					toolChoice: mapAnthropicToolChoice(options?.toolChoice),
 					thinkingDisplay: options?.hideThinkingSummary ? "omitted" : undefined,
 					serviceTier: options?.serviceTier,
@@ -1540,7 +848,7 @@ function mapOptionsForApi<TApi extends Api>(
 		case "bedrock-converse-stream": {
 			const bedrockBase: BedrockOptions = {
 				...base,
-				reasoning: options?.reasoning,
+				reasoning: options?.reasoning === undefined ? undefined : requireKnownEffort(model, options.reasoning),
 				thinkingBudgets: options?.thinkingBudgets,
 				toolChoice: mapAnthropicToolChoice(options?.toolChoice),
 				thinkingDisplay: options?.hideThinkingSummary ? "omitted" : undefined,
@@ -1569,60 +877,29 @@ function mapOptionsForApi<TApi extends Api>(
 			return castApi<"bedrock-converse-stream">({ ...bedrockBase, maxTokens, thinkingBudgets });
 		}
 
-		case "openrouter": {
-			const useResponses = $env.PI_OPENROUTER_RESPONSES !== "0";
-			if (useResponses) {
-				return castApi<"openai-responses">({
-					...base,
-					reasoning: resolveOpenAiReasoningEffort(model, options),
-					toolChoice: mapOpenAiToolChoice(options?.toolChoice),
-					serviceTier: options?.serviceTier,
-					reasoningSummary: options?.hideThinkingSummary ? null : undefined,
-					openrouterVariant: options?.openrouterVariant,
-					maxTokensExplicit: rawOptions?.maxTokens !== undefined,
-					disableReasoning: options?.disableReasoning,
-					textVerbosity: options?.textVerbosity,
-				});
-			}
-			return castApi<"openai-completions">({
-				...base,
-				reasoning: resolveOpenAiReasoningEffort(model, options),
-				disableReasoning: options?.disableReasoning,
-				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
-				serviceTier: options?.serviceTier,
-				openrouterVariant: options?.openrouterVariant,
-				maxTokensExplicit: rawOptions?.maxTokens !== undefined,
-			});
-		}
-
 		case "openai-completions":
 			return castApi<"openai-completions">({
 				...base,
-				reasoning: resolveOpenAiReasoningEffort(model, options),
+				reasoning: resolveCompatibleOpenAiReasoningEffort(model, options),
 				disableReasoning: options?.disableReasoning,
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
 				openrouterVariant: options?.openrouterVariant,
-				maxTokensExplicit: rawOptions?.maxTokens !== undefined,
 			});
 
 		case "openai-responses":
 			return castApi<"openai-responses">({
 				...base,
-				reasoning: resolveOpenAiReasoningEffort(model, options),
+				reasoning: resolveCompatibleOpenAiReasoningEffort(model, options),
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
 				reasoningSummary: options?.hideThinkingSummary ? null : undefined,
-				openrouterVariant: options?.openrouterVariant,
-				maxTokensExplicit: rawOptions?.maxTokens !== undefined,
-				disableReasoning: options?.disableReasoning,
-				textVerbosity: options?.textVerbosity,
 			});
 
 		case "azure-openai-responses":
 			return castApi<"azure-openai-responses">({
 				...base,
-				reasoning: resolveOpenAiReasoningEffort(model, options),
+				reasoning: resolveCompatibleOpenAiReasoningEffort(model, options),
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
 				reasoningSummary: options?.hideThinkingSummary ? null : undefined,
@@ -1635,9 +912,8 @@ function mapOptionsForApi<TApi extends Api>(
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
 				preferWebsockets: options?.preferWebsockets,
-				codexCompaction: options?.codexCompaction,
-				reasoningSummary: options?.hideThinkingSummary ? null : "detailed",
-				textVerbosity: options?.textVerbosity,
+				reasoningMode: options?.reasoningMode,
+				reasoningSummary: options?.hideThinkingSummary ? null : undefined,
 			});
 
 		case "google-generative-ai": {
@@ -1647,26 +923,23 @@ function mapOptionsForApi<TApi extends Api>(
 			if (!reasoning || !model.reasoning) {
 				return castApi<"google-generative-ai">({
 					...base,
-					serviceTier: options?.serviceTier,
 					thinking: { enabled: false },
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
 				});
 			}
 
 			const googleModel = model as Model<"google-generative-ai">;
-			const effort = requireSupportedEffort(googleModel, reasoning);
+			const effort = requireKnownEffort(googleModel, reasoning);
 
 			// Gemini 3+ models use thinkingLevel exclusively instead of thinkingBudget.
 			// https://ai.google.dev/gemini-api/docs/thinking#set-budget
 			if (googleModel.thinking?.mode === "google-level") {
 				return castApi<"google-generative-ai">({
 					...base,
-					serviceTier: options?.serviceTier,
 					thinking: {
 						enabled: true,
 						level: mapEffortToGoogleThinkingLevel(effort),
 					},
-					hideThinkingSummary: options?.hideThinkingSummary,
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
 				});
 			}
@@ -1677,7 +950,6 @@ function mapOptionsForApi<TApi extends Api>(
 					enabled: true,
 					budgetTokens: getGoogleBudget(googleModel, effort, options?.thinkingBudgets),
 				},
-				hideThinkingSummary: options?.hideThinkingSummary,
 				toolChoice: mapGoogleToolChoice(options?.toolChoice),
 			});
 		}
@@ -1686,7 +958,8 @@ function mapOptionsForApi<TApi extends Api>(
 			const reasoning = options?.reasoning;
 			const toolChoice = mapGoogleToolChoice(options?.toolChoice);
 			if (reasoning && model.reasoning) {
-				const effort = requireSupportedEffort(model, reasoning);
+				const effort = requireKnownEffort(model, reasoning);
+				let thinkingBudget = options.thinkingBudgets?.[effort] ?? GOOGLE_THINKING[effort] ?? 0;
 
 				// Gemini 3+ models use thinkingLevel instead of thinkingBudget
 				if (model.thinking?.mode === "google-level") {
@@ -1697,14 +970,9 @@ function mapOptionsForApi<TApi extends Api>(
 							enabled: true,
 							level: mapEffortToGoogleThinkingLevel(effort),
 						},
-						hideThinkingSummary: options?.hideThinkingSummary,
 						toolChoice,
-						antigravityEndpointMode: options?.antigravityEndpointMode,
 					});
 				}
-
-				let thinkingBudget =
-					options.thinkingBudgets?.[effort] ?? model.thinking?.effortBudgets?.[effort] ?? GOOGLE_THINKING[effort];
 
 				// Caller's maxTokens is desired output, so add thinking budget on top. With no caller/model cap, use a finite total fallback.
 				const maxTokens = maxTokensWithThinkingBudget(base.maxTokens, model.maxTokens, thinkingBudget);
@@ -1720,9 +988,7 @@ function mapOptionsForApi<TApi extends Api>(
 						maxTokens,
 						requestModelId: resolveWireModelId(model, effort),
 						thinking: { enabled: true, budgetTokens: thinkingBudget },
-						hideThinkingSummary: options?.hideThinkingSummary,
 						toolChoice,
-						antigravityEndpointMode: options?.antigravityEndpointMode,
 					});
 				}
 				// Budget clamped to zero — fall through to the thinking-off path.
@@ -1739,7 +1005,6 @@ function mapOptionsForApi<TApi extends Api>(
 				requestModelId: resolveWireModelId(model, undefined),
 				thinking,
 				toolChoice,
-				antigravityEndpointMode: options?.antigravityEndpointMode,
 			});
 		}
 
@@ -1749,37 +1014,32 @@ function mapOptionsForApi<TApi extends Api>(
 			if (!reasoning || !model.reasoning) {
 				return castApi<"google-vertex">({
 					...base,
-					serviceTier: options?.serviceTier,
 					thinking: { enabled: false },
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
 				});
 			}
 
 			const vertexModel = model as Model<"google-vertex">;
-			const effort = requireSupportedEffort(vertexModel, reasoning);
+			const effort = requireKnownEffort(vertexModel, reasoning);
 			const geminiModel = vertexModel as unknown as Model<"google-generative-ai">;
 
 			if (geminiModel.thinking?.mode === "google-level") {
 				return castApi<"google-vertex">({
 					...base,
-					serviceTier: options?.serviceTier,
 					thinking: {
 						enabled: true,
 						level: mapEffortToGoogleThinkingLevel(effort),
 					},
-					hideThinkingSummary: options?.hideThinkingSummary,
 					toolChoice: mapGoogleToolChoice(options?.toolChoice),
 				});
 			}
 
 			return castApi<"google-vertex">({
 				...base,
-				serviceTier: options?.serviceTier,
 				thinking: {
 					enabled: true,
 					budgetTokens: getGoogleBudget(geminiModel, effort, options?.thinkingBudgets),
 				},
-				hideThinkingSummary: options?.hideThinkingSummary,
 				toolChoice: mapGoogleToolChoice(options?.toolChoice),
 			});
 		}
@@ -1787,7 +1047,7 @@ function mapOptionsForApi<TApi extends Api>(
 		case "ollama-chat":
 			return castApi<"ollama-chat">({
 				...base,
-				reasoning: resolveOpenAiReasoningEffort(model, options),
+				reasoning: resolveCompatibleOpenAiReasoningEffort(model, options),
 				disableReasoning: options?.disableReasoning,
 				toolChoice: options?.toolChoice,
 			});
@@ -1802,25 +1062,8 @@ function mapOptionsForApi<TApi extends Api>(
 			});
 		}
 
-		case "gitlab-duo-agent":
-			return castApi<"gitlab-duo-agent">({
-				...base,
-				cwd: options?.cwd,
-				toolChoice: options?.toolChoice,
-			});
-		case "devin-agent": {
-			const devinModel = model as Model<"devin-agent">;
-			const effort =
-				options?.reasoning && !options.disableReasoning
-					? requireSupportedEffort(devinModel, options.reasoning)
-					: undefined;
-			return castApi<"devin-agent">({
-				...base,
-				chatModelUid: resolveWireModelId(devinModel, effort),
-			});
-		}
 		default:
-			throw new AIError.ConfigurationError(`Unhandled API in mapOptionsForApi: ${model.api}`);
+			throw new Error(`Unhandled API in mapOptionsForApi: ${model.api}`);
 	}
 }
 
@@ -1845,9 +1088,7 @@ function getGoogleBudget(
 				return 2048;
 			case "medium":
 				return 8192;
-			case "high":
-			case "xhigh":
-			case "max":
+			default:
 				return model.id.includes("2.5-flash") ? 24576 : 32768;
 		}
 	}

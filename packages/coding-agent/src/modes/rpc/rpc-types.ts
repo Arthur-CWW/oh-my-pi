@@ -108,7 +108,7 @@ export interface RpcSessionState {
 	/** For session dump / export (plain-text parity with /dump). */
 	systemPrompt?: string[];
 	dumpTools?: Array<{ name: string; description: string; parameters: unknown; examples?: readonly ToolExample[] }>;
-	/** Current context window usage. */
+	/** Current context window usage. Null tokens/percent when unknown (e.g. right after compaction). */
 	contextUsage?: ContextUsage;
 }
 
@@ -370,19 +370,7 @@ export type RpcExtensionUIRequest =
 	  }
 	| { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
 	| { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string }
-	| {
-			type: "extension_ui_request";
-			id: string;
-			method: "open_url";
-			url: string;
-			/**
-			 * Short loopback URL that 302-redirects to {@link url}. When present,
-			 * hosts SHOULD surface it as the copy target so terminal viewport
-			 * truncation cannot corrupt OAuth query parameters on the full URL.
-			 */
-			launchUrl?: string;
-			instructions?: string;
-	  };
+	| { type: "extension_ui_request"; id: string; method: "open_url"; url: string; instructions?: string };
 
 // ============================================================================
 // Host Tool Frames (bidirectional)

@@ -13,15 +13,7 @@ import type { OAuthCredentials, OAuthProvider } from "@oh-my-pi/pi-ai/registry/o
 import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
 
 const FIXTURE_SOURCE = "provider-registry-test";
-const ENV_KEYS = [
-	"COREWEAVE_API_KEY",
-	"ZENMUX_API_KEY",
-	"EXA_API_KEY",
-	"XAI_OAUTH_TOKEN",
-	"UMANS_AI_CODING_PLAN_API_KEY",
-	"LLAMA_CPP_API_KEY",
-	"WANDB_API_KEY",
-] as const;
+const ENV_KEYS = ["ZENMUX_API_KEY", "EXA_API_KEY", "XAI_OAUTH_TOKEN", "UMANS_AI_CODING_PLAN_API_KEY"] as const;
 const originalEnv = new Map(ENV_KEYS.map(key => [key, Bun.env[key]]));
 
 afterEach(() => {
@@ -45,8 +37,6 @@ describe("provider registry auth surface", () => {
 		expect(getEnvApiKey("zenmux")).toBe("zenmux-env");
 		Bun.env.UMANS_AI_CODING_PLAN_API_KEY = "umans-env";
 		expect(getEnvApiKey("umans")).toBe("umans-env");
-		Bun.env.LLAMA_CPP_API_KEY = "llama-env";
-		expect(getEnvApiKey("llama.cpp")).toBe("llama-env");
 		// Legacy search-tool key preserved (not a registry provider def).
 		expect(getEnvApiKey("exa")).toBe("exa-env");
 	});
@@ -54,11 +44,6 @@ describe("provider registry auth surface", () => {
 	test("multi-var catalog env fallback picks names in order", () => {
 		Bun.env.XAI_OAUTH_TOKEN = "xai-oauth-env";
 		expect(getEnvApiKey("xai-oauth")).toBe("xai-oauth-env");
-
-		Bun.env.WANDB_API_KEY = "wandb-env";
-		expect(getEnvApiKey("coreweave")).toBe("wandb-env");
-		Bun.env.COREWEAVE_API_KEY = "coreweave-env";
-		expect(getEnvApiKey("coreweave")).toBe("coreweave-env");
 	});
 
 	test("login list contains loginable providers and excludes env-only model providers", () => {
@@ -66,22 +51,13 @@ describe("provider registry auth surface", () => {
 		expect(ids).toContain("zenmux");
 		expect(ids).toContain("kagi");
 		expect(ids).toContain("umans");
-		expect(ids).toContain("llama.cpp");
 		// openai has no interactive login flow.
 		expect(ids).not.toContain("openai");
 	});
 
 	test("paste-code login set is derived from pasteCodeFlow", () => {
 		expect([...PASTE_CODE_LOGIN_PROVIDERS].sort()).toEqual(
-			[
-				"anthropic",
-				"devin",
-				"gitlab-duo",
-				"gitlab-duo-agent",
-				"google-antigravity",
-				"google-gemini-cli",
-				"openai-codex",
-			].sort(),
+			["anthropic", "gitlab-duo", "google-antigravity", "google-gemini-cli", "openai-codex"].sort(),
 		);
 		expect(PASTE_CODE_LOGIN_PROVIDERS.has("zenmux")).toBe(false);
 	});
@@ -115,15 +91,5 @@ describe("provider registry auth surface", () => {
 		await storage.login("fixture-x", { onAuth: () => {}, onPrompt: async () => "" });
 
 		expect(store.getApiKey("fixture-x")).toBe("fixture-key");
-	});
-
-	test("llama.cpp login stores a local no-auth token when no key is entered", async () => {
-		const store = new SqliteAuthCredentialStore(new Database(":memory:"));
-		const storage = new AuthStorage(store);
-		await storage.reload();
-
-		await storage.login("llama.cpp", { onAuth: () => {}, onPrompt: async () => "" });
-
-		expect(store.getApiKey("llama.cpp")).toBe("llama-cpp-local");
 	});
 });

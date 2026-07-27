@@ -1,5 +1,6 @@
-import { routeSelectListMouse, type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
+import { type SelectItem, SelectList, type SgrMouseEvent } from "@oh-my-pi/pi-tui";
 import { getSelectListTheme, type SymbolPreset, setSymbolPreset, theme } from "../../theme/theme";
+import { matchesUiDismiss } from "../../utils/keybinding-matchers";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
 const GLYPH_PRESETS = ["nerd", "unicode", "ascii"] as const satisfies readonly SymbolPreset[];
@@ -43,7 +44,6 @@ class GlyphSceneController implements SetupSceneController {
 		this.#selectList.onSelect = item => {
 			void this.#commit(item.value as SymbolPreset);
 		};
-		this.#selectList.onCancel = () => host.finish("skipped");
 	}
 
 	invalidate(): void {
@@ -52,6 +52,11 @@ class GlyphSceneController implements SetupSceneController {
 
 	handleInput(data: string): void {
 		if (this.#committing) return;
+		if (matchesUiDismiss(data)) {
+			this.host.finish("skipped");
+			return;
+		}
+
 		const quickIndex = data >= "1" && data <= "3" ? Number(data) - 1 : -1;
 		if (quickIndex >= 0) {
 			const preset = GLYPH_PRESETS[quickIndex];
@@ -65,7 +70,18 @@ class GlyphSceneController implements SetupSceneController {
 	/** Wheel moves the highlight (live preview); hover lights the row under the pointer; click confirms it. */
 	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
 		if (this.#committing) return;
-		routeSelectListMouse(this.#selectList, event, line - this.#listRowStart);
+		if (event.wheel !== null) {
+			this.#selectList.handleWheel(event.wheel);
+			return;
+		}
+		const index = this.#selectList.hitTest(line - this.#listRowStart);
+		if (event.motion) {
+			this.#selectList.setHoverIndex(index ?? null);
+			return;
+		}
+		if (event.leftClick && index !== undefined) {
+			this.#selectList.clickItem(index);
+		}
 	}
 
 	render(width: number): readonly string[] {

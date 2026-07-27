@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { getDefaultPasteImageKeys, KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
+import { buildHotkeysMarkdown } from "@oh-my-pi/pi-coding-agent/modes/utils/hotkeys-markdown";
 
 describe("KeybindingsManager.getDisplayString", () => {
 	it("formats a single binding as a human-readable key hint", () => {
@@ -8,12 +9,6 @@ describe("KeybindingsManager.getDisplayString", () => {
 		});
 
 		expect(keybindings.getDisplayString("app.message.dequeue")).toBe("Alt+Up");
-	});
-
-	it("defaults retry to Alt+R", () => {
-		const keybindings = KeybindingsManager.inMemory();
-
-		expect(keybindings.getDisplayString("app.retry")).toBe("Alt+R");
 	});
 
 	it("formats multiple bindings with the existing separator", () => {
@@ -31,6 +26,21 @@ describe("KeybindingsManager.getDisplayString", () => {
 
 		expect(keybindings.getDisplayString("app.clipboard.copyPrompt")).toBe("");
 	});
+
+	it("includes the raw semantic transcript toggle in the hotkey table", () => {
+		const keybindings = KeybindingsManager.inMemory();
+
+		expect(buildHotkeysMarkdown({ keybindings })).toContain("| `Alt+V` | Toggle raw semantic transcript |");
+	});
+
+	it("keeps session/tree defaults off editor word-navigation chords", () => {
+		const keybindings = KeybindingsManager.inMemory();
+
+		expect(keybindings.getKeys("app.session.observe")).toEqual(["ctrl+s"]);
+		expect(keybindings.getKeys("app.session.toggleSort")).toEqual(["ctrl+shift+s"]);
+		expect(keybindings.getKeys("app.tree.foldOrUp")).toEqual(["ctrl+shift+left"]);
+		expect(keybindings.getKeys("app.tree.unfoldOrDown")).toEqual(["ctrl+shift+right"]);
+	});
 });
 
 describe("getDefaultPasteImageKeys", () => {
@@ -38,8 +48,8 @@ describe("getDefaultPasteImageKeys", () => {
 		expect(getDefaultPasteImageKeys("win32")).toEqual(["ctrl+v", "alt+v"]);
 	});
 
-	it("adds the macOS Command key event to Ctrl+V for image paste", () => {
+	it("uses Ctrl+V as the image-paste shortcut on non-Windows platforms", () => {
 		expect(getDefaultPasteImageKeys("linux")).toEqual(["ctrl+v"]);
-		expect(getDefaultPasteImageKeys("darwin")).toEqual(["ctrl+v", "super+v"]);
+		expect(getDefaultPasteImageKeys("darwin")).toEqual(["ctrl+v"]);
 	});
 });

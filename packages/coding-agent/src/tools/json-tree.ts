@@ -1,7 +1,7 @@
 /**
  * JSON tree rendering utilities shared across tool renderers.
  */
-import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
+import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
 import type { Theme } from "../modes/theme/theme";
 import { truncateToWidth } from "./render-utils";
 
@@ -19,8 +19,6 @@ const ARGS_INLINE_PAIR_SEP = ", ";
 const ARGS_INLINE_PAIR_SEP_WIDTH = Bun.stringWidth(ARGS_INLINE_PAIR_SEP);
 const ARGS_INLINE_MORE = "…";
 const ARGS_INLINE_MORE_WIDTH = Bun.stringWidth(ARGS_INLINE_MORE);
-/** Minimal value footprint (quotes + a couple chars) reserved for each not-yet-rendered key. */
-const ARGS_INLINE_TAIL_VALUE_RESERVE = 4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
@@ -51,15 +49,10 @@ export function formatScalar(value: unknown, maxLen: number): string {
  * Format args inline for collapsed view.
  */
 export function formatArgsInline(args: Record<string, unknown>, maxWidth: number): string {
-	const keys: string[] = [];
-	for (const key in args) {
-		if (key in HIDDEN_ARG_KEYS) continue;
-		keys.push(key);
-	}
 	let result = "";
 	let width = 0;
-	for (let i = 0; i < keys.length; i++) {
-		const key = keys[i];
+	for (const key in args) {
+		if (key in HIDDEN_ARG_KEYS) continue;
 		const value = args[key];
 		const sep = width > 0 ? ARGS_INLINE_PAIR_SEP : "";
 		const sepW = width > 0 ? ARGS_INLINE_PAIR_SEP_WIDTH : 0;
@@ -68,21 +61,11 @@ export function formatArgsInline(args: Record<string, unknown>, maxWidth: number
 		if (cap <= 0) {
 			return `${result}${ARGS_INLINE_MORE}`;
 		}
-		// Reserve each still-pending key's minimal footprint (sep + name + `=` +
-		// a short value) so a long value can't starve the keys that follow it.
-		let tailReserve = 0;
-		for (let j = i + 1; j < keys.length; j++) {
-			tailReserve += ARGS_INLINE_PAIR_SEP_WIDTH + Bun.stringWidth(keys[j]) + 1 + ARGS_INLINE_TAIL_VALUE_RESERVE;
-		}
-		// Budget the whole `key=value` piece against the width left after the
-		// tail reserve, then back out the value's share. The last key reserves
-		// nothing and fills the line.
-		const pieceBudget = Math.min(cap, maxWidth - current - tailReserve);
-		const valueMaxLen = Math.max(1, pieceBudget - Bun.stringWidth(key) - 3);
+		const valueMaxLen = Math.min(maxWidth - current, 24);
 		const valueStr = formatScalar(value, valueMaxLen);
 		const piece = `${key}=${valueStr}`;
 		const pieceW = Bun.stringWidth(piece);
-		if (pieceW > pieceBudget) {
+		if (pieceW > cap) {
 			return `${result}${sep}${truncateToWidth(piece, cap)}`;
 		}
 		result += sep + piece;
@@ -94,8 +77,8 @@ export function formatArgsInline(args: Record<string, unknown>, maxWidth: number
 /**
  * Build tree prefix for nested rendering.
  */
-function buildTreePrefix(theme: Theme, ancestors: readonly boolean[]): string {
-	return ancestors.map(hasNext => (hasNext ? `${theme.tree.vertical}  ` : "   ")).join("");
+function buildTreePrefix(ancestors: readonly boolean[]): string {
+	return "   ".repeat(ancestors.length);
 }
 
 /**
@@ -130,8 +113,7 @@ export function renderJsonTreeLines(
 			return;
 		}
 
-		const connector = isLast ? theme.tree.last : theme.tree.branch;
-		const prefix = `${buildTreePrefix(theme, ancestors)}${theme.fg("dim", connector)} `;
+		const prefix = `${buildTreePrefix(ancestors)}   `;
 
 		ancestors.push(!isLast);
 		try {
@@ -143,7 +125,7 @@ export function renderJsonTreeLines(
 				if (typeof val === "string" && val.includes("\n")) {
 					const strLines = val.split("\n");
 					const maxStrLines = Math.min(strLines.length, Math.max(1, maxLines - lines.length - 1));
-					const continuePrefix = buildTreePrefix(theme, ancestors);
+					const continuePrefix = buildTreePrefix(ancestors);
 
 					// First line with label
 					const firstLine = truncateToWidth(strLines[0], maxScalarLen);
@@ -184,13 +166,13 @@ export function renderJsonTreeLines(
 				pushLine(`${prefix}${iconArray} ${header}`);
 				if (val.length === 0) {
 					pushLine(
-						`${buildTreePrefix(theme, ancestors)}${theme.fg("dim", theme.tree.last)} ${theme.fg("dim", "[]")}`,
+						`${buildTreePrefix(ancestors)}   ${theme.fg("dim", "[]")}`,
 					);
 					return;
 				}
 				if (depth >= maxDepth) {
 					pushLine(
-						`${buildTreePrefix(theme, ancestors)}${theme.fg("dim", theme.tree.last)} ${theme.fg("dim", "…")}`,
+						`${buildTreePrefix(ancestors)}   ${theme.fg("dim", "…")}`,
 					);
 					return;
 				}
@@ -210,13 +192,13 @@ export function renderJsonTreeLines(
 			const header = key ? theme.fg("muted", key) : theme.fg("muted", "object");
 			pushLine(`${prefix}${iconObject} ${header}`);
 			if (depth >= maxDepth) {
-				pushLine(`${buildTreePrefix(theme, ancestors)}${theme.fg("dim", theme.tree.last)} ${theme.fg("dim", "…")}`);
+				pushLine(`${buildTreePrefix(ancestors)}   ${theme.fg("dim", "…")}`);
 				return;
 			}
 			const keys = Object.keys(val);
 			if (keys.length === 0) {
 				pushLine(
-					`${buildTreePrefix(theme, ancestors)}${theme.fg("dim", theme.tree.last)} ${theme.fg("dim", "{}")}`,
+					`${buildTreePrefix(ancestors)}   ${theme.fg("dim", "{}")}`,
 				);
 				return;
 			}

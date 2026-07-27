@@ -2,22 +2,20 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { applyResolvedSystemPromptInputs, submitInteractiveInput } from "@oh-my-pi/pi-coding-agent/main";
+import { submitInteractiveInput } from "@oh-my-pi/pi-coding-agent/main";
 import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
-import type { CreateAgentSessionOptions } from "@oh-my-pi/pi-coding-agent/sdk";
 import { discoverTitleSystemPromptFile } from "@oh-my-pi/pi-coding-agent/system-prompt";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
 const cleanupDirs: string[] = [];
 
 afterEach(async () => {
-	await Promise.all(cleanupDirs.splice(0).map(dir => removeWithRetries(dir)));
+	await Promise.all(cleanupDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
 });
 
 function createInput(overrides: Partial<SubmittedUserInput> = {}): SubmittedUserInput {
 	return {
 		text: "hello",
-		images: undefined,
+		attachments: undefined,
 		cancelled: false,
 		started: false,
 		...overrides,
@@ -34,18 +32,6 @@ describe("discoverTitleSystemPromptFile", () => {
 		await fs.writeFile(promptPath, "custom title prompt");
 
 		expect(discoverTitleSystemPromptFile(projectDir)).toBe(promptPath);
-	});
-});
-
-describe("applyResolvedSystemPromptInputs", () => {
-	it("routes SYSTEM.md content through template-aware session options", () => {
-		const options: CreateAgentSessionOptions = {};
-
-		applyResolvedSystemPromptInputs(options, "project system prompt", "append prompt");
-
-		expect(options.customSystemPrompt).toBe("project system prompt");
-		expect(options.appendSystemPrompt).toBe("append prompt");
-		expect(options.systemPrompt).toBeUndefined();
 	});
 });
 
@@ -68,7 +54,7 @@ describe("submitInteractiveInput", () => {
 
 		expect(mode.markPendingSubmissionStarted).not.toHaveBeenCalled();
 		expect(session.prompt).toHaveBeenCalledWith("resume now", { synthetic: true, expandPromptTemplates: false });
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
@@ -90,7 +76,7 @@ describe("submitInteractiveInput", () => {
 
 		expect(mode.markPendingSubmissionStarted).toHaveBeenCalledWith(input);
 		expect(session.prompt).not.toHaveBeenCalled();
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
@@ -122,7 +108,7 @@ describe("submitInteractiveInput", () => {
 			},
 			{ streamingBehavior: "followUp" },
 		);
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
@@ -142,11 +128,11 @@ describe("submitInteractiveInput", () => {
 
 		await submitInteractiveInput(mode, session, input);
 
-		expect(session.prompt).toHaveBeenCalledWith("loop prompt", { images: undefined, streamingBehavior: "followUp" });
+		expect(session.prompt).toHaveBeenCalledWith("loop prompt", { attachments: undefined, streamingBehavior: "followUp" });
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
-	it("honors a steer intent on the submission (normal Enter) instead of forcing followUp", async () => {
+	it("honors an explicit steer intent on the submission instead of forcing followUp", async () => {
 		const mode = {
 			markPendingSubmissionStarted: vi.fn(() => true),
 			finishPendingSubmission: vi.fn(),
@@ -163,7 +149,7 @@ describe("submitInteractiveInput", () => {
 		await submitInteractiveInput(mode, session, input);
 
 		expect(session.prompt).toHaveBeenCalledWith("interrupt now", {
-			images: undefined,
+			attachments: undefined,
 			streamingBehavior: "steer",
 		});
 		expect(mode.showError).not.toHaveBeenCalled();
@@ -195,7 +181,7 @@ describe("submitInteractiveInput", () => {
 			},
 			{ streamingBehavior: "followUp" },
 		);
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 
@@ -215,9 +201,43 @@ describe("submitInteractiveInput", () => {
 
 		await submitInteractiveInput(mode, session, input);
 
-		expect(session.prompt).toHaveBeenCalledWith("loop prompt", { images: undefined, streamingBehavior: "followUp" });
+		expect(session.prompt).toHaveBeenCalledWith("loop prompt", { attachments: undefined, streamingBehavior: "followUp" });
 		expect(session.promptCustomMessage).not.toHaveBeenCalled();
-		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input);
+		expect(mode.finishPendingSubmission).toHaveBeenCalledWith(input, false);
+		expect(mode.showError).not.toHaveBeenCalled();
+	});
+
+	it("admits a submission once when duplicate callbacks race a turn boundary", async () => {
+		const admittedIds = new Set<string>();
+		const journal: string[] = [];
+		const mode = {
+			markPendingSubmissionStarted: vi.fn((candidate: SubmittedUserInput) => {
+				const id = candidate.submissionId;
+				if (candidate.started || id === undefined || admittedIds.has(id)) return false;
+				candidate.started = true;
+				admittedIds.add(id);
+				return true;
+			}),
+			finishPendingSubmission: vi.fn(),
+			showError: vi.fn(),
+			checkShutdownRequested: vi.fn(async () => {}),
+		};
+		const session = {
+			prompt: vi.fn(async (text: string) => {
+				journal.push(text);
+				await Promise.resolve();
+				return true;
+			}),
+			promptCustomMessage: vi.fn(async () => {}),
+			isStreaming: false,
+		};
+		const input = createInput({ submissionId: "editor-submit-44", text: "go on" });
+
+		await Promise.all([submitInteractiveInput(mode, session, input), submitInteractiveInput(mode, session, input)]);
+
+		expect(mode.markPendingSubmissionStarted).toHaveBeenCalledTimes(2);
+		expect(session.prompt).toHaveBeenCalledTimes(1);
+		expect(journal).toEqual(["go on"]);
 		expect(mode.showError).not.toHaveBeenCalled();
 	});
 });

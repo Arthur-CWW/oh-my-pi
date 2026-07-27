@@ -1,10 +1,15 @@
 import { logger } from "@oh-my-pi/pi-utils";
+import { ProgressCoalescer } from "./progress-coalescer";
 
 const DELIVERY_RETRY_BASE_MS = 500;
 const DELIVERY_RETRY_MAX_MS = 30_000;
 const DELIVERY_RETRY_JITTER_MS = 200;
 const DEFAULT_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_RUNNING_JOBS = 15;
+const DEFAULT_COMPLETION_SUMMARY_BYTES = 32 * 1024;
+const JOB_METADATA_ESTIMATE_BYTES = 512;
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder();
 
 /**
  * Adaptive ("smart") `job` poll-wait ladder (ms). A tight poll loop climbs
@@ -20,12 +25,53 @@ const POLL_WAIT_LADDER_MS = [5_000, 10_000, 30_000, 60_000, 300_000] as const;
  */
 const POLL_ESCALATION_RESET_MS = 60_000;
 
+const ASYNC_JOB_INTERRUPT_REASON_TYPE = "omp:async-job-interrupt";
+
+export interface AsyncJobInterruptReason {
+	type: typeof ASYNC_JOB_INTERRUPT_REASON_TYPE;
+	requestedBy?: string;
+	reason?: string;
+}
+
+export function isAsyncJobInterruptReason(value: unknown): value is AsyncJobInterruptReason {
+	if (!value || typeof value !== "object") return false;
+	return (value as { type?: unknown }).type === ASYNC_JOB_INTERRUPT_REASON_TYPE;
+}
+
+function createInterruptReason(requestedBy: string | undefined, reason: string | undefined): AsyncJobInterruptReason {
+	return {
+		type: ASYNC_JOB_INTERRUPT_REASON_TYPE,
+		...(requestedBy ? { requestedBy } : {}),
+		...(reason ? { reason } : {}),
+	};
+}
+
 interface PollEscalationState {
 	/** Index into POLL_WAIT_LADDER_MS used for the most recent poll wait. */
 	level: number;
 	/** Timestamp (ms) when the most recent poll wait returned. */
 	lastPollEndAt: number;
 }
+
+export type AsyncJobGroupTopology = "flat" | "supervised";
+export type AsyncJobGroupReporting = "main" | "hub";
+
+export interface AsyncJobGroupConfiguration {
+	topology: AsyncJobGroupTopology;
+	reporting: AsyncJobGroupReporting;
+}
+
+export interface AsyncJobGroupMetadata extends AsyncJobGroupConfiguration {
+	/** Stable root agent id derived from AgentRegistry parentage. */
+	groupId: string;
+	/** Immediate supervisor for a supervised leaf; absent for group coordinators. */
+	coordinatorId?: string;
+}
+
+const DEFAULT_GROUP_CONFIGURATION: AsyncJobGroupConfiguration = {
+	topology: "flat",
+	reporting: "main",
+};
 
 export interface AsyncJob {
 	id: string;
@@ -37,6 +83,12 @@ export interface AsyncJob {
 	promise: Promise<void>;
 	resultText?: string;
 	errorText?: string;
+	interruptRequested?: boolean;
+	interruptReason?: string;
+	interruptRequestedBy?: string;
+	interrupted?: boolean;
+	hardCancelled?: boolean;
+	isolated?: boolean;
 	/**
 	 * Registry id of the agent that registered the job (e.g. "Main",
 	 * "AuthLoader"). Used by scoped cancel/list APIs so a subagent's teardown
@@ -44,6 +96,8 @@ export interface AsyncJob {
 	 * supply an id (e.g. legacy tests, SDK consumers without an agent context).
 	 */
 	ownerId?: string;
+	/** Snapshot group routing metadata. Group configuration changes affect only later registrations. */
+	group?: AsyncJobGroupMetadata;
 	/**
 	 * Job is registered but parked behind a caller-managed gate (e.g. a task
 	 * batch semaphore). Queued jobs do not count toward the running-job limit
@@ -56,6 +110,19 @@ export interface AsyncJobManagerOptions {
 	onJobComplete: (jobId: string, text: string, job?: AsyncJob) => void | Promise<void>;
 	maxRunningJobs?: number;
 	retentionMs?: number;
+	/** Maximum UTF-8 bytes retained for a terminal job after reliable delivery. */
+	completionSummaryBytes?: number;
+	/** Heap-used threshold that evicts delivered terminal detail. Disabled when omitted. */
+	memoryPressureBytes?: number;
+}
+
+export interface AsyncJobMemoryReport {
+	running: { count: number; estimatedBytes: number };
+	terminal: { count: number; estimatedBytes: number };
+	deliveries: { count: number; estimatedBytes: number };
+	timers: { count: number; estimatedBytes: number };
+	totalEstimatedBytes: number;
+	pressureEvictions: number;
 }
 
 interface AsyncJobDelivery {
@@ -79,9 +146,13 @@ export interface AsyncJobRegisterOptions {
 	id?: string;
 	/** Registry id of the agent that owns this job; used to scope cancelAll. */
 	ownerId?: string;
+	/** Stable group root and immediate supervisor, both derived from AgentRegistry parentage. */
+	group?: Pick<AsyncJobGroupMetadata, "groupId" | "coordinatorId">;
 	onProgress?: (text: string, details?: Record<string, unknown>) => void | Promise<void>;
 	/** Register the job in queued state; see {@link AsyncJob.queued}. */
 	queued?: boolean;
+	/** Isolated task jobs cannot be kept alive after an interrupt. */
+	isolated?: boolean;
 }
 
 /**
@@ -118,9 +189,13 @@ export class AsyncJobManager {
 	readonly #watchedJobs = new Set<string>();
 	readonly #evictionTimers = new Map<string, NodeJS.Timeout>();
 	readonly #pollEscalation = new Map<string | undefined, PollEscalationState>();
+	readonly #groupConfigurations = new Map<string, AsyncJobGroupConfiguration>();
 	readonly #onJobComplete: AsyncJobManagerOptions["onJobComplete"];
 	readonly #maxRunningJobs: number;
 	readonly #retentionMs: number;
+	readonly #completionSummaryBytes: number;
+	readonly #memoryPressureBytes: number | undefined;
+	#pressureEvictions = 0;
 	#deliveryLoop: Promise<void> | undefined;
 	#disposed = false;
 
@@ -138,6 +213,40 @@ export class AsyncJobManager {
 		this.#onJobComplete = options.onJobComplete;
 		this.#maxRunningJobs = Math.max(1, Math.floor(options.maxRunningJobs ?? DEFAULT_MAX_RUNNING_JOBS));
 		this.#retentionMs = Math.max(0, Math.floor(options.retentionMs ?? DEFAULT_RETENTION_MS));
+		this.#completionSummaryBytes = Math.max(
+			0,
+			Math.floor(options.completionSummaryBytes ?? DEFAULT_COMPLETION_SUMMARY_BYTES),
+		);
+		this.#memoryPressureBytes =
+			options.memoryPressureBytes === undefined ? undefined : Math.max(0, Math.floor(options.memoryPressureBytes));
+	}
+
+	/**
+	 * Set routing defaults for a group. Existing jobs retain their registration
+	 * snapshot; the update applies only to jobs registered after this call.
+	 */
+	configureGroup(groupId: string, configuration: AsyncJobGroupConfiguration): void {
+		this.#groupConfigurations.set(groupId, { ...configuration });
+	}
+
+	/** Return the current defaults used by a future registration in this group. */
+	getGroupConfiguration(groupId: string): AsyncJobGroupConfiguration {
+		return this.#groupConfigurations.get(groupId) ?? DEFAULT_GROUP_CONFIGURATION;
+	}
+
+	/**
+	 * Explicitly promote a hub-only terminal completion to the Main delivery
+	 * route. This is intentionally per-job; it does not alter future jobs.
+	 */
+	escalateCompletion(jobId: string): boolean {
+		const job = this.#jobs.get(jobId);
+		if (job?.group?.reporting !== "hub") return false;
+		if (job.status !== "completed" && job.status !== "failed") return false;
+		job.group.reporting = "main";
+		const text = job.resultText ?? job.errorText;
+		if (!text || this.#hasDelivery(jobId)) return true;
+		this.#enqueueDelivery(jobId, text);
+		return true;
 	}
 
 	/** True when the running-job count has reached the configured cap. */
@@ -192,20 +301,19 @@ export class AsyncJobManager {
 			abortController,
 			promise: Promise.resolve(),
 			ownerId: options?.ownerId,
+			group: options?.group
+				? {
+						groupId: options.group.groupId,
+						coordinatorId: options.group.coordinatorId,
+						...this.getGroupConfiguration(options.group.groupId),
+					}
+				: undefined,
 			queued: options?.queued === true,
+			isolated: options?.isolated === true,
 		};
 
-		const reportProgress = async (text: string, details?: Record<string, unknown>): Promise<void> => {
-			if (!options?.onProgress) return;
-			try {
-				await options.onProgress(text, details);
-			} catch (error) {
-				logger.warn("Async job progress callback failed", {
-					jobId: id,
-					error: error instanceof Error ? error.message : String(error),
-				});
-			}
-		};
+		const progress = new ProgressCoalescer(id, options?.onProgress);
+		const reportProgress = progress.report.bind(progress);
 		job.promise = (async () => {
 			try {
 				const text = await run({
@@ -216,18 +324,19 @@ export class AsyncJobManager {
 						job.queued = false;
 					},
 				});
+				await progress.flush();
 				if (job.status === "cancelled") {
-					job.resultText = text;
 					this.#scheduleEviction(id);
 					return;
 				}
 				job.status = "completed";
+				if (job.interruptRequested) job.interrupted = true;
 				job.resultText = text;
 				this.#enqueueDelivery(id, text);
 				this.#scheduleEviction(id);
 			} catch (error) {
+				await progress.flush();
 				if (job.status === "cancelled") {
-					job.errorText = error instanceof Error ? error.message : String(error);
 					this.#scheduleEviction(id);
 					return;
 				}
@@ -254,8 +363,36 @@ export class AsyncJobManager {
 		if (filter?.ownerId && job.ownerId !== filter.ownerId) return false;
 		if (job.status !== "running") return false;
 		job.status = "cancelled";
+		if (job.interruptRequested) job.hardCancelled = true;
 		job.abortController.abort();
 		this.#scheduleEviction(id);
+		return true;
+	}
+
+	/**
+	 * Soft-interrupt a running job: abort the current turn with a typed reason
+	 * while leaving completion status to the job body. Unlike cancel(), this does
+	 * not mark the job terminal or schedule eviction.
+	 */
+	interrupt(id: string, filter?: AsyncJobFilter, reason?: string, requestedBy?: string): boolean {
+		const job = this.#jobs.get(id);
+		if (!job) return false;
+		if (filter?.ownerId && job.ownerId !== filter.ownerId) return false;
+		if (job.status !== "running" || job.queued || job.interruptRequested || job.isolated) return false;
+		const interruptReason = reason?.trim();
+		const attribution = requestedBy ?? filter?.ownerId;
+		job.interruptRequested = true;
+		job.interruptRequestedBy = attribution;
+		if (interruptReason) job.interruptReason = interruptReason;
+		job.abortController.abort(createInterruptReason(attribution, interruptReason));
+		return true;
+	}
+
+	refreshResultText(id: string, text: string): boolean {
+		const job = this.#jobs.get(id);
+		if (!job || (job.status !== "completed" && job.status !== "failed")) return false;
+		job.resultText = text;
+		if (job.errorText !== undefined) job.errorText = undefined;
 		return true;
 	}
 
@@ -276,6 +413,66 @@ export class AsyncJobManager {
 
 	getAllJobs(filter?: AsyncJobFilter): AsyncJob[] {
 		return this.#filterJobs(this.#jobs.values(), filter);
+	}
+
+	/** Bounded, allocation-light view of memory held directly by the manager. */
+	getMemoryReport(): AsyncJobMemoryReport {
+		let runningCount = 0;
+		let runningBytes = 0;
+		let terminalCount = 0;
+		let terminalBytes = 0;
+		for (const job of this.#jobs.values()) {
+			const bytes =
+				JOB_METADATA_ESTIMATE_BYTES +
+				UTF8_ENCODER.encode(job.id).byteLength +
+				UTF8_ENCODER.encode(job.label).byteLength +
+				UTF8_ENCODER.encode(job.ownerId ?? "").byteLength +
+				UTF8_ENCODER.encode(job.resultText ?? "").byteLength +
+				UTF8_ENCODER.encode(job.errorText ?? "").byteLength;
+			if (job.status === "running") {
+				runningCount++;
+				runningBytes += bytes;
+			} else {
+				terminalCount++;
+				terminalBytes += bytes;
+			}
+		}
+		let deliveryBytes = 0;
+		for (const delivery of this.#deliveries) deliveryBytes += UTF8_ENCODER.encode(delivery.text).byteLength;
+		for (const delivery of this.#inFlightDeliveries) deliveryBytes += UTF8_ENCODER.encode(delivery.text).byteLength;
+		const report: AsyncJobMemoryReport = {
+			running: { count: runningCount, estimatedBytes: runningBytes },
+			terminal: { count: terminalCount, estimatedBytes: terminalBytes },
+			deliveries: {
+				count: this.#deliveries.length + this.#inFlightDeliveries.length,
+				estimatedBytes: deliveryBytes,
+			},
+			timers: { count: this.#evictionTimers.size, estimatedBytes: this.#evictionTimers.size * 128 },
+			totalEstimatedBytes: 0,
+			pressureEvictions: this.#pressureEvictions,
+		};
+		report.totalEstimatedBytes =
+			report.running.estimatedBytes +
+			report.terminal.estimatedBytes +
+			report.deliveries.estimatedBytes +
+			report.timers.estimatedBytes;
+		return report;
+	}
+
+	/**
+	 * Drop only delivered terminal cache entries under pressure. Pending
+	 * deliveries remain authoritative, and task journals are owned elsewhere.
+	 */
+	enforceMemoryPressure(heapUsedBytes = process.memoryUsage().heapUsed): number {
+		if (this.#memoryPressureBytes === undefined || heapUsedBytes < this.#memoryPressureBytes) return 0;
+		let evicted = 0;
+		for (const [jobId, job] of this.#jobs) {
+			if (job.status === "running" || this.#watchedJobs.has(jobId) || this.#hasDelivery(jobId)) continue;
+			this.#evictJob(jobId);
+			evicted++;
+		}
+		this.#pressureEvictions += evicted;
+		return evicted;
 	}
 
 	getDeliveryState(filter?: AsyncJobFilter): AsyncJobDeliveryState {
@@ -397,27 +594,6 @@ export class AsyncJobManager {
 		await Promise.all(Array.from(this.#jobs.values()).map(job => job.promise));
 	}
 
-	async #waitForAllUntil(deadline: number): Promise<boolean> {
-		const promises = Array.from(this.#jobs.values()).map(job => job.promise);
-		if (promises.length === 0) return true;
-		if (deadline === Number.POSITIVE_INFINITY) {
-			await Promise.all(promises);
-			return true;
-		}
-		const remainingMs = deadline - Date.now();
-		if (remainingMs <= 0) return false;
-
-		const timeout = Promise.withResolvers<"timeout">();
-		const timer = setTimeout(() => timeout.resolve("timeout"), remainingMs);
-		timer.unref();
-		try {
-			const result = await Promise.race([Promise.all(promises).then(() => "settled" as const), timeout.promise]);
-			return result === "settled";
-		} finally {
-			clearTimeout(timer);
-		}
-	}
-
 	async drainDeliveries(options?: { timeoutMs?: number; filter?: AsyncJobFilter }): Promise<boolean> {
 		const timeoutMs = options?.timeoutMs;
 		const filter = options?.filter;
@@ -466,10 +642,8 @@ export class AsyncJobManager {
 		this.#disposed = true;
 		this.#clearEvictionTimers();
 		this.cancelAll();
-		const timeoutMs = Math.max(options?.timeoutMs ?? 3_000, 0);
-		const deadline = Date.now() + timeoutMs;
-		const jobsSettled = await this.#waitForAllUntil(deadline);
-		const drained = await this.drainDeliveries({ timeoutMs: Math.max(deadline - Date.now(), 0) });
+		await this.waitForAll();
+		const drained = await this.drainDeliveries({ timeoutMs: options?.timeoutMs ?? 3_000 });
 		this.#clearEvictionTimers();
 		this.#jobs.clear();
 		this.#deliveries.length = 0;
@@ -477,7 +651,7 @@ export class AsyncJobManager {
 		this.#suppressedDeliveries.clear();
 		this.#watchedJobs.clear();
 		this.#pollEscalation.clear();
-		return jobsSettled && drained;
+		return drained;
 	}
 
 	#resolveJobId(preferredId?: string): string {
@@ -505,24 +679,41 @@ export class AsyncJobManager {
 		return candidate;
 	}
 
+	#compactTerminalJob(jobId: string): void {
+		const job = this.#jobs.get(jobId);
+		if (!job || job.status === "running") return;
+		if (job.resultText !== undefined) job.resultText = this.#truncateUtf8(job.resultText);
+		if (job.errorText !== undefined) job.errorText = this.#truncateUtf8(job.errorText);
+		// A settled promise may retain the async closure graph in JSC. Replace it
+		// with a shared-shape resolved promise once completion has been delivered.
+		job.promise = Promise.resolve();
+		job.abortController = new AbortController();
+	}
+
+	#truncateUtf8(text: string): string {
+		const encoded = UTF8_ENCODER.encode(text);
+		if (encoded.byteLength <= this.#completionSummaryBytes) return text;
+		if (this.#completionSummaryBytes === 0) return "";
+		return UTF8_DECODER.decode(encoded.subarray(0, this.#completionSummaryBytes));
+	}
+
+	#evictJob(jobId: string): void {
+		const timer = this.#evictionTimers.get(jobId);
+		if (timer) clearTimeout(timer);
+		this.#evictionTimers.delete(jobId);
+		this.#jobs.delete(jobId);
+		this.#suppressedDeliveries.delete(jobId);
+		this.#watchedJobs.delete(jobId);
+	}
+
 	#scheduleEviction(jobId: string): void {
-		if (this.#disposed) return;
 		if (this.#retentionMs <= 0) {
-			this.#jobs.delete(jobId);
-			this.#suppressedDeliveries.delete(jobId);
-			this.#watchedJobs.delete(jobId);
+			this.#evictJob(jobId);
 			return;
 		}
 		const existing = this.#evictionTimers.get(jobId);
-		if (existing) {
-			clearTimeout(existing);
-		}
-		const timer = setTimeout(() => {
-			this.#evictionTimers.delete(jobId);
-			this.#jobs.delete(jobId);
-			this.#suppressedDeliveries.delete(jobId);
-			this.#watchedJobs.delete(jobId);
-		}, this.#retentionMs);
+		if (existing) clearTimeout(existing);
+		const timer = setTimeout(() => this.#evictJob(jobId), this.#retentionMs);
 		timer.unref();
 		this.#evictionTimers.set(jobId, timer);
 	}
@@ -587,6 +778,13 @@ export class AsyncJobManager {
 		return this.#suppressedDeliveries.has(jobId) || this.#watchedJobs.has(jobId);
 	}
 
+	#hasDelivery(jobId: string): boolean {
+		return (
+			this.#deliveries.some(delivery => delivery.jobId === jobId) ||
+			this.#inFlightDeliveries.some(delivery => delivery.jobId === jobId)
+		);
+	}
+
 	#enqueueDelivery(jobId: string, text: string): void {
 		// Skip delivery if already acknowledged
 		if (this.isDeliverySuppressed(jobId)) {
@@ -646,8 +844,11 @@ export class AsyncJobManager {
 	#deliverDelivery(delivery: AsyncJobDelivery): Promise<void> {
 		const promise = (async () => {
 			this.#inFlightDeliveries.push(delivery);
+			let delivered = false;
 			try {
 				await this.#onJobComplete(delivery.jobId, delivery.text, this.#jobs.get(delivery.jobId));
+				this.#compactTerminalJob(delivery.jobId);
+				delivered = true;
 			} catch (error) {
 				delivery.attempt += 1;
 				delivery.lastError = error instanceof Error ? error.message : String(error);
@@ -664,6 +865,7 @@ export class AsyncJobManager {
 			} finally {
 				const index = this.#inFlightDeliveries.indexOf(delivery);
 				if (index !== -1) this.#inFlightDeliveries.splice(index, 1);
+				if (delivered) this.enforceMemoryPressure();
 				if (this.#deliveries.length > 0) this.#ensureDeliveryLoop();
 			}
 		})();

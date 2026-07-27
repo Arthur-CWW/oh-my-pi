@@ -8,6 +8,7 @@ import { discoverAuthStorage } from "../sdk";
 import { loadProjectContextFiles } from "../system-prompt";
 import * as git from "../utils/git";
 import { runAgenticCommit } from "./agentic";
+import { appendCommitTrailers, resolveCommitAttribution } from "./attribution";
 import {
 	extractScopeCandidates,
 	generateConventionalAnalysis,
@@ -129,7 +130,7 @@ async function runLegacyCommitCommand(args: CommitCommandArgs): Promise<void> {
 		return;
 	}
 
-	await git.commit(cwd, commitMessage);
+	await git.commit(cwd, appendCommitTrailers(commitMessage, await resolveCommitAttribution(cwd)));
 	process.stdout.write("Commit created.\n");
 	if (args.push) {
 		await git.push(cwd);

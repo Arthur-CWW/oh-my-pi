@@ -21,6 +21,7 @@ import type {
 	AssistantMessageEventStream,
 	Context,
 	ImageContent,
+	MediaContent,
 	Model,
 	ModelSpec,
 	ProviderResponseMetadata,
@@ -28,12 +29,12 @@ import type {
 	Static,
 	TextContent,
 	TSchema,
+	UserContent,
 } from "@oh-my-pi/pi-ai";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
-import type { AutocompleteItem, AutocompleteProvider, Component, EditorTheme, KeyId, TUI } from "@oh-my-pi/pi-tui";
+import type { AutocompleteItem, Component, EditorTheme, KeyId, TUI } from "@oh-my-pi/pi-tui";
 import type { logger as PiLogger } from "@oh-my-pi/pi-utils";
-import type { Type as arktype } from "arktype";
-import type * as zod from "zod/v4";
+import type { z } from "zod/v4";
 import type { KeybindingsManager } from "../../config/keybindings";
 import type { ModelRegistry } from "../../config/model-registry";
 import type { EditToolDetails } from "../../edit";
@@ -44,21 +45,21 @@ import type * as PiCodingAgent from "../../index";
 import type { MemoryRuntimeContext } from "../../memory-backend";
 import type { CustomEditor } from "../../modes/components/custom-editor";
 import type { Theme } from "../../modes/theme/theme";
-import type { CompactMode } from "../../session/compact-modes";
-import type { CustomMessage, CustomMessagePayload } from "../../session/messages";
+import type { CustomMessage } from "../../session/messages";
 import type { ReadonlySessionManager, SessionManager } from "../../session/session-manager";
 import type {
 	BashToolDetails,
 	BashToolInput,
-	GlobToolDetails,
-	GlobToolInput,
-	GrepToolDetails,
-	GrepToolInput,
+	FindToolDetails,
+	FindToolInput,
 	ReadToolDetails,
 	ReadToolInput,
+	SearchToolDetails,
+	SearchToolInput,
 	WriteToolInput,
 } from "../../tools";
 import type { ApprovalMode } from "../../tools/approval";
+import type { ToolOrigin } from "../../tools/tool-origin";
 import type { EventBus } from "../../utils/event-bus";
 import type {
 	AgentEndEvent,
@@ -84,8 +85,6 @@ import type {
 	SessionEvent,
 	SessionShutdownEvent,
 	SessionStartEvent,
-	SessionStopEvent,
-	SessionStopEventResult,
 	SessionSwitchEvent,
 	SessionTreeEvent,
 	TodoReminderEvent,
@@ -125,10 +124,6 @@ export interface ExtensionUIDialogOptions {
 	timeout?: number;
 	/** Invoked when the UI times out while waiting for a selection/input */
 	onTimeout?: () => void;
-	/** Invoked when the UI-managed timeout countdown starts */
-	onTimeoutStart?: () => void;
-	/** Invoked when user input resets a UI-managed timeout countdown */
-	onTimeoutReset?: () => void;
 	/** Initial cursor position for select dialogs (0-indexed) */
 	initialIndex?: number;
 	/** Render an outlined list for select dialogs */
@@ -167,9 +162,6 @@ export type ExtensionUiComponent = Component & { dispose?(): void };
 export type ExtensionUiComponentFactory = (tui: TUI, theme: Theme) => ExtensionUiComponent;
 export type ExtensionWidgetContent = string[] | ExtensionUiComponentFactory | undefined;
 
-/** Wrap the current autocomplete provider with additional behavior (pi-compatible). */
-export type AutocompleteProviderFactory = (current: AutocompleteProvider) => AutocompleteProvider;
-
 /**
  * UI context for extensions to request interactive UI.
  * Each mode (interactive, RPC, print) provides its own implementation.
@@ -180,8 +172,6 @@ export type AutocompleteProviderFactory = (current: AutocompleteProvider) => Aut
 // and may be invoked from event handlers that have already taken the agent
 // loop's lock — hooks intentionally cannot.
 export interface ExtensionUIContext {
-	/** True when selector timeouts start only after the dialog is presented. */
-	timeoutStartsOnPresentation?: boolean;
 	/** Show a selector and return the selected label, even when an option also includes a description. */
 	select(
 		title: string,
@@ -253,14 +243,6 @@ export interface ExtensionUIContext {
 	): Promise<string | undefined>;
 
 	/**
-	 * Stack additional autocomplete behavior on top of the built-in provider
-	 * (pi-compatible). Interactive mode rebuilds the editor's provider through
-	 * every registered factory, in registration order; headless modes (print,
-	 * RPC, ACP, subagents) accept and ignore the factory.
-	 */
-	addAutocompleteProvider(factory: AutocompleteProviderFactory): void;
-
-	/**
 	 * Set a custom editor component via factory function, or `undefined` to restore the default editor.
 	 *
 	 * The factory must return a {@link CustomEditor} subclass. Plain `EditorComponent`/`Editor`
@@ -295,34 +277,20 @@ export interface ExtensionUIContext {
 // ============================================================================
 
 export interface ContextUsage {
-	/** Estimated context tokens. */
-	tokens: number;
+	/** Estimated context tokens, or null if unknown (e.g. right after compaction, before next LLM response). */
+	tokens: number | null;
 	contextWindow: number;
-	/** Context usage as percentage of context window. */
-	percent: number;
+	/** Context usage as percentage of context window, or null if tokens is unknown. */
+	percent: number | null;
 }
 
 export interface CompactOptions {
 	onComplete?: (result: CompactionResult) => void;
 	onError?: (error: Error) => void;
-	/**
-	 * Force a one-off compaction mode for this invocation, overriding the
-	 * configured `compaction.strategy` / `remoteEnabled` (the `/compact`
-	 * subcommands: `soft` | `remote` | `snapcompact`). Omitted = configured behavior.
-	 */
-	mode?: CompactMode;
-	/**
-	 * Internal summarizer guidance — piped only to native summarization, never
-	 * exposed as `customInstructions` on the `session_before_compact` extension
-	 * hook. Used by plan-mode "Approve and compact context" so extensions that
-	 * treat `customInstructions` as user focus don't mistake plan-mode
-	 * boilerplate for the operator's intent (issue #4359).
-	 *
-	 * When both `customInstructions` and `internalGuidance` are set, the
-	 * summarizer uses `internalGuidance`; the hook still sees only the public
-	 * `customInstructions`.
-	 */
-	internalGuidance?: string;
+	/** Runs after compaction state is installed, before queued input may resume. */
+	beforeAdmission?: (
+		result: { outcome: "ok"; result: CompactionResult } | { outcome: "cancelled" | "failed"; error: Error },
+	) => void | Promise<void>;
 }
 
 /**
@@ -362,6 +330,8 @@ export interface ExtensionModelQuery {
 export interface ExtensionContext {
 	/** UI methods for user interaction */
 	ui: ExtensionUIContext;
+	/** Aborted when this handler exceeds its execution budget. */
+	signal: AbortSignal;
 	/** Get current context usage for the active model. */
 	getContextUsage(): ContextUsage | undefined;
 	/** Compact the session context (interactive mode shows UI). */
@@ -461,6 +431,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	label: string;
 	/** Description for LLM */
 	description: string;
+	/** Provenance copied onto the live registry entry. The extension path is the default. */
+	origin?: ToolOrigin;
 	/** Parameter schema (Zod, or TypeBox for legacy/extension compat). */
 	parameters: TParams;
 	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field */
@@ -559,19 +531,12 @@ export interface AfterProviderResponseEvent extends ProviderResponseMetadata {
 /** Fired after user submits prompt but before agent loop. */
 export interface BeforeAgentStartEvent {
 	type: "before_agent_start";
-	prompt: string;
-	images?: ImageContent[];
+	prompt: string | UserContent[];
+	attachments?: MediaContent[];
 	systemPrompt: string[];
 }
 
-export type {
-	AgentEndEvent,
-	AgentStartEvent,
-	SessionStopEvent,
-	SessionStopEventResult,
-	TurnEndEvent,
-	TurnStartEvent,
-} from "../shared-events";
+export type { AgentEndEvent, AgentStartEvent, TurnEndEvent, TurnStartEvent } from "../shared-events";
 
 /** Fired when a message starts (user, assistant, or toolResult) */
 export interface MessageStartEvent {
@@ -674,8 +639,8 @@ export interface UserPythonEvent {
 /** Fired when the user submits input (interactive mode only). */
 export interface InputEvent {
 	type: "input";
-	text: string;
-	images?: ImageContent[];
+	input: string | UserContent[];
+	attachments?: MediaContent[];
 	source: "interactive" | "rpc" | "extension";
 }
 
@@ -726,14 +691,14 @@ export interface WriteToolCallEvent extends ToolCallEventBase {
 	input: WriteToolInput;
 }
 
-export interface GrepToolCallEvent extends ToolCallEventBase {
-	toolName: "grep";
-	input: GrepToolInput;
+export interface SearchToolCallEvent extends ToolCallEventBase {
+	toolName: "search";
+	input: SearchToolInput;
 }
 
-export interface GlobToolCallEvent extends ToolCallEventBase {
-	toolName: "glob";
-	input: GlobToolInput;
+export interface FindToolCallEvent extends ToolCallEventBase {
+	toolName: "find";
+	input: FindToolInput;
 }
 
 export interface CustomToolCallEvent extends ToolCallEventBase {
@@ -747,8 +712,8 @@ export type ToolCallEvent =
 	| ReadToolCallEvent
 	| EditToolCallEvent
 	| WriteToolCallEvent
-	| GrepToolCallEvent
-	| GlobToolCallEvent
+	| SearchToolCallEvent
+	| FindToolCallEvent
 	| CustomToolCallEvent;
 
 interface ToolResultEventBase {
@@ -779,14 +744,14 @@ export interface WriteToolResultEvent extends ToolResultEventBase {
 	details: undefined;
 }
 
-export interface GrepToolResultEvent extends ToolResultEventBase {
-	toolName: "grep";
-	details: GrepToolDetails | undefined;
+export interface SearchToolResultEvent extends ToolResultEventBase {
+	toolName: "search";
+	details: SearchToolDetails | undefined;
 }
 
-export interface GlobToolResultEvent extends ToolResultEventBase {
-	toolName: "glob";
-	details: GlobToolDetails | undefined;
+export interface FindToolResultEvent extends ToolResultEventBase {
+	toolName: "find";
+	details: FindToolDetails | undefined;
 }
 
 export interface CustomToolResultEvent extends ToolResultEventBase {
@@ -800,8 +765,8 @@ export type ToolResultEvent =
 	| ReadToolResultEvent
 	| EditToolResultEvent
 	| WriteToolResultEvent
-	| GrepToolResultEvent
-	| GlobToolResultEvent
+	| SearchToolResultEvent
+	| FindToolResultEvent
 	| CustomToolResultEvent;
 
 /**
@@ -828,8 +793,8 @@ export function isToolCallEventType(toolName: "bash", event: ToolCallEvent): eve
 export function isToolCallEventType(toolName: "read", event: ToolCallEvent): event is ReadToolCallEvent;
 export function isToolCallEventType(toolName: "edit", event: ToolCallEvent): event is EditToolCallEvent;
 export function isToolCallEventType(toolName: "write", event: ToolCallEvent): event is WriteToolCallEvent;
-export function isToolCallEventType(toolName: "grep", event: ToolCallEvent): event is GrepToolCallEvent;
-export function isToolCallEventType(toolName: "glob", event: ToolCallEvent): event is GlobToolCallEvent;
+export function isToolCallEventType(toolName: "search", event: ToolCallEvent): event is SearchToolCallEvent;
+export function isToolCallEventType(toolName: "find", event: ToolCallEvent): event is FindToolCallEvent;
 export function isToolCallEventType<TName extends string, TInput extends Record<string, unknown>>(
 	toolName: TName,
 	event: ToolCallEvent,
@@ -848,7 +813,6 @@ export type ExtensionEvent =
 	| BeforeAgentStartEvent
 	| AgentStartEvent
 	| AgentEndEvent
-	| SessionStopEvent
 	| TurnStartEvent
 	| TurnEndEvent
 	| MessageStartEvent
@@ -889,10 +853,10 @@ export type { ToolCallEventResult } from "../shared-events";
 export interface InputEventResult {
 	/** If true, the input was handled and should not continue through normal flow */
 	handled?: boolean;
-	/** Replace the input text */
-	text?: string;
-	/** Replace any pending images */
-	images?: ImageContent[];
+	/** Replace the input */
+	input?: string | UserContent[];
+	/** Replace any pending attachments */
+	attachments?: MediaContent[];
 }
 
 /** Result from user_bash event handler */
@@ -910,7 +874,7 @@ export interface UserPythonEventResult {
 export type { ToolResultEventResult } from "../shared-events";
 
 export interface BeforeAgentStartEventResult {
-	message?: CustomMessagePayload;
+	message?: Pick<CustomMessage, "customType" | "content" | "display" | "details" | "attribution">;
 	/** Replace the system prompt for this turn. If multiple extensions return this, they are chained. */
 	systemPrompt?: string[];
 }
@@ -985,10 +949,8 @@ export interface ExtensionAPI {
 	/** Injected zod-backed typebox shim for legacy `Type.Object(...)` parameter authoring. */
 	typebox: typeof TypeBox;
 
-	/** Injected arktype module for arktype-authored extension tools (canonical going forward). */
-	arktype: typeof arktype;
-	/** Injected zod/v4 module for canonical extension tool parameter schemas. */
-	zod: typeof zod;
+	/** Injected zod module for Zod-authored extension tools (canonical going forward). */
+	zod: typeof z;
 
 	/** Injected pi-coding-agent exports for accessing SDK utilities */
 	pi: typeof PiCodingAgent;
@@ -1027,7 +989,6 @@ export interface ExtensionAPI {
 	on(event: "before_agent_start", handler: ExtensionHandler<BeforeAgentStartEvent, BeforeAgentStartEventResult>): void;
 	on(event: "agent_start", handler: ExtensionHandler<AgentStartEvent>): void;
 	on(event: "agent_end", handler: ExtensionHandler<AgentEndEvent>): void;
-	on(event: "session_stop", handler: ExtensionHandler<SessionStopEvent, SessionStopEventResult>): void;
 	on(event: "turn_start", handler: ExtensionHandler<TurnStartEvent>): void;
 	on(event: "turn_end", handler: ExtensionHandler<TurnEndEvent>): void;
 	on(event: "message_start", handler: ExtensionHandler<MessageStartEvent>): void;
@@ -1120,15 +1081,12 @@ export interface ExtensionAPI {
 	 * an internal continuation that consumes the message on the next turn.
 	 */
 	sendMessage<T = unknown>(
-		message: CustomMessagePayload<T>,
+		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 	): void;
 
-	/** Send a user prompt: idle starts a turn; streaming queues as steer unless deliverAs is set. */
-	sendUserMessage(
-		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
-	): void;
+	/** Send a user message to the agent, or queue it when deliverAs is set. */
+	sendUserMessage(content: string | UserContent[], options?: { deliverAs?: "steer" | "followUp" }): void;
 
 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
 	appendEntry<T = unknown>(customType: string, data?: T): void;
@@ -1306,7 +1264,7 @@ export interface ExtensionShortcut {
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 
 export type SendMessageHandler = <T = unknown>(
-	message: CustomMessagePayload<T>,
+	message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 	/**
 	 * `deliverAs: "nextTurn"` queues hidden custom context for the next turn.
 	 * When paired with `triggerTurn: true` during prompt teardown, the session schedules
@@ -1316,7 +1274,7 @@ export type SendMessageHandler = <T = unknown>(
 ) => void;
 
 export type SendUserMessageHandler = (
-	content: string | (TextContent | ImageContent)[],
+	content: string | UserContent[],
 	options?: { deliverAs?: "steer" | "followUp" },
 ) => void;
 
@@ -1336,11 +1294,24 @@ export type GetThinkingLevelHandler = () => ThinkingLevel | undefined;
 
 export type SetThinkingLevelHandler = (level: ThinkingLevel, persist?: boolean) => void;
 
+export type ExtensionRuntimePhase = "loading" | "active" | "disposing" | "disposed";
+
+export type RefreshToolsHandler = (tools: RegisteredTool[]) => Promise<void>;
+
 /** Shared state created by loader, used during registration and runtime. */
 export interface ExtensionRuntimeState {
 	flagValues: Map<string, boolean | string>;
 	/** Provider registrations queued during extension loading, processed during session initialization */
 	pendingProviderRegistrations: Array<{ name: string; config: ProviderConfig; sourceId: string }>;
+	/** Lifecycle of this session-owned extension runtime. */
+	extensionPhase: ExtensionRuntimePhase;
+	/** Runtime registrations grouped by their owning extension and tool name. */
+	dynamicTools: Map<Extension, Extension["tools"]>;
+	/** Serialized completion tail for dynamic registry refreshes. */
+	dynamicToolRefreshTail: Promise<void>;
+	activateDynamicTools(refreshTools?: RefreshToolsHandler): void;
+	requestDynamicToolRefresh(): void;
+	flushDynamicToolRefresh(): Promise<void>;
 }
 
 /** Action implementations for ExtensionAPI methods. */
@@ -1358,6 +1329,8 @@ export interface ExtensionActions {
 	setThinkingLevel: SetThinkingLevelHandler;
 	getSessionName: () => string | undefined;
 	setSessionName: (name: string) => Promise<void>;
+	/** Replace the session-owned dynamic extension tool set. */
+	refreshTools?: RefreshToolsHandler;
 }
 
 /** Actions for ExtensionContext (ctx.* in event handlers). */

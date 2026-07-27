@@ -1,4 +1,5 @@
 import type { AppKeybinding, KeybindingsManager } from "../../config/keybindings";
+import { renderInteractionMarkdown } from "../interaction-registry";
 
 export interface HotkeysMarkdownBindings {
 	keybindings: Pick<KeybindingsManager, "getDisplayString">;
@@ -9,6 +10,14 @@ function appKey(bindings: HotkeysMarkdownBindings, action: AppKeybinding): strin
 }
 
 export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string {
+	const interactionMarkdown = renderInteractionMarkdown(
+		[
+			{ title: "Read-only viewer", surfaces: ["viewer"] },
+			{ title: "Agent Hub", surfaces: ["hub.table", "hub.chat", "hub.inspector"] },
+			{ title: "Command line", surfaces: ["command-line"], modes: ["input", "completion"] },
+		],
+		action => bindings.keybindings.getDisplayString(action) || "Disabled",
+	);
 	return [
 		"**Navigation**",
 		"| Key | Action |",
@@ -17,6 +26,8 @@ export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string 
 		"| `Option+Left/Right` | Move by word |",
 		"| `Ctrl+A` / `Home` / `Cmd+Left` | Start of line |",
 		"| `Ctrl+E` / `End` / `Cmd+Right` | End of line |",
+		"",
+		interactionMarkdown,
 		"",
 		"**Editing**",
 		"| Key | Action |",
@@ -33,11 +44,13 @@ export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string 
 		"| Key | Action |",
 		"|-----|--------|",
 		"| `Tab` | Path completion / accept autocomplete |",
-		`| \`${appKey(bindings, "app.interrupt")}\` | Cancel autocomplete / interrupt active work |`,
+		`| \`${appKey(bindings, "ui.dismiss")}\` | Dismiss autocomplete / active UI |`,
+		`| \`${appKey(bindings, "app.interrupt")}\` | Interrupt active work |`,
 		`| \`${appKey(bindings, "app.clear")}\` | Clear editor (first) / exit (second) |`,
 		`| \`${appKey(bindings, "app.exit")}\` | Exit (when editor is empty) |`,
 		`| \`${appKey(bindings, "app.suspend")}\` | Suspend to background |`,
 		`| \`${appKey(bindings, "app.display.reset")}\` | Reset terminal display |`,
+		`| \`${appKey(bindings, "app.transcript.rawToggle")}\` | Toggle raw semantic transcript |`,
 		`| \`${appKey(bindings, "app.thinking.cycle")}\` | Cycle thinking level |`,
 		`| \`${appKey(bindings, "app.model.cycleForward")}\` | Cycle role models (slow/default/smol) |`,
 		`| \`${appKey(bindings, "app.model.cycleBackward")}\` | Cycle role models (backward) |`,
@@ -48,12 +61,11 @@ export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string 
 		`| \`${appKey(bindings, "app.tools.expand")}\` | Toggle tool output expansion |`,
 		`| \`${appKey(bindings, "app.thinking.toggle")}\` | Toggle thinking block visibility |`,
 		`| \`${appKey(bindings, "app.editor.external")}\` | Edit message in external editor |`,
-		`| \`${appKey(bindings, "app.retry")}\` | Retry last failed assistant turn |`,
 		`| \`${appKey(bindings, "app.clipboard.pasteImage")}\` | Paste image or text from clipboard |`,
 		"| Hold `Space` | Speech-to-text (push-to-talk): hold to record, release to transcribe |",
 		`| \`${appKey(bindings, "app.agents.hub")}\` / \`${appKey(bindings, "app.session.observe")}\` / double-tap \`←\` (empty editor) | Open the agent hub |`,
-		"| `#<number>` | GitHub issue/PR reference (e.g. `#3164` → `pr://`/`issue://`) |",
-		"| `#` / `#<text>` | Prompt actions (copy / undo / move cursor) |",
+		`| \`${appKey(bindings, "app.primitives.inspect")}\` / \`:inspect\` | Open the read-only primitives inspector |`,
+		"| `#` | Open prompt actions |",
 		"| `/` | Slash commands |",
 		"| `!` | Run bash command |",
 		"| `!!` | Run bash command (excluded from context) |",

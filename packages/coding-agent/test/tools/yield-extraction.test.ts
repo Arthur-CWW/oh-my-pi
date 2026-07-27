@@ -12,22 +12,11 @@ describe("yield subprocess extraction", () => {
 			toolCallId: "call-1",
 			result: {
 				content: [{ type: "text", text: "Result submitted." }],
-				details: {
-					status: "success",
-					data: { ok: true },
-					type: ["notes"],
-					useLastTurn: true,
-				},
+				details: { status: "success", data: { ok: true } },
 			},
 			isError: false,
 		});
-		expect(data).toEqual({
-			status: "success",
-			data: { ok: true },
-			error: undefined,
-			type: ["notes"],
-			useLastTurn: true,
-		});
+		expect(data).toEqual({ status: "success", data: { ok: true }, error: undefined });
 	});
 
 	it("ignores malformed yield details without status", () => {
@@ -41,49 +30,5 @@ describe("yield subprocess extraction", () => {
 			isError: true,
 		});
 		expect(data).toBeUndefined();
-	});
-
-	it("classifies terminal and incremental yield completions", () => {
-		expect(handler?.shouldTerminate).toBeDefined();
-		expect(
-			handler?.shouldTerminate?.({
-				toolName: "yield",
-				toolCallId: "call-terminal-untyped",
-				result: {
-					content: [{ type: "text", text: "Result submitted." }],
-					details: { status: "success", data: { ok: true } },
-				},
-				isError: false,
-			}),
-		).toBe(true);
-		expect(
-			handler?.shouldTerminate?.({
-				toolName: "yield",
-				toolCallId: "call-terminal-string",
-				result: {
-					content: [{ type: "text", text: "Result submitted." }],
-					details: { status: "success", type: "summary", useLastTurn: true },
-				},
-				isError: false,
-			}),
-		).toBe(true);
-		expect(
-			handler?.shouldTerminate?.({
-				toolName: "yield",
-				toolCallId: "call-incremental",
-				result: {
-					content: [{ type: "text", text: "Result submitted." }],
-					details: { status: "success", data: { ok: true }, type: ["notes"] },
-				},
-				isError: false,
-			}),
-		).toBe(false);
-		expect(
-			handler?.shouldTerminate?.({
-				toolName: "yield",
-				toolCallId: "call-tool-error",
-				isError: true,
-			}),
-		).toBe(false);
 	});
 });

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { TaskTool, taskSchema } from "@oh-my-pi/pi-coding-agent/task";
+import { loadBundledAgents } from "@oh-my-pi/pi-coding-agent/task/agents";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import {
 	getTaskSchema,
@@ -10,7 +11,6 @@ import {
 } from "@oh-my-pi/pi-coding-agent/task/types";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { prompt } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
 import subagentSystemPromptTemplate from "../../src/prompts/system/subagent-system-prompt.md" with { type: "text" };
 
 // Contract: a per-spawn `role` gives a subagent a tailored identity. The role
@@ -85,37 +85,57 @@ describe("subagent system prompt role preamble", () => {
 	});
 });
 
+describe("bundled responsibility agents", () => {
+	it.each(["implementer", "qa", "operator", "synthesizer"] as const)(
+		"exposes %s as a full-capability responsibility template",
+		responsibility => {
+			const agent = loadBundledAgents().find(candidate => candidate.name === responsibility);
+			expect(agent).toBeDefined();
+			expect(agent?.model).toEqual([`pi/${responsibility}`]);
+			expect(agent?.spawns).toBe("*");
+			expect(agent?.tools).toBeUndefined();
+			expect(agent?.description).not.toMatch(/general-purpose/i);
+		},
+	);
+
+	it("keeps task discoverable as the migration alias", () => {
+		const task = loadBundledAgents().find(candidate => candidate.name === "task");
+		expect(task?.model).toEqual(["pi/task"]);
+		expect(task?.spawns).toBe("*");
+	});
+});
+
 describe("task schema accepts role", () => {
 	it("keeps role on the flat single-spawn shape", () => {
-		const parsed = taskSchema({ agent: "task", assignment: "x", role: "Rust specialist" });
-		expect(parsed instanceof type.errors).toBe(false);
-		if (!(parsed instanceof type.errors)) {
-			expect(parsed.role).toBe("Rust specialist");
+		const parsed = taskSchema.safeParse({ agent: "task", assignment: "x", role: "Rust specialist" });
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
+			expect(parsed.data.role).toBe("Rust specialist");
 		}
 	});
 
 	it("keeps role on batch task items", () => {
 		const batch = getTaskSchema({ isolationEnabled: false, batchEnabled: true });
-		const parsed = batch({
+		const parsed = batch.safeParse({
 			agent: "task",
 			context: "ctx",
 			tasks: [{ assignment: "x", role: "DB migration specialist" }],
 		});
-		expect(parsed instanceof type.errors).toBe(false);
-		if (!(parsed instanceof type.errors) && "tasks" in parsed) {
-			const tasks = parsed.tasks as Array<{ role?: string }>;
+		expect(parsed.success).toBe(true);
+		if (parsed.success && "tasks" in parsed.data) {
+			const tasks = parsed.data.tasks as Array<{ role?: string }>;
 			expect(tasks[0]?.role).toBe("DB migration specialist");
 		}
 	});
 
 	it("rejects a role longer than the schema bound", () => {
-		const parsed = taskSchema({ agent: "task", assignment: "x", role: "x".repeat(ROLE_INPUT_MAX + 1) });
-		expect(parsed instanceof type.errors).toBe(true);
+		const parsed = taskSchema.safeParse({ agent: "task", assignment: "x", role: "x".repeat(ROLE_INPUT_MAX + 1) });
+		expect(parsed.success).toBe(false);
 	});
 
 	it("accepts a role at the schema bound", () => {
-		const parsed = taskSchema({ agent: "task", assignment: "x", role: "x".repeat(ROLE_INPUT_MAX) });
-		expect(parsed instanceof type.errors).toBe(false);
+		const parsed = taskSchema.safeParse({ agent: "task", assignment: "x", role: "x".repeat(ROLE_INPUT_MAX) });
+		expect(parsed.success).toBe(true);
 	});
 });
 

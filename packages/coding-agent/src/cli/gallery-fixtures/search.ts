@@ -1,15 +1,15 @@
-/** Gallery fixtures for the search tools (grep, search_tool_bm25, ast_grep). */
+/** Gallery fixtures for the search tools (search, search_tool_bm25, ast_grep). */
 import type { GalleryFixture } from "./types";
 
 export const searchFixtures: Record<string, GalleryFixture> = {
-	grep: {
-		label: "Grep",
+	search: {
+		label: "Search",
 		streamingArgs: {
 			pattern: "useState",
 		},
 		args: {
 			pattern: "useState",
-			path: "packages/tui/src",
+			paths: ["packages/tui/src"],
 		},
 		result: {
 			content: [
@@ -101,7 +101,7 @@ export const searchFixtures: Record<string, GalleryFixture> = {
 				limit: 5,
 				total_tools: 142,
 				activated_tools: ["docling_extract_tables", "docling_convert", "pdf_read_text"],
-				active_selected_tools: ["read", "grep", "edit", "bash"],
+				active_selected_tools: ["read", "search", "edit", "bash"],
 				tools: [
 					{
 						name: "docling_extract_tables",
@@ -160,7 +160,7 @@ export const searchFixtures: Record<string, GalleryFixture> = {
 		},
 		args: {
 			pat: "useState($A)",
-			path: "packages/tui/src/components",
+			paths: ["packages/tui/src/components"],
 		},
 		result: {
 			content: [

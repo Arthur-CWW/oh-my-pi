@@ -1,7 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, spyOn, vi } from "bun:test";
 import * as path from "node:path";
 import * as core from "@oh-my-pi/pi-agent-core";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -17,17 +16,10 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 
 const planModel = { provider: "test", id: "plan" } as unknown as Model<Api>;
 const slowModel = { provider: "test", id: "slow" } as unknown as Model<Api>;
-const currentModel = { provider: "test", id: "current" } as unknown as Model<Api>;
 
-function createSession(options?: {
-	plan?: boolean;
-	slow?: boolean;
-	current?: boolean;
-	thinkingLevel?: ThinkingLevel;
-}): AgentSession {
+function createSession(options?: { plan?: boolean; slow?: boolean }): AgentSession {
 	const plan = options?.plan ?? true;
 	const slow = options?.slow ?? true;
-	const current = options?.current ?? false;
 	return {
 		resolveRoleModelWithThinking(role: string) {
 			if (role === "plan" && plan) return { model: planModel, explicitThinkingLevel: false };
@@ -35,15 +27,9 @@ function createSession(options?: {
 			return { model: undefined, explicitThinkingLevel: false };
 		},
 		modelRegistry: {
-			getAvailable: () => [currentModel],
 			getApiKey: async () => "test-key",
 			resolver: (model: typeof planModel) => `${model.provider}/${model.id}:key`,
 		},
-		settings: {
-			getModelRole: () => undefined,
-		},
-		model: current ? currentModel : undefined,
-		thinkingLevel: options?.thinkingLevel,
 		sessionId: "session-1",
 		agent: { telemetry: undefined },
 	} as unknown as AgentSession;
@@ -119,7 +105,7 @@ async function createInteractiveGoalHarness(): Promise<{
 			mode.stop();
 			await session.dispose();
 			authStorage.close();
-			await tempDir.remove();
+			tempDir.removeSync();
 			resetSettingsForTest();
 		},
 	};
@@ -159,42 +145,12 @@ describe("guided goal setup", () => {
 		expect(complete.mock.calls[0]?.[0]).toBe(slowModel);
 	});
 
-	it("throws when no guided-goal fallback model resolves", async () => {
+	it("throws when neither plan nor slow resolves", async () => {
 		await expect(
 			runGuidedGoalTurn(createSession({ plan: false, slow: false }), {
 				messages: [{ role: "user", content: "Ship it" }],
 			}),
-		).rejects.toThrow("No plan, slow, or current session model is available for /guided-goal.");
-	});
-
-	it("falls back to the current session model when plan and slow roles are unresolved", async () => {
-		const complete = spyOn(core, "instrumentedCompleteSimple").mockResolvedValue(
-			mockResponse({ kind: "ready", objective: "Deliver with the active model." }) as never,
-		);
-
-		const result = await runGuidedGoalTurn(
-			createSession({ plan: false, slow: false, current: true, thinkingLevel: ThinkingLevel.High }),
-			{ messages: [{ role: "user", content: "Ship it" }] },
-		);
-
-		expect(result).toEqual({ kind: "ready", objective: "Deliver with the active model." });
-		expect(complete.mock.calls[0]?.[0]).toBe(currentModel);
-		expect((complete.mock.calls[0]?.[2] as { reasoning?: ThinkingLevel } | undefined)?.reasoning).toBe(
-			ThinkingLevel.High,
-		);
-	});
-
-	it("preserves disabled reasoning when falling back to the current session model", async () => {
-		const complete = spyOn(core, "instrumentedCompleteSimple").mockResolvedValue(
-			mockResponse({ kind: "ready", objective: "Deliver without reasoning." }) as never,
-		);
-
-		await runGuidedGoalTurn(
-			createSession({ plan: false, slow: false, current: true, thinkingLevel: ThinkingLevel.Off }),
-			{ messages: [{ role: "user", content: "Ship it" }] },
-		);
-
-		expect((complete.mock.calls[0]?.[2] as { disableReasoning?: boolean } | undefined)?.disableReasoning).toBe(true);
+		).rejects.toThrow("No plan or slow model is available for /guided-goal.");
 	});
 
 	it("rejects malformed structured responses", async () => {

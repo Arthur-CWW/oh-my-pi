@@ -61,7 +61,7 @@ describe("eval renderer: viewport tail window for cell code", () => {
 
 	it("bounds the pending preview to the same live tail window", () => {
 		const component = evalToolRenderer.renderCall(
-			{ language: "py", code },
+			{ cells: [{ language: "py", code }] },
 			{ expanded: false, isPartial: true },
 			theme,
 		);

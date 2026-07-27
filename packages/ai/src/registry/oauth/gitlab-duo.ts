@@ -1,4 +1,3 @@
-import * as AIError from "../../error";
 import { clearGitLabDuoDirectAccessCache } from "../../providers/gitlab-duo";
 import type { FetchImpl } from "../../types";
 import { OAuthCallbackFlow, type OAuthCallbackFlowOptions } from "./callback-server";
@@ -60,24 +59,15 @@ function resolveCallbackOptions(): OAuthCallbackFlowOptions {
 	try {
 		parsed = new URL(raw);
 	} catch {
-		throw new AIError.OAuthError(`Invalid GITLAB_REDIRECT_URI: ${raw}`, {
-			kind: "configuration",
-			provider: "gitlab-duo",
-		});
+		throw new Error(`Invalid GITLAB_REDIRECT_URI: ${raw}`);
 	}
 	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-		throw new AIError.OAuthError(`GITLAB_REDIRECT_URI must use http:// or https://, got: ${raw}`, {
-			kind: "configuration",
-			provider: "gitlab-duo",
-		});
+		throw new Error(`GITLAB_REDIRECT_URI must use http:// or https://, got: ${raw}`);
 	}
 
 	const isLoopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
 	if (isLoopback && parsed.protocol !== "http:") {
-		throw new AIError.OAuthError(`GITLAB_REDIRECT_URI loopback callbacks must use http://, got: ${raw}`, {
-			kind: "configuration",
-			provider: "gitlab-duo",
-		});
+		throw new Error(`GITLAB_REDIRECT_URI loopback callbacks must use http://, got: ${raw}`);
 	}
 
 	const port = parsed.port ? Number.parseInt(parsed.port, 10) : parsed.protocol === "https:" ? 443 : 80;
@@ -97,10 +87,7 @@ function mapTokenResponse(payload: {
 	created_at?: number;
 }): OAuthCredentials {
 	if (!payload.access_token || !payload.refresh_token || typeof payload.expires_in !== "number") {
-		throw new AIError.OAuthError("GitLab OAuth token response missing required fields", {
-			kind: "validation",
-			provider: "gitlab-duo",
-		});
+		throw new Error("GitLab OAuth token response missing required fields");
 	}
 
 	const createdAtMs =
@@ -161,14 +148,7 @@ class GitLabDuoOAuthFlow extends OAuthCallbackFlow {
 		});
 
 		if (!response.ok) {
-			throw new AIError.OAuthError(
-				`GitLab OAuth token exchange failed: ${response.status} ${await response.text()}`,
-				{
-					kind: "token-exchange",
-					provider: "gitlab-duo",
-					status: response.status,
-				},
-			);
+			throw new Error(`GitLab OAuth token exchange failed: ${response.status} ${await response.text()}`);
 		}
 
 		clearGitLabDuoDirectAccessCache();
@@ -203,11 +183,7 @@ export async function refreshGitLabDuoToken(credentials: OAuthCredentials): Prom
 	});
 
 	if (!response.ok) {
-		throw new AIError.OAuthError(`GitLab OAuth refresh failed: ${response.status} ${await response.text()}`, {
-			kind: "token-refresh",
-			provider: "gitlab-duo",
-			status: response.status,
-		});
+		throw new Error(`GitLab OAuth refresh failed: ${response.status} ${await response.text()}`);
 	}
 
 	clearGitLabDuoDirectAccessCache();

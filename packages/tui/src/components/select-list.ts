@@ -2,7 +2,6 @@ import { popLoopPhase, pushLoopPhase } from "@oh-my-pi/pi-utils";
 import { fuzzyFilter } from "../fuzzy";
 import { getKeybindings } from "../keybindings";
 import { extractPrintableText } from "../keys";
-import { type MouseRoutable, routeSelectListMouse, type SgrMouseEvent } from "../mouse";
 import type { SymbolTheme } from "../symbols";
 import type { Component } from "../tui";
 import { Ellipsis, padding, replaceTabs, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
@@ -11,8 +10,6 @@ import { ScrollView } from "./scroll-view";
 const DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
 const PRIMARY_COLUMN_GAP = 2;
 const MIN_DESCRIPTION_WIDTH = 10;
-
-const DEFAULT_CURSOR_SYMBOL = ">";
 
 function sanitizeSingleLine(text: string): string {
 	return replaceTabs(text)
@@ -83,7 +80,7 @@ type SelectItemLayout =
 			spacing: "";
 	  };
 
-export class SelectList implements Component, MouseRoutable {
+export class SelectList implements Component {
 	#filteredItems: ReadonlyArray<SelectItem>;
 	#filterQuery = "";
 	#selectedIndex: number = 0;
@@ -140,10 +137,6 @@ export class SelectList implements Component, MouseRoutable {
 			this.#notifySelectionChange();
 		}
 		this.onSelect?.(item);
-	}
-
-	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
-		routeSelectListMouse(this, event, line);
 	}
 
 	invalidate(): void {
@@ -244,6 +237,7 @@ export class SelectList implements Component, MouseRoutable {
 		}
 
 		if (this.#filteredItems.length === 0) return;
+		const vimNavigationEnabled = !this.#canEditSearch();
 		// Up arrow - wrap to bottom when at top
 		if (kb.matches(keyData, "tui.select.up")) {
 			this.#selectedIndex = this.#selectedIndex === 0 ? this.#filteredItems.length - 1 : this.#selectedIndex - 1;
@@ -254,6 +248,23 @@ export class SelectList implements Component, MouseRoutable {
 			this.#selectedIndex = this.#selectedIndex === this.#filteredItems.length - 1 ? 0 : this.#selectedIndex + 1;
 			this.#notifySelectionChange();
 		}
+		// Vim line navigation is reserved for selectors without text search.
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.vimUp")) {
+			this.#selectedIndex = this.#selectedIndex === 0 ? this.#filteredItems.length - 1 : this.#selectedIndex - 1;
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.vimDown")) {
+			this.#selectedIndex = this.#selectedIndex === this.#filteredItems.length - 1 ? 0 : this.#selectedIndex + 1;
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.first")) {
+			this.#selectedIndex = 0;
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.last")) {
+			this.#selectedIndex = this.#filteredItems.length - 1;
+			this.#notifySelectionChange();
+		}
 		// PageUp - jump up by one visible page
 		else if (kb.matches(keyData, "tui.select.pageUp")) {
 			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.maxVisible);
@@ -262,6 +273,17 @@ export class SelectList implements Component, MouseRoutable {
 		// PageDown - jump down by one visible page
 		else if (kb.matches(keyData, "tui.select.pageDown")) {
 			this.#selectedIndex = Math.min(this.#filteredItems.length - 1, this.#selectedIndex + this.maxVisible);
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.halfPageUp")) {
+			this.#selectedIndex = Math.max(0, this.#selectedIndex - Math.max(1, Math.floor(this.maxVisible / 2)));
+			this.#notifySelectionChange();
+		}
+		else if (vimNavigationEnabled && kb.matches(keyData, "tui.select.halfPageDown")) {
+			this.#selectedIndex = Math.min(
+				this.#filteredItems.length - 1,
+				this.#selectedIndex + Math.max(1, Math.floor(this.maxVisible / 2)),
+			);
 			this.#notifySelectionChange();
 		}
 		// Enter
@@ -374,8 +396,9 @@ export class SelectList implements Component, MouseRoutable {
 		width: number,
 		primaryColumnWidth: number,
 	): SelectItemLayout {
-		const cursor = this.theme.symbols?.cursor ?? DEFAULT_CURSOR_SYMBOL;
-		const prefix = isSelected ? `${cursor} ` : padding(visibleWidth(cursor) + 1);
+		const prefix = isSelected
+			? `${this.theme.symbols.cursor} `
+			: padding(visibleWidth(this.theme.symbols.cursor) + 1);
 		const prefixWidth = visibleWidth(prefix);
 		const descriptionSingleLine = item.description ? sanitizeSingleLine(item.description) : undefined;
 

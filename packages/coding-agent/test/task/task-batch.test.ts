@@ -33,16 +33,13 @@ const taskAgent: AgentDefinition = {
 	source: "bundled",
 };
 
-function createSession(
-	options: { manager?: AsyncJobManager; settings?: Record<string, unknown>; agentId?: string } = {},
-): ToolSession {
+function createSession(options: { manager?: AsyncJobManager; settings?: Record<string, unknown> } = {}): ToolSession {
 	return {
 		cwd: "/tmp",
 		hasUI: false,
 		settings: Settings.isolated(options.settings ?? {}),
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
-		getAgentId: () => options.agentId ?? null,
 		asyncJobManager: options.manager,
 	} as unknown as ToolSession;
 }
@@ -131,6 +128,25 @@ describe("task.batch schema gating", () => {
 			const tool = await TaskTool.create(createSession({ settings }));
 			expect(getSchemaProperties(tool).schema).toBeUndefined();
 		}
+	});
+
+	it("documents the batch parameters only when enabled", async () => {
+		mockDiscovery();
+
+		const off = await TaskTool.create(createSession({ settings: { "task.batch": false } }));
+		expect(off.description).toContain("Spawns ONE subagent per call to work in the background");
+		expect(off.description).not.toContain("`context`: shared background");
+		expect(off.description).toContain("Before spawning a retry, continuation, or `NameResume`/`Name-2` variant");
+		expect(off.description).toContain("revive it in place with full context instead of spawning a duplicate");
+
+		const offSync = await TaskTool.create(
+			createSession({ settings: { "async.enabled": false, "task.batch": false } }),
+		);
+		expect(offSync.description).toContain("Runs ONE subagent synchronously per call");
+
+		const on = await TaskTool.create(createSession({ settings: { "task.batch": true } }));
+		expect(on.description).toContain("`tasks`: tasks to spawn");
+		expect(on.description).toContain("`context`: shared background");
 	});
 });
 
@@ -229,20 +245,15 @@ describe("task.batch spawning", () => {
 
 	it("spawns one background job per task item and forwards the shared context", async () => {
 		mockDiscovery();
-		const seen: Array<{ id?: string; context?: string; assignment?: string; parentAgentId?: string }> = [];
+		const seen: Array<{ id?: string; context?: string; assignment?: string }> = [];
 		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			seen.push({
-				id: options.id,
-				context: options.context,
-				assignment: options.assignment,
-				parentAgentId: options.parentAgentId,
-			});
+			seen.push({ id: options.id, context: options.context, assignment: options.assignment });
 			return makeResult(options.id ?? "?");
 		});
 
 		const manager = createManager();
 		const tool = await TaskTool.create(
-			createSession({ manager, agentId: "ParentA", settings: { "async.enabled": true, "task.batch": true } }),
+			createSession({ manager, settings: { "async.enabled": true, "task.batch": true } }),
 		);
 
 		const result = await tool.execute("tc-batch", {
@@ -270,7 +281,7 @@ describe("task.batch spawning", () => {
 
 		expect(alphaJob!.status).toBe("completed");
 		expect(betaJob!.status).toBe("completed");
-		expect(alphaJob!.resultText).toContain("Alpha is now idle");
+		expect(alphaJob!.resultText).toContain("history://Alpha");
 		expect(betaJob!.resultText).toContain("history://Beta");
 
 		expect(seen).toHaveLength(2);
@@ -278,9 +289,6 @@ describe("task.batch spawning", () => {
 			expect(spawn.context).toBe("# Goal\nShared background.");
 		}
 		expect(seen.map(spawn => spawn.assignment).sort()).toEqual(["Do A.", "Do B."]);
-		// Every spawn is parented to the spawning agent (not to itself): the
-		// registry "of <parent>" link must be the caller, never the child's id.
-		for (const spawn of seen) expect(spawn.parentAgentId).toBe("ParentA");
 	});
 
 	it("treats a one-item batch as a single spawn and forwards context", async () => {
@@ -363,76 +371,5 @@ describe("task.batch spawning", () => {
 			"# Goal\nShared synchronous context.",
 			"# Goal\nShared synchronous context.",
 		]);
-	});
-
-	it("settles the batch async aggregate when a queued spawn is cancelled mid-flight", async () => {
-		mockDiscovery();
-		const started: string[] = [];
-		const gates = new Map<string, { promise: Promise<void>; resolve: () => void }>();
-		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			const id = options.id ?? "?";
-			started.push(id);
-			const { promise, resolve } = Promise.withResolvers<void>();
-			gates.set(id, { promise, resolve });
-			await promise;
-			return makeResult(id);
-		});
-
-		const manager = createManager();
-		const tool = await TaskTool.create(
-			createSession({
-				manager,
-				settings: { "async.enabled": true, "task.batch": true, "task.maxConcurrency": 1 },
-			}),
-		);
-
-		const updates: Array<{ async?: { state?: string }; progress?: Array<{ id: string; status: string }> }> = [];
-		const result = await tool.execute(
-			"tc-batch-cancel",
-			{
-				agent: "task",
-				context: "ctx",
-				tasks: [
-					{ id: "First", assignment: "Do A." },
-					{ id: "Second", assignment: "Do B." },
-				],
-			} as TaskParams,
-			undefined,
-			update => {
-				if (update.details) {
-					updates.push({
-						async: update.details.async,
-						progress: update.details.progress?.map(p => ({ id: p.id, status: p.status })),
-					});
-				}
-			},
-		);
-
-		expect(result.details?.async?.state).toBe("running");
-
-		const firstJob = manager.getJob("First")!;
-		const secondJob = manager.getJob("Second")!;
-		const deadline = Date.now() + 1_000;
-		while (started.length === 0) {
-			if (Date.now() > deadline) throw new Error("First spawn never reached the executor");
-			await Bun.sleep(5);
-		}
-		expect(started).toEqual(["First"]);
-		expect(secondJob.queued).toBe(true);
-
-		expect(manager.cancel(secondJob.id)).toBe(true);
-		await secondJob.promise;
-
-		gates.get("First")!.resolve();
-		await firstJob.promise;
-
-		expect(secondJob.status).toBe("cancelled");
-		const last = updates.at(-1);
-		// The acquire-time abort path has to flow through the same `onSettled`
-		// the post-acquire abort path uses, otherwise the batch aggregate sticks
-		// at "running" forever after the surviving spawn completes.
-		expect(last?.async?.state).toBe("failed");
-		expect(last?.progress?.find(p => p.id === "Second")?.status).toBe("aborted");
-		expect(last?.progress?.find(p => p.id === "First")?.status).toBe("completed");
 	});
 });

@@ -2,6 +2,7 @@ import { type Component, Container, Markdown, Spacer, Text, type TUI } from "@oh
 import { replaceTabs } from "../../tools/render-utils";
 import { getMarkdownTheme, theme } from "../theme/theme";
 import { DynamicBorder } from "./dynamic-border";
+import { keyHint } from "./keybinding-hints";
 
 export type OmfgPanelState =
 	| "generating"
@@ -113,18 +114,18 @@ export class OmfgPanelComponent extends Container {
 			case "validating":
 			case "confirming":
 			case "saving":
-				return theme.fg("muted", "Esc cancel /omfg");
+				return keyHint("app.interrupt", "cancel /omfg");
 			case "saved":
 				return theme.fg(
 					"success",
-					`${theme.status.success} Registered live · ${replaceTabs(this.#savedPath ?? "saved")} · Esc dismiss`,
+					`${theme.status.success} Registered live · ${replaceTabs(this.#savedPath ?? "saved")}`,
 				);
 			case "rejected":
-				return theme.fg("warning", `${theme.status.warning} Not saved · Esc dismiss`);
+				return `${theme.fg("warning", `${theme.status.warning} Not saved · `)}${keyHint("ui.dismiss", "dismiss")}`;
 			case "aborted":
-				return theme.fg("warning", `${theme.status.warning} Cancelled · Esc dismiss`);
+				return `${theme.fg("warning", `${theme.status.warning} Cancelled · `)}${keyHint("ui.dismiss", "dismiss")}`;
 			case "error":
-				return theme.fg("error", `${theme.status.error} Error · Esc dismiss`);
+				return `${theme.fg("error", `${theme.status.error} Error · `)}${keyHint("ui.dismiss", "dismiss")}`;
 		}
 	}
 

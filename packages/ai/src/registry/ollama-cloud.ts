@@ -1,4 +1,3 @@
-import * as AIError from "../error";
 import type { OAuthController, OAuthLoginCallbacks } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
 
@@ -6,10 +5,10 @@ const OLLAMA_CLOUD_KEYS_URL = "https://ollama.com/settings/keys";
 
 export async function loginOllamaCloud(options: OAuthController): Promise<string> {
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 	if (!options.onPrompt) {
-		throw new AIError.ConfigurationError("Interactive prompt is required for Ollama Cloud login");
+		throw new Error("Interactive prompt is required for Ollama Cloud login");
 	}
 	options.onAuth?.({
 		url: OLLAMA_CLOUD_KEYS_URL,
@@ -20,11 +19,11 @@ export async function loginOllamaCloud(options: OAuthController): Promise<string
 		placeholder: "ollama-cloud-api-key",
 	});
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 	const trimmed = apiKey.trim();
 	if (!trimmed) {
-		throw new AIError.ApiKeyRequiredError("Ollama Cloud API key is required");
+		throw new Error("Ollama Cloud API key is required");
 	}
 	return trimmed;
 }

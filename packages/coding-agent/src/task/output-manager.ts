@@ -11,7 +11,6 @@
  * collisions across repeated or nested task invocations.
  */
 import * as fs from "node:fs/promises";
-import { ADVISOR_TRANSCRIPT_STEM } from "../advisor/transcript-recorder";
 
 /**
  * Manages agent output ID allocation to ensure uniqueness.
@@ -30,10 +29,6 @@ export class AgentOutputManager {
 	constructor(getArtifactsDir: () => string | null, options?: { parentPrefix?: string }) {
 		this.#getArtifactsDir = getArtifactsDir;
 		this.#parentPrefix = options?.parentPrefix;
-		// Reserve the advisor transcript stem: a subagent allocated this id would
-		// write `<id>.jsonl`, clobbering the advisor's `__advisor.jsonl` in the same
-		// artifacts dir. Reserving bumps such a request to `__advisor-2`.
-		this.#taken.add(ADVISOR_TRANSCRIPT_STEM);
 	}
 
 	/**
@@ -71,23 +66,28 @@ export class AgentOutputManager {
 	}
 
 	/** Pick the first free name (base, then `base-2`, `base-3`, …) and reserve it. */
-	#allocateUnique(id: string): string {
+	#allocateUnique(id: string, unavailable?: (candidate: string) => boolean): string {
 		let candidate = id;
-		for (let n = 2; this.#taken.has(candidate); n++) {
+		let qualified = this.#parentPrefix ? `${this.#parentPrefix}.${candidate}` : candidate;
+		for (let n = 2; this.#taken.has(candidate) || unavailable?.(qualified) === true; n++) {
 			candidate = `${id}-${n}`;
+			qualified = this.#parentPrefix ? `${this.#parentPrefix}.${candidate}` : candidate;
 		}
 		this.#taken.add(candidate);
-		return this.#parentPrefix ? `${this.#parentPrefix}.${candidate}` : candidate;
+		return qualified;
 	}
 
 	/**
 	 * Allocate a unique ID.
 	 *
+	 * `unavailable` lets runtime owners reserve identities that have no output
+	 * artifact yet, such as a currently running registry agent.
+	 *
 	 * @param id Requested ID (e.g., "Anna")
 	 * @returns Unique ID ("Anna" first, then "Anna-2", "Anna-3", …)
 	 */
-	async allocate(id: string): Promise<string> {
+	async allocate(id: string, unavailable?: (candidate: string) => boolean): Promise<string> {
 		await this.#ensureInitialized();
-		return this.#allocateUnique(id);
+		return this.#allocateUnique(id, unavailable);
 	}
 }

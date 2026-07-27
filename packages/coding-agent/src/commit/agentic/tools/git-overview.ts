@@ -1,9 +1,28 @@
-import { type } from "arktype";
+import { z } from "zod/v4";
 import type { CommitAgentState, GitOverviewSnapshot } from "../../../commit/agentic/state";
 import { extractScopeCandidates } from "../../../commit/analysis/scope";
 import type { CustomTool } from "../../../extensibility/custom-tools/types";
 import * as git from "../../../utils/git";
-import { EXCLUDED_LOCK_FILES } from "../lock-files";
+
+const EXCLUDED_LOCK_FILES = new Set([
+	"Cargo.lock",
+	"package-lock.json",
+	"yarn.lock",
+	"pnpm-lock.yaml",
+	"bun.lock",
+	"bun.lockb",
+	"go.sum",
+	"poetry.lock",
+	"Pipfile.lock",
+	"uv.lock",
+	"composer.lock",
+	"Gemfile.lock",
+	"flake.lock",
+	"pubspec.lock",
+	"Podfile.lock",
+	"mix.lock",
+	"gradle.lockfile",
+]);
 
 function isExcludedFile(path: string): boolean {
 	const basename = path.split("/").pop() ?? path;
@@ -23,9 +42,9 @@ function filterExcludedFiles(files: string[]): { filtered: string[]; excluded: s
 	return { filtered, excluded };
 }
 
-const gitOverviewSchema = type({
-	"staged?": type("boolean").describe("use staged changes (default true)"),
-	"include_untracked?": type("boolean").describe("include untracked when unstaged"),
+const gitOverviewSchema = z.object({
+	staged: z.boolean().describe("use staged changes (default true)").optional(),
+	include_untracked: z.boolean().describe("include untracked when unstaged").optional(),
 });
 
 export function createGitOverviewTool(cwd: string, state: CommitAgentState): CustomTool<typeof gitOverviewSchema> {

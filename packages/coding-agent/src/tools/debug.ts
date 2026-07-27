@@ -10,7 +10,7 @@ import type {
 import type { ToolExample } from "@oh-my-pi/pi-ai";
 import { type Component, Text } from "@oh-my-pi/pi-tui";
 import { isEnoent, prompt } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import {
 	type DapBreakpointRecord,
 	type DapCapabilities,
@@ -31,7 +31,6 @@ import {
 	type DapThread,
 	type DapVariable,
 	dapSessionManager,
-	getAdapterConfigs,
 	getAvailableAdapters,
 	type LaunchProgramKind,
 	resolveLaunchOverrides,
@@ -51,7 +50,6 @@ import {
 	formatStatusIcon,
 	PREVIEW_LIMITS,
 	replaceTabs,
-	shortenPath,
 	TRUNCATE_LENGTHS,
 	truncateToWidth,
 } from "./render-utils";
@@ -76,78 +74,75 @@ export const DEBUG_READONLY_ACTIONS: ReadonlySet<string> = new Set([
 	"modules",
 	"sessions",
 ]);
-const debugActionSchema = type.enumerated(
-	"launch",
-	"attach",
-	"set_breakpoint",
-	"remove_breakpoint",
-	"set_instruction_breakpoint",
-	"remove_instruction_breakpoint",
-	"data_breakpoint_info",
-	"set_data_breakpoint",
-	"remove_data_breakpoint",
-	"continue",
-	"step_over",
-	"step_in",
-	"step_out",
-	"pause",
-	"evaluate",
-	"stack_trace",
-	"threads",
-	"scopes",
-	"variables",
-	"disassemble",
-	"read_memory",
-	"write_memory",
-	"modules",
-	"loaded_sources",
-	"custom_request",
-	"output",
-	"terminate",
-	"sessions",
-);
-const debugSchema = type({
-	action: debugActionSchema,
-	"program?": type("string").describe("debug target path; Delve accepts Go package directories"),
-	"args?": type("string[]").describe("program arguments"),
-	"adapter?": type("string").describe("configured adapter id (gdb, lldb-dap, debugpy, dlv, rdbg, or dap.json entry)"),
-	cwd: "string?",
-	"file?": type("string").describe("source file"),
-	"line?": type("number").describe("source line"),
-	"function?": type("string").describe("function name"),
-	"name?": type("string").describe("variable or data name"),
-	"condition?": type("string").describe("breakpoint condition"),
-	hit_condition: "string?",
-	"expression?": type("string").describe("expression to evaluate"),
-	"context?": type("string").describe("evaluate context: watch | repl | hover | variables | clipboard"),
-	frame_id: "number?",
-	"scope_id?": type("number").describe("scope variables reference"),
-	"variable_ref?": type("number").describe("variable reference"),
-	"pid?": type("number").describe("process id for attach"),
-	"port?": type("number").describe("remote attach port"),
-	"host?": type("string").describe("remote attach host"),
-	"levels?": type("number").describe("max stack frames"),
-	"memory_reference?": type("string").describe("memory reference or address"),
-	instruction_reference: "string?",
-	instruction_count: "number?",
-	instruction_offset: "number?",
-	"count?": type("number").describe("bytes to read"),
-	"data?": type("string").describe("base64 memory payload"),
-	"data_id?": type("string").describe("data breakpoint id"),
-	"access_type?": "'read' | 'write' | 'readWrite'",
-	"command?": type("string").describe("custom dap request command"),
-	"arguments?": type({
-		"[string]": "unknown",
-	}).describe("custom request arguments"),
-	offset: "number?",
-	resolve_symbols: "boolean?",
-	allow_partial: "boolean?",
-	start_module: "number?",
-	module_count: "number?",
-	"timeout?": type("number").describe("per-request timeout seconds"),
+const debugSchema = z.object({
+	action: z.enum([
+		"launch",
+		"attach",
+		"set_breakpoint",
+		"remove_breakpoint",
+		"set_instruction_breakpoint",
+		"remove_instruction_breakpoint",
+		"data_breakpoint_info",
+		"set_data_breakpoint",
+		"remove_data_breakpoint",
+		"continue",
+		"step_over",
+		"step_in",
+		"step_out",
+		"pause",
+		"evaluate",
+		"stack_trace",
+		"threads",
+		"scopes",
+		"variables",
+		"disassemble",
+		"read_memory",
+		"write_memory",
+		"modules",
+		"loaded_sources",
+		"custom_request",
+		"output",
+		"terminate",
+		"sessions",
+	] as const),
+	program: z.string().describe("program path").optional(),
+	args: z.array(z.string()).describe("program arguments").optional(),
+	adapter: z.string().describe("debugger adapter (gdb, lldb-dap, debugpy, dlv)").optional(),
+	cwd: z.string().optional(),
+	file: z.string().describe("source file").optional(),
+	line: z.number().describe("source line").optional(),
+	function: z.string().describe("function name").optional(),
+	name: z.string().describe("variable or data name").optional(),
+	condition: z.string().describe("breakpoint condition").optional(),
+	hit_condition: z.string().optional(),
+	expression: z.string().describe("expression to evaluate").optional(),
+	context: z.string().describe("evaluate context: watch | repl | hover | variables | clipboard").optional(),
+	frame_id: z.number().optional(),
+	scope_id: z.number().describe("scope variables reference").optional(),
+	variable_ref: z.number().describe("variable reference").optional(),
+	pid: z.number().describe("process id for attach").optional(),
+	port: z.number().describe("remote attach port").optional(),
+	host: z.string().describe("remote attach host").optional(),
+	levels: z.number().describe("max stack frames").optional(),
+	memory_reference: z.string().describe("memory reference or address").optional(),
+	instruction_reference: z.string().optional(),
+	instruction_count: z.number().optional(),
+	instruction_offset: z.number().optional(),
+	count: z.number().describe("bytes to read").optional(),
+	data: z.string().describe("base64 memory payload").optional(),
+	data_id: z.string().describe("data breakpoint id").optional(),
+	access_type: z.enum(["read", "write", "readWrite"] as const).optional(),
+	command: z.string().describe("custom dap request command").optional(),
+	arguments: z.record(z.string(), z.any()).describe("custom request arguments").optional(),
+	offset: z.number().optional(),
+	resolve_symbols: z.boolean().optional(),
+	allow_partial: z.boolean().optional(),
+	start_module: z.number().optional(),
+	module_count: z.number().optional(),
+	timeout: z.number().describe("per-request timeout seconds").optional(),
 });
 
-export type DebugParams = typeof debugSchema.infer;
+export type DebugParams = z.infer<typeof debugSchema>;
 export type DebugAction = DebugParams["action"];
 
 interface DebugToolDetails {
@@ -496,33 +491,7 @@ function buildOutcomeText(outcome: DapContinueOutcome, timeoutSec: number, verb:
 
 function getConfiguredAdapters(cwd: string): string {
 	const adapters = getAvailableAdapters(cwd).map(adapter => adapter.name);
-	const names = adapters.length > 0 ? adapters.join(", ") : "none";
-	return truncateToWidth(replaceTabs(names), TRUNCATE_LENGTHS.LONG);
-}
-
-const ADAPTER_UNAVAILABLE_MESSAGES: Readonly<Record<string, string>> = {
-	debugpy: "adapter 'debugpy' is not available: python not found in PATH",
-	dlv: "adapter 'dlv' is not available: install with 'go install github.com/go-delve/delve/cmd/dlv@latest'",
-	rdbg: "adapter 'rdbg' is not available: install with 'gem install debug'",
-};
-
-const ADAPTER_CANONICAL_COMMANDS: Readonly<Record<string, string>> = {
-	debugpy: "python",
-	dlv: "dlv",
-	rdbg: "rdbg",
-};
-
-function formatAdapterUnavailable(adapterName: string, command: string, cwd: string): string {
-	const displayName = truncateToWidth(replaceTabs(adapterName), TRUNCATE_LENGTHS.SHORT);
-	const canonicalCommand = ADAPTER_CANONICAL_COMMANDS[adapterName] ?? adapterName;
-	if (command !== canonicalCommand) {
-		const displayCommand = truncateToWidth(replaceTabs(shortenPath(command)), TRUNCATE_LENGTHS.CONTENT);
-		return `adapter '${displayName}' is not available: configured command '${displayCommand}' did not resolve. Check the DAP adapter config for this workspace.`;
-	}
-	return (
-		ADAPTER_UNAVAILABLE_MESSAGES[adapterName] ??
-		`adapter '${displayName}' is not available. Installed adapters: ${getConfiguredAdapters(cwd)}`
-	);
+	return adapters.length > 0 ? adapters.join(", ") : "none";
 }
 
 async function classifyLaunchProgram(program: string): Promise<LaunchProgramKind> {
@@ -543,7 +512,7 @@ function validateLaunchProgram(
 	if (programKind !== "directory" || adapter.acceptsDirectoryProgram) return;
 	const displayPath = formatPathRelativeToCwd(program, cwd, { trailingSlash: true });
 	throw new ToolError(
-		`launch program resolves to a directory: ${displayPath}. Pass an executable file path or choose an adapter that supports package directories.`,
+		`launch program resolves to a directory: ${displayPath}. Pass an executable file path, or for Python use adapter "debugpy" with program set to the .py file.`,
 	);
 }
 
@@ -611,7 +580,6 @@ function summarizeDebugCall(args: DebugRenderArgs): string {
 }
 
 export const debugToolRenderer = {
-	animatedPartialResult: true,
 	renderCall(args: DebugRenderArgs, _options: RenderResultOptions, theme: Theme): Component {
 		const text = renderStatusLine({ icon: "pending", title: "Debug", description: summarizeDebugCall(args) }, theme);
 		return new Text(text, 0, 0);
@@ -693,7 +661,7 @@ export class DebugTool implements AgentTool<typeof debugSchema, DebugToolDetails
 	readonly parameters = debugSchema;
 	readonly strict = true;
 
-	readonly examples: readonly ToolExample<typeof debugSchema.infer>[] = [
+	readonly examples: readonly ToolExample<z.input<typeof debugSchema>>[] = [
 		{
 			caption: "Launch and inspect hang",
 			note: '1. debug(action: "launch", program: "./my_app")\n2. debug(action: "set_breakpoint", file: "src/main.c", line: 42)\n3. debug(action: "continue")\n4. If the program appears hung: debug(action: "pause")\n5. Inspect state with `threads`, `stack_trace`, `scopes`, and `variables`',
@@ -739,16 +707,15 @@ export class DebugTool implements AgentTool<typeof debugSchema, DebugToolDetails
 				const commandCwd = params.cwd ? resolveToCwd(params.cwd, this.session.cwd) : this.session.cwd;
 				const program = resolveToCwd(params.program, commandCwd);
 				const programKind = await classifyLaunchProgram(program);
-				const selection = selectLaunchAdapter(program, commandCwd, params.adapter, programKind);
-				if (selection.kind === "unavailable") {
-					throw new ToolError(formatAdapterUnavailable(selection.adapterName, selection.command, commandCwd));
-				}
-				if (selection.kind === "none") {
+				const adapter = selectLaunchAdapter(program, commandCwd, params.adapter, programKind);
+				if (!adapter) {
+					if (params.adapter === "debugpy") {
+						throw new ToolError("adapter 'debugpy' is not available: python not found in PATH");
+					}
 					throw new ToolError(
 						`No debugger adapter available. Installed adapters: ${getConfiguredAdapters(commandCwd)}`,
 					);
 				}
-				const { adapter } = selection;
 				validateLaunchProgram(program, commandCwd, programKind, adapter);
 				const extraLaunchArguments = resolveLaunchOverrides(adapter, program, programKind);
 				const snapshot = await dapSessionManager.launch(
@@ -767,9 +734,8 @@ export class DebugTool implements AgentTool<typeof debugSchema, DebugToolDetails
 				const commandCwd = params.cwd ? resolveToCwd(params.cwd, this.session.cwd) : this.session.cwd;
 				const adapter = selectAttachAdapter(commandCwd, params.adapter, params.port);
 				if (!adapter) {
-					if (params.adapter) {
-						const command = getAdapterConfigs(commandCwd)[params.adapter]?.command ?? params.adapter;
-						throw new ToolError(formatAdapterUnavailable(params.adapter, command, commandCwd));
+					if (params.adapter === "debugpy") {
+						throw new ToolError("adapter 'debugpy' is not available: python not found in PATH");
 					}
 					throw new ToolError(
 						`No debugger adapter available. Installed adapters: ${getConfiguredAdapters(commandCwd)}`,

@@ -1,41 +1,46 @@
-import { type } from "arktype";
-import type { ModelSpec } from "../types";
-import { discoveryFetch } from "../utils";
-import { CODEX_BASE_URL, CODEX_CLIENT_VERSION, OPENAI_HEADER_VALUES, OPENAI_HEADERS } from "../wire/codex";
+import { z } from "zod/v4";
+import { toReasoningEffort } from "../effort";
+import type { CodexModelCapabilities, FetchImpl, ModelSpec, ReasoningEffortPreset } from "../types";
+import { isRecord } from "../utils";
+import { CODEX_BASE_URL, OPENAI_HEADER_VALUES, OPENAI_HEADERS } from "../wire/codex";
 
 const DEFAULT_MODEL_LIST_PATHS = ["/codex/models", "/models"] as const;
 const DEFAULT_CONTEXT_WINDOW = 272_000;
 const DEFAULT_MAX_TOKENS = 128_000;
-const CODEX_REMOTE_COMPACTION = {
-	enabled: true,
-	api: "openai-codex-responses",
-	v2StreamingEnabled: true,
-} as const;
+// Codex `/models` does not advertise output caps or pricing. These are explicit
+// discovery fallbacks, never live capability claims.
+const DEFAULT_CODEX_CLIENT_VERSION = "0.99.0";
+const NPM_CODEX_LATEST_URL = "https://registry.npmjs.org/@openai%2Fcodex/latest";
 
-const codexReasoningPresetSchema = type({
-	"effort?": "unknown",
-});
+const codexReasoningPresetSchema = z
+	.object({
+		effort: z.unknown().optional(),
+		description: z.unknown().optional(),
+	})
+	.loose();
 
-const codexModelEntrySchema = type({
-	"slug?": "unknown",
-	"id?": "unknown",
-	"display_name?": "unknown",
-	"context_window?": "unknown",
-	"default_reasoning_level?": "unknown",
-	"supported_reasoning_levels?": "unknown",
-	"input_modalities?": "unknown",
-	"supported_in_api?": "unknown",
-	"priority?": "unknown",
-	"prefer_websockets?": "unknown",
-	"use_responses_lite?": "unknown",
-});
+const codexModelEntrySchema = z
+	.object({
+		slug: z.unknown().optional(), id: z.unknown().optional(), display_name: z.unknown().optional(), description: z.unknown().optional(),
+		context_window: z.unknown().optional(), max_context_window: z.unknown().optional(), auto_compact_token_limit: z.unknown().optional(), comp_hash: z.unknown().optional(), effective_context_window_percent: z.unknown().optional(),
+		default_reasoning_level: z.unknown().optional(), supported_reasoning_levels: z.unknown().optional(),
+		shell_type: z.unknown().optional(), visibility: z.unknown().optional(), supported_in_api: z.unknown().optional(), priority: z.unknown().optional(),
+		additional_speed_tiers: z.unknown().optional(), service_tiers: z.unknown().optional(), default_service_tier: z.unknown().optional(), availability_nux: z.unknown().optional(), upgrade: z.unknown().optional(), base_instructions: z.unknown().optional(), model_messages: z.unknown().optional(), include_skills_usage_instructions: z.unknown().optional(),
+		supports_reasoning_summaries: z.unknown().optional(), default_reasoning_summary: z.unknown().optional(), support_verbosity: z.unknown().optional(), default_verbosity: z.unknown().optional(),
+		apply_patch_tool_type: z.unknown().optional(), web_search_tool_type: z.unknown().optional(), truncation_policy: z.unknown().optional(), supports_parallel_tool_calls: z.unknown().optional(), supports_image_detail_original: z.unknown().optional(),
+		experimental_supported_tools: z.unknown().optional(), input_modalities: z.unknown().optional(), supports_search_tool: z.unknown().optional(), use_responses_lite: z.unknown().optional(), auto_review_model_override: z.unknown().optional(), tool_mode: z.unknown().optional(), multi_agent_version: z.unknown().optional(), prefer_websockets: z.unknown().optional(), minimal_client_version: z.unknown().optional(), available_in_plans: z.unknown().optional(), reasoning_summary_format: z.unknown().optional(),
+	})
+	.loose();
 
-const codexModelsResponseSchema = type({
-	"models?": "unknown[]",
-	"data?": "unknown[]",
-});
+const codexModelsResponseSchema = z
+	.object({
+		models: z.array(z.unknown()).optional(),
+		data: z.array(z.unknown()).optional(),
+	})
+	.loose();
 
-type CodexModelEntry = typeof codexModelEntrySchema.infer;
+type CodexModelEntry = z.infer<typeof codexModelEntrySchema>;
+
 interface NormalizedCodexModel {
 	model: ModelSpec<"openai-codex-responses">;
 	priority: number;
@@ -60,7 +65,9 @@ export interface CodexModelDiscoveryOptions {
 	/** Abort signal for network request cancellation. */
 	signal?: AbortSignal;
 	/** Optional fetch implementation override for tests. */
-	fetchFn?: typeof fetch;
+	fetchFn?: FetchImpl;
+	/** Optional registry fetch implementation override for client version lookup. */
+	registryFetchFn?: FetchImpl;
 }
 
 /**
@@ -78,11 +85,15 @@ export interface CodexModelDiscoveryResult {
  * Returns `{ models: [] }` when a route succeeds but yields no usable models.
  */
 export async function fetchCodexModels(options: CodexModelDiscoveryOptions): Promise<CodexModelDiscoveryResult | null> {
-	const fetchFn = discoveryFetch(options.fetchFn);
+	const fetchFn = options.fetchFn ?? fetch;
 	const baseUrl = normalizeBaseUrl(options.baseUrl);
 	const paths = normalizePaths(options.paths);
-	const clientVersion = normalizeClientVersion(options.clientVersion) ?? CODEX_CLIENT_VERSION;
-	const headers = buildCodexHeaders(options, clientVersion);
+	const headers = buildCodexHeaders(options);
+	const clientVersion = await resolveCodexClientVersion(
+		options.clientVersion,
+		options.registryFetchFn ?? fetchFn,
+		options.signal,
+	);
 
 	let sawSuccessfulResponse = false;
 	for (const path of paths) {
@@ -147,7 +158,7 @@ function buildModelsUrl(baseUrl: string, path: string, clientVersion: string | u
 	return url.toString();
 }
 
-function buildCodexHeaders(options: CodexModelDiscoveryOptions, clientVersion: string): Headers {
+function buildCodexHeaders(options: CodexModelDiscoveryOptions): Headers {
 	const headers = new Headers(options.headers);
 	headers.set("Authorization", `Bearer ${options.accessToken}`);
 	if (options.accountId && options.accountId.trim().length > 0) {
@@ -155,9 +166,40 @@ function buildCodexHeaders(options: CodexModelDiscoveryOptions, clientVersion: s
 	}
 	headers.set(OPENAI_HEADERS.BETA, OPENAI_HEADER_VALUES.BETA_RESPONSES);
 	headers.set(OPENAI_HEADERS.ORIGINATOR, OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
-	headers.set(OPENAI_HEADERS.VERSION, clientVersion);
 	headers.set("accept", "application/json");
 	return headers;
+}
+
+async function resolveCodexClientVersion(
+	clientVersion: string | undefined,
+	fetchFn: FetchImpl,
+	signal: AbortSignal | undefined,
+): Promise<string> {
+	const normalizedClientVersion = normalizeClientVersion(clientVersion);
+	if (normalizedClientVersion) {
+		return normalizedClientVersion;
+	}
+	try {
+		const response = await fetchFn(NPM_CODEX_LATEST_URL, {
+			method: "GET",
+			headers: { Accept: "application/json" },
+			signal,
+		});
+		if (!response.ok) {
+			return DEFAULT_CODEX_CLIENT_VERSION;
+		}
+		const payload: unknown = await response.json();
+		if (!isRecord(payload)) {
+			return DEFAULT_CODEX_CLIENT_VERSION;
+		}
+		const npmVersion = normalizeClientVersion(payload.version);
+		return npmVersion ?? DEFAULT_CODEX_CLIENT_VERSION;
+	} catch (error) {
+		if (isAbortError(error)) {
+			throw error;
+		}
+		return DEFAULT_CODEX_CLIENT_VERSION;
+	}
 }
 
 function normalizeClientVersion(value: unknown): string | undefined {
@@ -171,13 +213,17 @@ function normalizeClientVersion(value: unknown): string | undefined {
 	return trimmed;
 }
 
-function normalizeCodexModels(payload: unknown, baseUrl: string): ModelSpec<"openai-codex-responses">[] | null {
-	const parsedResponse = codexModelsResponseSchema(payload);
-	if (parsedResponse instanceof type.errors) {
+function isAbortError(error: unknown): error is Error {
+	return error instanceof Error && error.name === "AbortError";
+}
+
+export function normalizeCodexModels(payload: unknown, baseUrl: string): ModelSpec<"openai-codex-responses">[] | null {
+	const parsedResponse = codexModelsResponseSchema.safeParse(payload);
+	if (!parsedResponse.success) {
 		return null;
 	}
 
-	const entries = parsedResponse.models ?? parsedResponse.data ?? [];
+	const entries = parsedResponse.data.models ?? parsedResponse.data.data ?? [];
 	const normalized: NormalizedCodexModel[] = [];
 	for (const entry of entries) {
 		const model = normalizeCodexModelEntry(entry, baseUrl);
@@ -197,74 +243,142 @@ function normalizeCodexModels(payload: unknown, baseUrl: string): ModelSpec<"ope
 }
 
 function normalizeCodexModelEntry(entry: unknown, baseUrl: string): NormalizedCodexModel | null {
-	const parsedEntry = codexModelEntrySchema(entry);
-	if (parsedEntry instanceof type.errors) {
-		return null;
-	}
+	const parsedEntry = codexModelEntrySchema.safeParse(entry);
+	if (!parsedEntry.success) return null;
 
-	const payload: CodexModelEntry = parsedEntry;
+	const payload: CodexModelEntry = parsedEntry.data;
 	const slug = toNonEmptyString(payload.slug) ?? toNonEmptyString(payload.id);
-	if (!slug) {
-		return null;
-	}
+	if (!slug) return null;
+	if (toBoolean(payload.supported_in_api) === false) return null;
 
-	const supportedInApi = toBoolean(payload.supported_in_api);
-	if (supportedInApi === false) {
-		return null;
-	}
-
-	const name = toNonEmptyString(payload.display_name) ?? slug;
-	const contextWindow = toPositiveInt(payload.context_window) ?? DEFAULT_CONTEXT_WINDOW;
-	const maxTokens = Math.min(DEFAULT_MAX_TOKENS, contextWindow);
-	const reasoning = supportsReasoning(payload.default_reasoning_level, payload.supported_reasoning_levels);
-	const input = normalizeInputModalities(payload.input_modalities);
-	const preferWebsockets = toBoolean(payload.prefer_websockets) === true;
-	const useResponsesLite = toBoolean(payload.use_responses_lite) === true;
+	const presets = normalizeReasoningPresets(payload.supported_reasoning_levels);
+	const defaultLevel = normalizeEffort(payload.default_reasoning_level);
+	const reasoning = presets.some(preset => preset.effort !== "none") || (defaultLevel !== undefined && defaultLevel !== "none");
+	const endpointContextWindow = toPositiveInt(payload.context_window);
+	const contextWindow = endpointContextWindow ?? DEFAULT_CONTEXT_WINDOW;
 	const priority = toFiniteNumber(payload.priority) ?? Number.MAX_SAFE_INTEGER;
+	const visibility = toNonEmptyString(payload.visibility);
+	const capabilities = normalizeCodexCapabilities(payload, endpointContextWindow === null ? "fallback" : "endpoint");
 
 	return {
 		priority,
 		model: {
 			id: slug,
-			name,
+			name: toNonEmptyString(payload.display_name) ?? slug,
 			api: "openai-codex-responses",
 			provider: "openai-codex",
 			baseUrl,
 			reasoning,
-			input,
+			...(reasoning && presets.length > 0 ? { thinking: { mode: "effort" as const, efforts: presets.map(preset => preset.effort), presets, ...(defaultLevel && presets.some(preset => preset.effort === defaultLevel) ? { defaultLevel } : {}) } } : {}),
+			input: normalizeInputModalities(payload.input_modalities),
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			remoteCompaction: CODEX_REMOTE_COMPACTION,
 			contextWindow,
-			maxTokens,
-			...(preferWebsockets ? { preferWebsockets: true } : {}),
-			...(useResponsesLite ? { useResponsesLite: true } : {}),
+			maxTokens: Math.min(DEFAULT_MAX_TOKENS, contextWindow),
+			codex: capabilities,
+			...(toNonEmptyString(payload.apply_patch_tool_type) === "freeform" ? { applyPatchToolType: "freeform" as const } : {}),
+			...(toBoolean(payload.prefer_websockets) === true ? { preferWebsockets: true } : {}),
+			...(visibility === "hide" || visibility === "none" ? { hidden: true } : {}),
 			...(priority !== Number.MAX_SAFE_INTEGER ? { priority } : {}),
 		},
 	};
 }
 
-function supportsReasoning(defaultReasoningLevel: unknown, supportedReasoningLevels: unknown): boolean {
-	const defaultLevel = toNonEmptyString(defaultReasoningLevel)?.toLowerCase();
-	if (defaultLevel && defaultLevel !== "none") {
-		return true;
+function normalizeReasoningPresets(value: unknown): ReasoningEffortPreset[] {
+	if (!Array.isArray(value)) return [];
+	const presets: ReasoningEffortPreset[] = [];
+	for (const item of value) {
+		const parsed = codexReasoningPresetSchema.safeParse(item);
+		if (!parsed.success) continue;
+		const effort = normalizeEffort(parsed.data.effort);
+		if (effort === undefined) continue;
+		presets.push({ effort, description: toNonEmptyString(parsed.data.description) ?? "" });
 	}
+	return presets;
+}
 
-	if (!Array.isArray(supportedReasoningLevels)) {
-		return false;
+function normalizeEffort(value: unknown) {
+	const exact = toNonEmptyString(value);
+	return exact === null ? undefined : toReasoningEffort(exact);
+}
+
+
+function normalizeCodexCapabilities(payload: CodexModelEntry, contextWindowSource: "endpoint" | "fallback"): CodexModelCapabilities {
+	const capability: CodexModelCapabilities = { maxTokensSource: "fallback", costSource: "fallback", contextWindowSource };
+	assignString(capability, "description", payload.description); assignString(capability, "visibility", payload.visibility); assignBoolean(capability, "supportedInApi", payload.supported_in_api); assignString(capability, "shellType", payload.shell_type); const defaultReasoningLevel = normalizeEffort(payload.default_reasoning_level); if (defaultReasoningLevel !== undefined) capability.defaultReasoningLevel = defaultReasoningLevel;
+	assignStringList(capability, "additionalSpeedTiers", payload.additional_speed_tiers); assignServiceTiers(capability, payload.service_tiers); assignString(capability, "defaultServiceTier", payload.default_service_tier); assignNux(capability, payload.availability_nux); assignUpgrade(capability, payload.upgrade); assignString(capability, "baseInstructions", payload.base_instructions); assignModelMessages(capability, payload.model_messages); assignBoolean(capability, "includeSkillsUsageInstructions", payload.include_skills_usage_instructions);
+	assignBoolean(capability, "supportsReasoningSummaries", payload.supports_reasoning_summaries); assignString(capability, "defaultReasoningSummary", payload.default_reasoning_summary); assignBoolean(capability, "supportsVerbosity", payload.support_verbosity); assignString(capability, "defaultVerbosity", payload.default_verbosity); assignString(capability, "applyPatchToolType", payload.apply_patch_tool_type); assignString(capability, "webSearchToolType", payload.web_search_tool_type); assignTruncationPolicy(capability, payload.truncation_policy); assignBoolean(capability, "supportsParallelToolCalls", payload.supports_parallel_tool_calls); assignBoolean(capability, "supportsImageDetailOriginal", payload.supports_image_detail_original);
+	assignPositive(capability, "maxContextWindow", payload.max_context_window); assignPositive(capability, "autoCompactTokenLimit", payload.auto_compact_token_limit); assignString(capability, "compactionHash", payload.comp_hash); assignPositive(capability, "effectiveContextWindowPercent", payload.effective_context_window_percent); assignStringList(capability, "experimentalSupportedTools", payload.experimental_supported_tools); assignBoolean(capability, "supportsSearchTool", payload.supports_search_tool); assignBoolean(capability, "useResponsesLite", payload.use_responses_lite); assignString(capability, "autoReviewModelOverride", payload.auto_review_model_override); assignString(capability, "toolMode", payload.tool_mode); assignString(capability, "multiAgentVersion", payload.multi_agent_version);
+	assignString(capability, "minimalClientVersion", payload.minimal_client_version); assignStringList(capability, "availableInPlans", payload.available_in_plans); assignString(capability, "reasoningSummaryFormat", payload.reasoning_summary_format);
+	if (toNonEmptyString(payload.multi_agent_version) === "v2") capability.supportsUltraOrchestration = true;
+	return capability;
+}
+function assignString<T extends keyof CodexModelCapabilities>(target: CodexModelCapabilities, key: T, value: unknown): void {
+	const normalized = toNonEmptyString(value);
+	if (normalized !== null) (target as Record<string, unknown>)[key] = normalized;
+}
+
+function assignBoolean<T extends keyof CodexModelCapabilities>(target: CodexModelCapabilities, key: T, value: unknown): void {
+	const normalized = toBoolean(value);
+	if (normalized !== null) (target as Record<string, unknown>)[key] = normalized;
+}
+
+function assignPositive<T extends keyof CodexModelCapabilities>(target: CodexModelCapabilities, key: T, value: unknown): void {
+	const normalized = toPositiveInt(value);
+	if (normalized !== null) (target as Record<string, unknown>)[key] = normalized;
+}
+
+function assignStringList<T extends keyof CodexModelCapabilities>(target: CodexModelCapabilities, key: T, value: unknown): void {
+	if (!Array.isArray(value)) return;
+	const normalized = value.map(toNonEmptyString).filter((item): item is string => item !== null);
+	if (normalized.length > 0) (target as Record<string, unknown>)[key] = normalized;
+}
+
+function assignServiceTiers(target: CodexModelCapabilities, value: unknown): void {
+	if (!Array.isArray(value)) return;
+	const tiers = value.flatMap(item => {
+		if (!isRecord(item)) return [];
+		const id = toNonEmptyString(item.id); const name = toNonEmptyString(item.name); const description = toNonEmptyString(item.description);
+		return id === null || name === null || description === null ? [] : [{ id, name, description }];
+	});
+	if (tiers.length > 0) target.serviceTiers = tiers;
+}
+
+function assignNux(target: CodexModelCapabilities, value: unknown): void {
+	if (!isRecord(value)) return;
+	const message = toNonEmptyString(value.message);
+	if (message !== null) target.availabilityNuxMessage = message;
+}
+
+function assignUpgrade(target: CodexModelCapabilities, value: unknown): void {
+	if (!isRecord(value)) return;
+	const model = toNonEmptyString(value.model); const migrationMarkdown = toNonEmptyString(value.migration_markdown);
+	if (model !== null && migrationMarkdown !== null) target.upgrade = { model, migrationMarkdown };
+}
+
+function assignModelMessages(target: CodexModelCapabilities, value: unknown): void {
+	if (!isRecord(value)) return;
+	const messages: NonNullable<CodexModelCapabilities["modelMessages"]> = {};
+	const instructionsTemplate = toNonEmptyString(value.instructions_template);
+	if (instructionsTemplate !== null) messages.instructionsTemplate = instructionsTemplate;
+	if (isRecord(value.instructions_variables)) {
+		const variables: NonNullable<typeof messages.instructionsVariables> = {};
+		const personalityDefault = toNonEmptyString(value.instructions_variables.personality_default); const personalityFriendly = toNonEmptyString(value.instructions_variables.personality_friendly); const personalityPragmatic = toNonEmptyString(value.instructions_variables.personality_pragmatic);
+		if (personalityDefault !== null) variables.personalityDefault = personalityDefault; if (personalityFriendly !== null) variables.personalityFriendly = personalityFriendly; if (personalityPragmatic !== null) variables.personalityPragmatic = personalityPragmatic;
+		if (Object.keys(variables).length > 0) messages.instructionsVariables = variables;
 	}
-
-	for (const level of supportedReasoningLevels) {
-		const parsedLevel = codexReasoningPresetSchema(level);
-		if (parsedLevel instanceof type.errors) {
-			continue;
-		}
-		const effort = toNonEmptyString(parsedLevel.effort)?.toLowerCase();
-		if (effort && effort !== "none") {
-			return true;
-		}
+	if (isRecord(value.approvals)) {
+		const approvals: NonNullable<typeof messages.approvals> = {};
+		const onRequest = toNonEmptyString(value.approvals.on_request); const onRequestAutoReview = toNonEmptyString(value.approvals.on_request_auto_review);
+		if (onRequest !== null) approvals.onRequest = onRequest; if (onRequestAutoReview !== null) approvals.onRequestAutoReview = onRequestAutoReview;
+		if (Object.keys(approvals).length > 0) messages.approvals = approvals;
 	}
+	if (Object.keys(messages).length > 0) target.modelMessages = messages;
+}
 
-	return false;
+function assignTruncationPolicy(target: CodexModelCapabilities, value: unknown): void {
+	if (!isRecord(value)) return;
+	const mode = toNonEmptyString(value.mode); const limit = toPositiveInt(value.limit);
+	if (mode !== null && limit !== null) target.truncationPolicy = { mode, limit };
 }
 
 function normalizeInputModalities(inputModalities: unknown): ("text" | "image")[] {

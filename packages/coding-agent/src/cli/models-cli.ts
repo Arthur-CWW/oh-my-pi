@@ -2,7 +2,7 @@
  * `omp models` — list, search, and refresh available models.
  *
  * Subcommands:
- * - `ls` (default): list every available model grouped by provider.
+ * - `ls` (default): list every available model with a canonical + provider view.
  * - `find <substring>`: list models whose provider, id, or name contains the substring.
  * - `refresh`: force an online catalog re-fetch (ignoring the model cache TTL),
  *   then list. This is the supported replacement for `rm -rf ~/.omp/models.db`
@@ -11,7 +11,7 @@
  * `ls`/`find` use the cache when fresh (`online-if-uncached`); only `refresh`
  * forces the network (`online`).
  */
-import type { Api, Effort, Model } from "@oh-my-pi/pi-ai";
+import type { Api, Model, ModelInput, ReasoningEffort } from "@oh-my-pi/pi-ai";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { formatNumber, getProjectDir } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
@@ -21,7 +21,7 @@ import { discoverAndLoadExtensions, loadExtensions } from "../extensibility/exte
 import { discoverAuthStorage } from "../sdk";
 import { EventBus } from "../utils/event-bus";
 
-export type ModelsAction = "ls" | "find" | "refresh";
+export type ModelsAction = "ls" | "find" | "refresh" | "canonical";
 
 export interface ModelsCommandArgs {
 	action: ModelsAction;
@@ -48,6 +48,7 @@ const KNOWN_ACTIONS: Record<string, ModelsAction> = {
 	list: "ls",
 	find: "find",
 	refresh: "refresh",
+	canonical: "canonical",
 };
 
 /** Resolve the two positional args into an action + filter (provider names fall through to `ls`). */
@@ -71,25 +72,29 @@ interface ModelJson {
 	maxTokens: number | null;
 	reasoning: boolean;
 	/** Supported thinking efforts when the model thinks, otherwise null. */
-	thinking: readonly Effort[] | null;
-	input: ("text" | "image")[];
+	thinking: readonly ReasoningEffort[] | null;
+	input: ModelInput[];
 	cost: Model<Api>["cost"];
+}
+
+interface CanonicalJson {
+	id: string;
+	selected: string;
+	variants: number;
+	contextWindow: number | null;
+	maxTokens: number | null;
 }
 
 interface ModelsJson {
 	models: ModelJson[];
 }
 
-function writeLine(line = ""): void {
-	process.stdout.write(`${line}\n`);
+interface CanonicalModelsJson {
+	canonical: CanonicalJson[];
 }
 
-function writeModelsConfigError(error: Error): void {
-	writeLine(chalk.yellow("Warning: models.yml validation failed — custom providers disabled"));
-	for (const line of error.message.split("\n")) {
-		writeLine(`  ${line}`);
-	}
-	writeLine();
+function writeLine(line = ""): void {
+	process.stdout.write(`${line}\n`);
 }
 
 function formatLimit(n: number | null): string {
@@ -119,7 +124,7 @@ function toModelJson(model: Model<Api>): ModelJson {
 
 type ColumnAlign = "left" | "right";
 
-interface BoxColumn {
+interface TableColumn {
 	header: string;
 	align?: ColumnAlign;
 }
@@ -133,38 +138,41 @@ function padCell(text: string, width: number, align: ColumnAlign = "left"): stri
 }
 
 /**
- * Render `rows` as a box-drawing table. Cells must be plain text (no ANSI); the
- * header row is bolded and the borders dimmed (both no-ops on non-TTY output).
+ * Render `rows` as an aligned, unframed table: each column padded to a shared
+ * width and separated by two spaces, with a bold header row (a no-op on non-TTY
+ * output). No box-drawing borders, so rows copy cleanly out of the terminal.
  */
-function boxTable(columns: BoxColumn[], rows: string[][]): string[] {
+function alignedTable(columns: TableColumn[], rows: string[][]): string[] {
 	const widths = columns.map((column, index) =>
 		Math.max(Bun.stringWidth(column.header), ...rows.map(row => Bun.stringWidth(row[index] ?? ""))),
 	);
-	const bar = chalk.dim("│");
-	const segments = widths.map(width => "─".repeat(width + 2));
+	const lastIndex = columns.length - 1;
 	const renderRow = (cells: string[], bold: boolean): string => {
 		const padded = columns.map((column, index) => {
-			const cell = padCell(cells[index] ?? "", widths[index]!, column.align);
+			const raw = cells[index] ?? "";
+			// Skip the trailing pad on the final left-aligned column: nothing
+			// follows it, so the padding would only add invisible copy noise.
+			const cell =
+				index === lastIndex && (column.align ?? "left") === "left"
+					? raw
+					: padCell(raw, widths[index]!, column.align);
 			return bold ? chalk.bold(cell) : cell;
 		});
-		return `${bar} ${padded.join(` ${bar} `)} ${bar}`;
+		return padded.join("  ");
 	};
-	const lines = [chalk.dim(`┌${segments.join("┬")}┐`)];
-	lines.push(
+	const lines = [
 		renderRow(
 			columns.map(column => column.header),
 			true,
 		),
-	);
-	lines.push(chalk.dim(`├${segments.join("┼")}┤`));
+	];
 	for (const row of rows) {
 		lines.push(renderRow(row, false));
 	}
-	lines.push(chalk.dim(`└${segments.join("┴")}┘`));
 	return lines;
 }
 
-/** `omp models ls`/`find`: provider-grouped listing (one box table per provider). */
+/** `omp models ls`/`find`: provider-grouped listing (one aligned table per provider). */
 function renderProviderModels(
 	modelRegistry: ModelRegistry,
 	action: ModelsAction,
@@ -195,21 +203,10 @@ function renderProviderModels(
 		}
 	}
 
-	const configError = modelRegistry.getError();
-
 	if (json) {
-		if (configError) {
-			process.stderr.write(
-				`Warning: models.yml validation failed — custom providers disabled\n${configError.message}\n`,
-			);
-		}
 		const output: ModelsJson = { models: filtered.slice().sort(byProviderThenId).map(toModelJson) };
 		writeLine(JSON.stringify(output));
 		return;
-	}
-
-	if (configError) {
-		writeModelsConfigError(configError);
 	}
 
 	if (available.length === 0) {
@@ -221,7 +218,7 @@ function renderProviderModels(
 		return;
 	}
 
-	// One section per provider: bold heading + a box table of that provider's models.
+	// One section per provider: bold heading + an aligned table of that provider's models.
 	const byProvider = new Map<string, Model<Api>[]>();
 	for (const model of filtered.slice().sort(byProviderThenId)) {
 		let group = byProvider.get(model.provider);
@@ -244,7 +241,7 @@ function renderProviderModels(
 			model.thinking ? getSupportedEfforts(model).join(",") : model.reasoning ? "yes" : "-",
 			model.input.includes("image") ? "yes" : "no",
 		]);
-		for (const line of boxTable(
+		for (const line of alignedTable(
 			[
 				{ header: "model" },
 				{ header: "context", align: "right" },
@@ -256,6 +253,67 @@ function renderProviderModels(
 		)) {
 			writeLine(line);
 		}
+	}
+}
+
+/** `omp models canonical`: the coalesced canonical view (one row per canonical id). */
+function renderCanonicalModels(modelRegistry: ModelRegistry, pattern: string | undefined, json: boolean): void {
+	const selections = modelRegistry.getCanonicalModelSelections({ availableOnly: true });
+	const needle = pattern?.toLowerCase();
+	const filtered = needle
+		? selections.filter(
+				({ record, model }) =>
+					record.id.toLowerCase().includes(needle) ||
+					`${model.provider}/${model.id}`.toLowerCase().includes(needle),
+			)
+		: selections;
+
+	if (json) {
+		const output: CanonicalModelsJson = {
+			canonical: filtered
+				.map(({ record, model }) => ({
+					id: record.id,
+					selected: `${model.provider}/${model.id}`,
+					variants: record.variants.length,
+					contextWindow: model.contextWindow,
+					maxTokens: model.maxTokens,
+				}))
+				.sort((left, right) => left.id.localeCompare(right.id)),
+		};
+		writeLine(JSON.stringify(output));
+		return;
+	}
+
+	if (selections.length === 0) {
+		writeLine("No models available. Set API keys in environment variables.");
+		return;
+	}
+	if (filtered.length === 0) {
+		writeLine(`No canonical models matching "${pattern}"`);
+		return;
+	}
+
+	const rows = filtered
+		.slice()
+		.sort((left, right) => left.record.id.localeCompare(right.record.id))
+		.map(({ record, model }) => [
+			record.id,
+			`${model.provider}/${model.id}`,
+			String(record.variants.length),
+			formatLimit(model.contextWindow),
+			formatLimit(model.maxTokens),
+		]);
+	for (const line of alignedTable(
+		[
+			{ header: "canonical" },
+			{ header: "selected" },
+			{ header: "variants", align: "right" },
+			{ header: "context", align: "right" },
+			{ header: "max-out", align: "right" },
+		],
+		rows,
+	)) {
+		writeLine(line);
 	}
 }
 
@@ -321,7 +379,11 @@ export async function runModelsListing(options: RunModelsListingOptions): Promis
 	// Discover runtime (extension) provider catalogs now that they are registered.
 	await modelRegistry.refreshRuntimeProviders(action === "refresh" ? "online" : "online-if-uncached");
 
-	renderProviderModels(modelRegistry, action, pattern, json);
+	if (action === "canonical") {
+		renderCanonicalModels(modelRegistry, pattern, json);
+	} else {
+		renderProviderModels(modelRegistry, action, pattern, json);
+	}
 }
 
 /**

@@ -1,16 +1,112 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+/** Removes model-emitted empty HTML separators outside fenced code blocks. */
+export function removeEmptyThinkingCommentSeparators(text: string): string {
+	return removeThinkingCommentSeparators(text, false);
+}
 
-// Single-slot-per-mode memo for formatThinkingForDisplay. During a streaming
-// tick the same growing thinking text is formatted up to three times (reveal
-// count, reveal slice, component render); this collapses them to one
-// computation. Prose and raw modes produce different output for the same text,
-// so each mode keeps its own slot. One entry per mode is enough for the common
-// case of one active thinking block and never regresses (a miss recomputes
-// exactly as before).
-let proseCacheKey = "";
-let proseCacheValue = "";
-let rawCacheKey = "";
-let rawCacheValue = "";
+/** Removes trailing partial separator syntax while a thinking block streams. */
+export function removeIncompleteThinkingCommentSuffix(text: string): string {
+	return removeThinkingCommentSeparators(text, true);
+}
+
+function removeThinkingCommentSeparators(text: string, removeIncompleteSuffix: boolean): string {
+	let display: string | undefined;
+	let copiedThrough = 0;
+	let inFence = false;
+	let fenceMarker = 0;
+	let fenceLength = 0;
+	let lineStart = 0;
+
+	for (let index = 0; index < text.length; index++) {
+		if (index === lineStart) {
+			let markerStart = index;
+			while (markerStart - index < 4 && text.charCodeAt(markerStart) === 0x20) markerStart += 1;
+			const marker = text.charCodeAt(markerStart);
+			if (marker === 0x60 || marker === 0x7e) {
+				let markerEnd = markerStart;
+				while (text.charCodeAt(markerEnd) === marker) markerEnd += 1;
+				const markerLength = markerEnd - markerStart;
+				const closesFence =
+					inFence && marker === fenceMarker && markerLength >= fenceLength && isFenceCloser(text, markerEnd);
+				if (markerLength >= 3 && (!inFence || closesFence)) {
+					if (inFence) {
+						inFence = false;
+					} else {
+						inFence = true;
+						fenceMarker = marker;
+						fenceLength = markerLength;
+					}
+				}
+			}
+		}
+
+		if (
+			!inFence &&
+			text.charCodeAt(index) === 0x3c &&
+			text.charCodeAt(index + 1) === 0x21 &&
+			text.charCodeAt(index + 2) === 0x2d &&
+			text.charCodeAt(index + 3) === 0x2d
+		) {
+			let commentEnd = index + 4;
+			while (isHtmlWhitespace(text.charCodeAt(commentEnd))) {
+				if (text.charCodeAt(commentEnd) === 0x0a) lineStart = commentEnd + 1;
+				commentEnd += 1;
+			}
+			const isComplete =
+				text.charCodeAt(commentEnd) === 0x2d &&
+				text.charCodeAt(commentEnd + 1) === 0x2d &&
+				text.charCodeAt(commentEnd + 2) === 0x3e;
+			if (isComplete || (removeIncompleteSuffix && commentEnd === text.length)) {
+				if (display === undefined) {
+					display = text.slice(0, index);
+				} else {
+					display += text.slice(copiedThrough, index);
+				}
+				const separatorEnd = isComplete ? commentEnd + 3 : commentEnd;
+				copiedThrough = separatorEnd;
+				index = separatorEnd - 1;
+				continue;
+			}
+		}
+
+		if (text.charCodeAt(index) === 0x0a) lineStart = index + 1;
+	}
+
+	return display === undefined ? text : display + text.slice(copiedThrough);
+}
+
+function isFenceCloser(text: string, index: number): boolean {
+	for (let cursor = index; cursor < text.length && text.charCodeAt(cursor) !== 0x0a; cursor++) {
+		const code = text.charCodeAt(cursor);
+		if (code !== 0x09 && code !== 0x0d && code !== 0x20) return false;
+	}
+	return true;
+}
+
+function isHtmlWhitespace(code: number): boolean {
+	return (
+		code === 0x09 ||
+		code === 0x0a ||
+		code === 0x0b ||
+		code === 0x0c ||
+		code === 0x0d ||
+		code === 0x20 ||
+		code === 0xa0 ||
+		code === 0x1680 ||
+		(code >= 0x2000 && code <= 0x200a) ||
+		code === 0x2028 ||
+		code === 0x2029 ||
+		code === 0x202f ||
+		code === 0x205f ||
+		code === 0x3000 ||
+		code === 0xfeff
+	);
+}
+
+/** Normalizes thinking for display without changing the persisted source. */
+export function normalizeThinkingDisplay(text: string | null | undefined): string {
+	if (!text) return "";
+	return canonicalizeMessage(removeEmptyThinkingCommentSeparators(text));
+}
 
 export function canonicalizeMessage(text: string | null | undefined): string {
 	if (!text) return "";
@@ -22,142 +118,4 @@ export function canonicalizeMessage(text: string | null | undefined): string {
 		}
 	}
 	return "";
-}
-
-// gpt-5.x reasoning summaries pad every summary part with an empty HTML
-// comment (`**Headline**\n\n<!-- -->`), streamed as a `<!--` delta followed by
-// ` -->`. Comments with actual content are left untouched.
-const EMPTY_COMMENT_RE = /^<!--\s*-->$/;
-const OPEN_COMMENT_RE = /^<!--\s*$/;
-
-/**
- * Whether `line` is reasoning-summary comment noise: an empty HTML comment,
- * or its still-unterminated `<!--` prefix on the last line while streaming.
- */
-function isCommentNoise(line: string, isLastLine: boolean): boolean {
-	const trimmed = line.trim();
-	return EMPTY_COMMENT_RE.test(trimmed) || (isLastLine && OPEN_COMMENT_RE.test(trimmed));
-}
-
-/**
- * Thinking text prepared for display. Both modes drop empty `<!-- -->`
- * sentinel lines outside code fences (see {@link isCommentNoise}); prose-only
- * mode additionally elides fenced code down to a trailing ellipsis.
- */
-export function formatThinkingForDisplay(text: string, proseOnly: boolean): string {
-	if (!text) return text;
-	const hasComment = text.includes("<!--");
-	if (proseOnly) {
-		if (text === proseCacheKey) return proseCacheValue;
-	} else {
-		if (!hasComment) return text;
-		if (text === rawCacheKey) return rawCacheValue;
-	}
-
-	const lines = text.split("\n");
-	const resultLines: string[] = [];
-	let inFence = false;
-	let fenceChar = "";
-	let fenceLen = 0;
-
-	const FENCE = /^( {0,3})([`~]{3,})/;
-	const appendEllipsis = () => {
-		let lastLineIdx = resultLines.length - 1;
-		while (lastLineIdx >= 0 && resultLines[lastLineIdx]!.trim() === "") {
-			lastLineIdx--;
-		}
-
-		if (lastLineIdx >= 0) {
-			const lastLine = resultLines[lastLineIdx]!;
-			const trimmed = lastLine.trimEnd();
-			if (trimmed.endsWith("...")) {
-				resultLines[lastLineIdx] = trimmed;
-			} else if (trimmed.endsWith(".")) {
-				resultLines[lastLineIdx] = `${trimmed.slice(0, -1)}...`;
-			} else {
-				resultLines[lastLineIdx] = `${trimmed}...`;
-			}
-		} else {
-			resultLines.push("...");
-		}
-	};
-
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i]!;
-
-		if (inFence) {
-			const close = FENCE.exec(line);
-			// A closing fence is the same char, at least as long, with nothing else on the line.
-			if (
-				close &&
-				close[2]![0] === fenceChar &&
-				close[2]!.length >= fenceLen &&
-				line.slice(close[1]!.length + close[2]!.length).trim() === ""
-			) {
-				inFence = false;
-				fenceChar = "";
-				fenceLen = 0;
-			}
-			// Prose mode skips all fence lines; raw mode keeps them verbatim
-			// (comment markers inside fences are code, not noise).
-			if (!proseOnly) resultLines.push(line);
-			continue;
-		}
-
-		// Drop the whole line so `**Headline**\n\n<!-- -->` leaves no blank tail.
-		if (hasComment && isCommentNoise(line, i === lines.length - 1)) continue;
-
-		const open = FENCE.exec(line);
-		if (open) {
-			const marker = open[2]!;
-			const ch = marker[0]!;
-			// A backtick fence's info string may not contain a backtick.
-			if (!(ch === "`" && line.slice(open[1]!.length + marker.length).includes("`"))) {
-				inFence = true;
-				fenceChar = ch;
-				fenceLen = marker.length;
-				if (proseOnly) {
-					appendEllipsis();
-				} else {
-					resultLines.push(line);
-				}
-				continue;
-			}
-		}
-		resultLines.push(line);
-	}
-
-	const formatted = resultLines.join("\n");
-	if (proseOnly) {
-		proseCacheKey = text;
-		proseCacheValue = formatted;
-	} else {
-		rawCacheKey = text;
-		rawCacheValue = formatted;
-	}
-	return formatted;
-}
-
-/** Whether a formatted thinking block has non-placeholder content worth rendering. */
-export function hasDisplayableThinking(
-	text: string | null | undefined,
-	formattedText: string | null | undefined,
-): boolean {
-	if (!text || !formattedText) return false;
-	// Visibility keys off the formatted text: a block whose raw text is only
-	// comment noise (`<!-- -->\n`) formats to whitespace and stays hidden. The
-	// raw canonicalize check still hides dot/ellipsis-only placeholder blocks.
-	return formattedText.trim().length > 0 && canonicalizeMessage(text).length > 0;
-}
-
-/** Whether an assistant message contains thinking content the TUI can reveal. */
-export function messageHasDisplayableThinking(message: AgentMessage, proseOnly: boolean): boolean {
-	if (message.role !== "assistant") return false;
-	for (const content of message.content) {
-		if (content.type !== "thinking") continue;
-		if (hasDisplayableThinking(content.thinking, formatThinkingForDisplay(content.thinking, proseOnly))) {
-			return true;
-		}
-	}
-	return false;
 }

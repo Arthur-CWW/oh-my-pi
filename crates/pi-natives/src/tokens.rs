@@ -17,7 +17,6 @@ use std::sync::LazyLock;
 
 use napi::bindgen_prelude::Either;
 use napi_derive::napi;
-use pi_uutils_ctx::rayon_global_pool_available;
 use rayon::prelude::*;
 use tiktoken_rs::{CoreBPE, cl100k_base, o200k_base};
 
@@ -46,9 +45,9 @@ fn encoder(encoding: Option<Encoding>) -> &'static CoreBPE {
 /// Count tokens in `input`.
 ///
 /// `input` may be a single string or an array of strings; an array returns
-/// the sum across all elements (encoded in parallel via rayon when the global
-/// pool is available). Always returns a single token total — use this for any
-/// aggregate budget question without paying a per-element napi crossing.
+/// the sum across all elements (encoded in parallel via rayon). Always
+/// returns a single token total — use this for any aggregate budget question
+/// without paying a per-element napi crossing.
 ///
 /// Uses ordinary encoding (no special-token handling), which is the right
 /// choice for measuring user/model content rather than wire-protocol tokens.
@@ -58,12 +57,8 @@ pub fn count_tokens(input: Either<String, Vec<String>>, encoding: Option<Encodin
 	let bpe = encoder(encoding);
 	match input {
 		Either::A(text) => bpe.encode_ordinary(&text).len() as u32,
-		Either::B(texts) if rayon_global_pool_available() => texts
-			.par_iter()
-			.map(|s| bpe.encode_ordinary(s).len() as u32)
-			.sum(),
 		Either::B(texts) => texts
-			.iter()
+			.par_iter()
 			.map(|s| bpe.encode_ordinary(s).len() as u32)
 			.sum(),
 	}

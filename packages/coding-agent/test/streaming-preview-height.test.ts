@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -9,7 +9,6 @@ import { ToolExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/componen
 import { theme as activeTheme, initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { previewWindowRows } from "@oh-my-pi/pi-coding-agent/tools/render-utils";
 import { TUI, visibleWidth } from "@oh-my-pi/pi-tui";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal";
 
 // The streaming edit preview is a fixed-height tail window ("cursor"): the last
@@ -38,24 +37,6 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 	let file: string;
 	let themed = false;
 
-	// The streaming edit window is sized as min(EDIT_STREAMING_PREVIEW_LINES,
-	// previewWindowRows()), and previewWindowRows() reads process.stdout.rows.
-	// Pin a tall, stable viewport so the "full window of real diff" height
-	// assertions don't shrink (and flake) under a short ambient terminal when the
-	// file runs inside the full suite. Restored in afterAll.
-	let originalRowsDescriptor: PropertyDescriptor | undefined;
-	beforeAll(() => {
-		originalRowsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "rows");
-		Object.defineProperty(process.stdout, "rows", { value: 50, configurable: true });
-	});
-	afterAll(() => {
-		if (originalRowsDescriptor) {
-			Object.defineProperty(process.stdout, "rows", originalRowsDescriptor);
-		} else {
-			delete (process.stdout as { rows?: number }).rows;
-		}
-	});
-
 	beforeEach(async () => {
 		if (!themed) {
 			await initTheme();
@@ -70,7 +51,7 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 
 	afterEach(async () => {
 		resetSettingsForTest();
-		await removeWithRetries(tmpDir);
+		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
 	// Char-by-char partials of the new function body.
@@ -273,6 +254,13 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 			"+  return finalValue;",
 			" }",
 		].join("\n");
+		const finalBlock = [
+			"function foo() {",
+			"  const x = 1;",
+			`  const finalValue = "${finalSentinel}";`,
+			"  return finalValue;",
+			"}",
+		].join("\n");
 		const { component, term, tui, scheduler } = makeTuiComponent();
 
 		try {
@@ -297,6 +285,7 @@ describe("streaming edit preview height (stable, full tail window)", () => {
 					}
 				}),
 				() => {
+					component.updateArgs({ path: file, edits: [{ old_text: oldBlock, new_text: finalBlock }] });
 					component.setArgsComplete();
 				},
 				() => {
@@ -401,24 +390,15 @@ describe("streaming tool call preview height (bounded across renderers)", () => 
 		}
 	}
 
-	function getRenderedLines(lines: readonly string[]): string[] {
-		return lines
-			.map(line => Bun.stripANSI(line).trim())
-			.filter(line => line.startsWith("│") && line.endsWith("│"))
-			.map(line => line.slice(1, -1).trim())
-			.filter(line => line !== "" && !line.includes("earlier lines"));
-	}
-
-	test("framed inline tool previews span the full tool width", () => {
+	test("inline tool previews render unframed across the full tool width", () => {
 		const width = 80;
-		const { lines } = renderPending("bash", { command: "echo hi" });
+		const { lines, text } = renderPending("bash", { command: "echo hi" });
 		const strippedLines = lines.map(line => Bun.stripANSI(line));
-		const topBorder = strippedLines.find(line => line.includes(activeTheme.boxRound.topLeft));
-
-		expect(topBorder).toBeDefined();
-		expect(topBorder?.[0]).toBe(activeTheme.boxRound.topLeft);
-		expect(topBorder?.endsWith(activeTheme.boxRound.topRight)).toBe(true);
-		expect(visibleWidth(topBorder ?? "")).toBe(width);
+		// No frame rule caps the preview; the unframed block still spans the width.
+		expect(strippedLines.some(line => visibleWidth(line) === width)).toBe(true);
+		expect(strippedLines.every(line => visibleWidth(line) <= width)).toBe(true);
+		expect(strippedLines.some(line => line.startsWith(activeTheme.boxSharp.horizontal))).toBe(false);
+		expect(text).toContain("echo hi");
 	});
 
 	test("bash/ssh pending previews stay short even with very long multiline args", () => {
@@ -441,11 +421,11 @@ describe("streaming tool call preview height (bounded across renderers)", () => 
 		for (const testCase of cases) {
 			const { lines, text } = renderPending(testCase.name, testCase.args);
 			expect(lines.length, `${testCase.name} preview should stay bounded`).toBeLessThan(window + 10);
-			const renderedLines = getRenderedLines(lines);
-			expect(renderedLines, `${testCase.name} preview should keep ${firstVisible}`).toContain(firstVisible);
-			expect(renderedLines, `${testCase.name} preview should keep ${lastVisible}`).toContain(lastVisible);
-			expect(renderedLines, `${testCase.name} preview should elide line-0`).not.toContain("line-0");
-			expect(renderedLines, `${testCase.name} preview should elide ${lastHidden}`).not.toContain(lastHidden);
+			for (const needle of [firstVisible, lastVisible]) {
+				expect(text, `${testCase.name} preview should keep ${needle}`).toContain(needle);
+			}
+			expect(text, `${testCase.name} preview should elide line-0`).not.toContain("line-0");
+			expect(text, `${testCase.name} preview should elide ${lastHidden}`).not.toContain(lastHidden);
 			expect(text, `${testCase.name} preview should advertise the elided head`).toContain(
 				`… ${hidden} earlier lines`,
 			);
@@ -462,17 +442,14 @@ describe("streaming tool call preview height (bounded across renderers)", () => 
 		const hidden = total - window;
 		const longLines = Array.from({ length: total }, (_, i) => `line-${i}`);
 		const { lines, text } = renderPending("eval", {
-			language: "js",
-			title: "big",
-			code: longLines.map(line => `const ${line} = 1;`).join("\n"),
+			cells: [{ language: "js", title: "big", code: longLines.map(line => `const ${line} = 1;`).join("\n") }],
 		});
 
 		expect(lines.length, "eval code preview should stay bounded").toBeLessThan(window + 10);
-		const renderedLines = getRenderedLines(lines);
-		expect(renderedLines).toContain(`const line-${total - 1} = 1;`);
-		expect(renderedLines).toContain(`const line-${hidden} = 1;`);
-		expect(renderedLines).not.toContain("const line-0 = 1;");
-		expect(renderedLines).not.toContain(`const line-${hidden - 1} = 1;`);
+		expect(text).toContain(`const line-${total - 1} = 1;`);
+		expect(text).toContain(`const line-${hidden} = 1;`);
+		expect(text).not.toContain("const line-0 = 1;");
+		expect(text).not.toContain(`const line-${hidden - 1} = 1;`);
 		expect(text).toContain(`… ${hidden} earlier lines`);
 	}, 30_000);
 });

@@ -11,27 +11,30 @@
 
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type { ToolExample } from "@oh-my-pi/pi-ai";
-import { type Component, Text } from "@oh-my-pi/pi-tui";
-import { formatAge, formatDuration, prompt } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import type { Component } from "@oh-my-pi/pi-tui";
+import { formatDuration, prompt } from "@oh-my-pi/pi-utils";
+import { z } from "zod/v4";
 import type { Settings } from "../config/settings";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
-import { IrcBus, type IrcDeliveryReceipt, type IrcMessage } from "../irc/bus";
-import type { Theme } from "../modes/theme/theme";
-import ircDescription from "../prompts/tools/irc.md" with { type: "text" };
-import { type AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
-import { canSpawnAtDepth } from "../task/types";
-import { Ellipsis, renderStatusLine, renderTreeList, truncateToWidth } from "../tui";
-import type { ToolSession } from ".";
+import { IrcBus, type IrcDeliveryReceipt, type IrcDeliveryRecord, type IrcMessage } from "../irc/bus";
 import {
-	createCachedComponent,
-	formatBadge,
-	formatErrorDetail,
-	getPreviewLines,
-	PREVIEW_LIMITS,
-	replaceTabs,
-	type ToolUIColor,
-} from "./render-utils";
+	getIrcExternalPeerDisplayState,
+	IrcExternalBus,
+	IrcExternalDeliveryError,
+	resolveIrcExternalPeerName,
+} from "../irc/bus-external";
+import { renderTranscriptBodyLines } from "../modes/components/transcript-body";
+import type { Theme } from "../modes/theme/theme";
+import { type TranscriptDisplayContext, transcriptDisplayCacheVersion } from "../modes/transcript-display";
+import ircDescription from "../prompts/tools/irc.md" with { type: "text" };
+import type { AgentRegistry } from "../registry/agent-registry";
+import { createFleetCapability } from "../session/fleet-capability";
+import { CURRENT_SESSION_CONTROL_PROTOCOL } from "../session/session-control";
+import { canSpawnAtDepth } from "../task/types";
+import { Ellipsis, renderStatusLine, truncateToWidth } from "../tui";
+import type { ToolSession } from ".";
+import { buildIrcCallLines, buildIrcResultLines, type IrcRenderArgs, ircGlyph, messageAge } from "./irc-renderer";
+import { createCachedComponent } from "./render-utils";
 
 const DEFAULT_IRC_TIMEOUT_MS = 120_000;
 
@@ -49,18 +52,29 @@ export function isIrcEnabled(settings: Settings, taskDepth: number): boolean {
 	return canSpawnAtDepth(maxDepth, taskDepth);
 }
 
-const ircSchema = type({
-	op: type("'send' | 'wait' | 'inbox' | 'list'").describe("irc operation"),
-	"to?": type("string").describe('send: recipient agent id or "all"'),
-	"message?": type("string").describe("send: message body"),
-	"replyTo?": type("string").describe("send: message id being answered"),
-	"await?": type("boolean").describe('send: wait for the recipient\'s reply (invalid with to:"all")'),
-	"from?": type("string").describe("wait: only accept a message from this agent id"),
-	"timeoutMs?": type("number").describe("wait: timeout in milliseconds (0 waits indefinitely)"),
-	"peek?": type("boolean").describe("inbox: list messages without consuming them"),
+const ircSchema = z.object({
+	op: z.enum(["send", "wait", "inbox", "list"]).describe("irc operation"),
+	to: z
+		.string()
+		.optional()
+		.describe(
+			'send: exact recipient agent id; "all" is only a short coordination or ownership question to live peers',
+		),
+	message: z
+		.string()
+		.optional()
+		.describe(
+			"send: short intent plus a file reference, never pasted content; max 1200 chars for DMs or 400 for broadcasts. If refused, write the content to local://, artifact://, or history:// and send that path.",
+		),
+	replyTo: z.string().optional().describe("send: message id being answered"),
+	await: z.boolean().optional().describe('send: wait for the recipient\'s reply (invalid with to:"all")'),
+	from: z.string().optional().describe("wait: only accept a message from this agent id"),
+	timeoutMs: z.number().optional().describe("wait: timeout in milliseconds (0 waits indefinitely)"),
+	peek: z.boolean().optional().describe("inbox: list messages without consuming them"),
+	includeParked: z.boolean().optional().describe("list: include parked historical children (default false)"),
 });
 
-type IrcParams = typeof ircSchema.infer;
+type IrcParams = z.infer<typeof ircSchema>;
 
 interface IrcPeerInfo {
 	id: string;
@@ -71,6 +85,11 @@ interface IrcPeerInfo {
 	unread: number;
 	lastActivity: number;
 	activity?: string;
+	cwd?: string;
+	external?: boolean;
+	pendingDeliveries?: number;
+	undeliveredDeliveries?: number;
+	lastDelivery?: IrcDeliveryRecord;
 }
 
 export interface IrcDetails {
@@ -97,9 +116,8 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 	readonly description: string;
 	readonly parameters = ircSchema;
 	readonly strict = true;
-	readonly interruptible = true;
 
-	readonly examples: readonly ToolExample<typeof ircSchema.infer>[] = [
+	readonly examples: readonly ToolExample<z.input<typeof ircSchema>>[] = [
 		{
 			caption: "List peers",
 			call: { op: "list" },
@@ -139,7 +157,10 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 		},
 	];
 	readonly loadMode = "discoverable";
-	constructor(private readonly session: ToolSession) {
+	constructor(
+		private readonly session: ToolSession,
+		private readonly externalBus?: IrcExternalBus | null,
+	) {
 		this.description = prompt.render(ircDescription);
 	}
 
@@ -167,23 +188,23 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 
 		switch (params.op) {
 			case "list":
-				return this.#executeList(registry, senderId);
+				return this.#executeList(registry, senderId, params.includeParked ?? false);
 			case "send":
 				return this.#executeSend(registry, senderId, params, signal);
 			case "wait":
-				return this.#executeWait(registry, senderId, params, signal);
+				return this.#executeWait(senderId, params, signal);
 			case "inbox":
-				return this.#executeInbox(registry, senderId, params);
+				return this.#executeInbox(senderId, params);
 			default:
 				return errorResult("Unknown irc op.", { op: params.op });
 		}
 	}
 
-	#executeList(registry: AgentRegistry, senderId: string): AgentToolResult<IrcDetails> {
+	#executeList(registry: AgentRegistry, senderId: string, includeParked: boolean): AgentToolResult<IrcDetails> {
 		const bus = IrcBus.global();
-		const peers = registry
+		const localPeers: IrcPeerInfo[] = registry
 			.list()
-			.filter(ref => ref.id !== senderId && ref.status !== "aborted" && ref.kind !== "advisor")
+			.filter(ref => ref.id !== senderId && ref.status !== "aborted")
 			.map(ref => ({
 				id: ref.id,
 				displayName: ref.displayName,
@@ -191,22 +212,67 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 				status: ref.status,
 				parentId: ref.parentId,
 				unread: bus.unreadCount(ref.id),
+				pendingDeliveries: bus.peerDeliverySummary(ref.id).pendingCount,
+				undeliveredDeliveries: bus.peerDeliverySummary(ref.id).undeliveredCount,
+				lastDelivery: bus.peerDeliverySummary(ref.id).lastMessage,
 				lastActivity: ref.lastActivity,
 				activity: ref.activity,
 			}));
+		const external = this.#registerExternalPeer();
+		const externalPeers: IrcPeerInfo[] = external
+			? external.bus.listPeers({ excludeSessionId: external.sessionId }).map(peer => ({
+					id: peer.name,
+					displayName: "[external]",
+					kind: "external",
+					status: getIrcExternalPeerDisplayState(peer),
+					unread: external.bus.unreadCount(peer.name),
+					lastActivity: Date.parse(peer.lastSeen) || Date.now(),
+					cwd: peer.cwd,
+					external: true,
+					lastDelivery: external.bus.recentDeliveries({ peerId: peer.name, limit: 1 })[0],
+				}))
+			: [];
+		const omittedParked = includeParked ? 0 : localPeers.filter(peer => peer.status === "parked").length;
+		const visibleLocalPeers = includeParked
+			? localPeers
+			: localPeers.filter(
+					peer =>
+						peer.status !== "parked" ||
+						peer.unread > 0 ||
+						(peer.pendingDeliveries ?? 0) > 0 ||
+						(peer.undeliveredDeliveries ?? 0) > 0,
+				);
+		const peers = [...visibleLocalPeers, ...externalPeers];
 		const lines: string[] = [];
 		if (peers.length === 0) {
 			lines.push("No other agents.");
 		} else {
 			lines.push(`${peers.length} peer(s):`);
 			for (const peer of peers) {
+				if (peer.external) {
+					const extras = [
+						peer.cwd ? `cwd ${peer.cwd}` : undefined,
+						peer.unread > 0 ? `unread ${peer.unread}` : undefined,
+						`active ${formatDuration(Date.now() - peer.lastActivity)} ago`,
+					].filter(Boolean);
+					lines.push(`- ${peer.id} [external, ${peer.status}] — ${extras.join(", ")}`);
+					continue;
+				}
 				const extras = [
 					peer.activity || undefined,
 					peer.unread > 0 ? `unread ${peer.unread}` : undefined,
+					peer.pendingDeliveries ? `pending ${peer.pendingDeliveries}` : undefined,
+					peer.undeliveredDeliveries ? `undelivered ${peer.undeliveredDeliveries}` : undefined,
+					peer.lastDelivery ? `last message ${peer.lastDelivery.state}` : undefined,
 					peer.parentId ? `parent ${peer.parentId}` : undefined,
 					`active ${formatDuration(Date.now() - peer.lastActivity)} ago`,
 				].filter(Boolean);
 				lines.push(`- ${peer.id} [${peer.displayName} · ${peer.kind} · ${peer.status}] — ${extras.join(", ")}`);
+			}
+			if (omittedParked > 0) {
+				lines.push(
+					`- ${omittedParked} parked historical child${omittedParked === 1 ? "" : "ren"} omitted; use includeParked:true or an exact history://<id>.`,
+				);
 			}
 			if (peers.some(peer => peer.status === "parked")) {
 				lines.push("");
@@ -245,6 +311,46 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 			});
 		}
 
+		const external = this.#registerExternalPeer();
+		if (external?.name === to) {
+			return errorResult("Cannot send an IRC message to yourself.", { op: "send", from: senderId, to });
+		}
+		const localTarget = !isBroadcast ? registry.get(to) : undefined;
+		const externalTarget =
+			!isBroadcast && (!localTarget || localTarget.session === null) && external
+				? external.bus.findPeerByName(to, { excludeSessionId: external.sessionId })
+				: undefined;
+		if (external && externalTarget) {
+			if (params.await) {
+				return errorResult("`await:true` is in-process-only; external peers receive fire-and-forget messages.", {
+					op: "send",
+					from: senderId,
+					to,
+				});
+			}
+			try {
+				external.bus.sendMessage({ fromPeer: external.name, toPeer: externalTarget.name, body: message });
+			} catch (error) {
+				if (!(error instanceof IrcExternalDeliveryError)) throw error;
+				const receipt = error.receipt;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `No recipients received the message.\n- ${receipt.to}: failed — ${receipt.error ?? "unknown error"}`,
+						},
+					],
+					details: { op: "send", from: senderId, to, receipts: [receipt] },
+					isError: true,
+				};
+			}
+			const receipts: IrcDeliveryReceipt[] = [{ to: externalTarget.name, outcome: "injected" }];
+			return {
+				content: [{ type: "text", text: `Delivered to 1 peer(s):\n- ${externalTarget.name}: injected` }],
+				details: { op: "send", from: senderId, to, receipts },
+			};
+		}
+
 		const bus = IrcBus.global();
 		let waited: IrcMessage | null | undefined;
 		const timeoutMs = params.await ? this.#resolveTimeoutMs(params) : undefined;
@@ -281,10 +387,10 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 			// parked agent on a broadcast would be a stampede. Direct sends go
 			// through the bus unfiltered so parked recipients are revived.
 			const targets = isBroadcast ? registry.listVisibleTo(senderId).map(ref => ref.id) : [to];
-			// A broadcast that also reaches the main agent delivers the body to it
-			// directly (its own incoming card); relaying the sibling legs to the
-			// main UI would then show the same body once per other recipient.
-			const suppressRelay = isBroadcast && targets.includes(MAIN_AGENT_ID);
+			const deliveryOptions = {
+				broadcast: isBroadcast,
+				...(params.await ? { expectsReply: true } : {}),
+			};
 			const receipts = await Promise.all(
 				targets.map(target =>
 					bus.send(
@@ -292,7 +398,7 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 						// Awaited sends mark the sender as blocked on an answer so a
 						// busy recipient that cannot reach a step boundary (async
 						// disabled) auto-replies instead of stranding the sender.
-						{ expectsReply: params.await || undefined, suppressRelay: suppressRelay || undefined },
+						deliveryOptions,
 					),
 				),
 			);
@@ -318,30 +424,16 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 				lines.push("");
 				if (delivered.length > 0) {
 					const reply = await waiting;
-					if (reply.error) {
-						// The send already succeeded; if the wait was interrupted by our
-						// caller signal (steering / IRC), preserve the delivery receipt so
-						// the agent loop keeps this tool as "sent" instead of marking it
-						// skipped, which would prompt a duplicate resend on the next turn.
-						if (signal?.aborted) {
-							lines.push(
-								`Send delivered but the reply wait was interrupted before ${to} answered. ` +
-									"Check `inbox` or `wait` again after handling the interrupt.",
-							);
-						} else {
-							throw reply.error;
-						}
+					if (reply.error) throw reply.error;
+					waited = reply.message;
+					if (waited) {
+						lines.push(`Reply from ${waited.from}:`);
+						lines.push(waited.body);
 					} else {
-						waited = reply.message;
-						if (waited) {
-							lines.push(`Reply from ${waited.from}:`);
-							lines.push(waited.body);
-						} else {
-							lines.push(
-								`No reply from ${to} within ${formatDuration(timeoutMs)}. ` +
-									"They may answer later — check `inbox` or `wait` again.",
-							);
-						}
+						lines.push(
+							`No reply from ${to} within ${formatDuration(timeoutMs)}. ` +
+								"They may answer later — check `inbox` or `wait` again.",
+						);
 					}
 				} else {
 					awaitAbort?.abort(awaitCancelled);
@@ -367,24 +459,8 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 		}
 	}
 
-	async #executeWait(
-		registry: AgentRegistry,
-		senderId: string,
-		params: IrcParams,
-		signal?: AbortSignal,
-	): Promise<AgentToolResult<IrcDetails>> {
+	async #executeWait(senderId: string, params: IrcParams, signal?: AbortSignal): Promise<AgentToolResult<IrcDetails>> {
 		const from = params.from?.trim() || undefined;
-		const session = registry.get(senderId)?.session;
-		const pending =
-			typeof session?.drainPendingIrcInboxMessages === "function"
-				? session.drainPendingIrcInboxMessages(senderId, { from, limit: 1 })[0]
-				: undefined;
-		if (pending) {
-			return {
-				content: [{ type: "text", text: formatIncoming(pending) }],
-				details: { op: "wait", from: senderId, waited: pending },
-			};
-		}
 		const timeoutMs = this.#resolveTimeoutMs(params);
 		const waited = await IrcBus.global().wait(senderId, { from }, timeoutMs, signal);
 		if (!waited) {
@@ -402,14 +478,20 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 		};
 	}
 
-	#executeInbox(registry: AgentRegistry, senderId: string, params: IrcParams): AgentToolResult<IrcDetails> {
-		const busMessages = IrcBus.global().inbox(senderId, { peek: params.peek });
-		const session = registry.get(senderId)?.session;
-		const pendingMessages =
-			typeof session?.drainPendingIrcInboxMessages === "function"
-				? session.drainPendingIrcInboxMessages(senderId)
-				: [];
-		const messages = [...busMessages, ...pendingMessages].sort((a, b) => a.ts - b.ts);
+	#executeInbox(senderId: string, params: IrcParams): AgentToolResult<IrcDetails> {
+		const localMessages = IrcBus.global().inbox(senderId, { peek: params.peek });
+		const external = this.#registerExternalPeer();
+		const externalMessages: IrcMessage[] = external
+			? external.bus.drainMessages(external.name, { peek: params.peek }).map(message => ({
+					id: `external:${message.id}`,
+					from: message.fromPeer,
+					to: senderId,
+					body: message.body,
+					ts: Date.parse(message.ts) || Date.now(),
+					origin: message.origin,
+				}))
+			: [];
+		const messages = [...localMessages, ...externalMessages];
 		if (messages.length === 0) {
 			return {
 				content: [{ type: "text", text: "Inbox empty." }],
@@ -424,6 +506,45 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 			content: [{ type: "text", text: lines.join("\n") }],
 			details: { op: "inbox", from: senderId, inbox: messages },
 		};
+	}
+
+	#registerExternalPeer(): { bus: IrcExternalBus; sessionId: string; name: string } | null {
+		if (this.externalBus === null) return null;
+		const senderId = this.session.getAgentId?.() ?? undefined;
+		const ownership = this.session.sessionManager?.getSessionOwnership();
+		const isSubprocessWorker = process.env.OMP_SUBPROCESS_WORKER === "1" && senderId !== undefined;
+		const sessionId = isSubprocessWorker
+			? senderId
+			: (ownership?.sessionId ?? this.session.getSessionId?.() ?? `${this.session.cwd}:${process.pid}`);
+		const bus = this.externalBus ?? IrcExternalBus.global();
+		const name = isSubprocessWorker
+			? senderId
+			: resolveIrcExternalPeerName({
+					configuredName: this.session.settings.get("irc.peerName"),
+					cwd: this.session.cwd,
+					sessionId,
+				});
+		bus.registerPeer({
+			sessionId,
+			name,
+			cwd: this.session.cwd,
+			pid: process.pid,
+			explicitName: Boolean(this.session.settings.get("irc.peerName")?.trim()),
+			sessionFile: this.session.getSessionFile() ?? undefined,
+			ownerEpoch: ownership?.ownerEpoch,
+			buildDigest: ownership?.buildRevision.digest,
+			version: ownership?.buildRevision.version,
+			fleetCapability:
+				ownership === undefined
+					? undefined
+					: createFleetCapability({
+							buildDigest: ownership.buildRevision.digest,
+							productVersion: ownership.buildRevision.version,
+							controlProtocol: CURRENT_SESSION_CONTROL_PROTOCOL,
+							workstream: this.session.sessionManager?.getWorkstream(),
+						}),
+		});
+		return { bus, sessionId, name };
 	}
 
 	#resolveTimeoutMs(params: IrcParams): number {
@@ -454,119 +575,6 @@ function normalizeIrcTimeoutMs(value: number): number {
 // TUI Renderer
 // =============================================================================
 
-type IrcRenderArgs = Partial<IrcParams>;
-
-const BODY_LINES_COLLAPSED = 2;
-const BODY_LINES_EXPANDED = 12;
-const BODY_LINE_WIDTH = 100;
-
-const PEER_STATUS_ORDER: Record<string, number> = { running: 0, idle: 1, parked: 2 };
-
-function ircGlyph(theme: Theme): string {
-	return theme.styledSymbol("tool.irc", "accent");
-}
-
-function outcomeColor(outcome: IrcDeliveryReceipt["outcome"]): ToolUIColor {
-	switch (outcome) {
-		case "woken":
-			return "success";
-		case "revived":
-			return "warning";
-		case "injected":
-			return "accent";
-		case "failed":
-			return "error";
-	}
-}
-
-/** Glyph + status word, matching the agent-hub status conventions. */
-function peerStatusBadge(status: string, theme: Theme): string {
-	switch (status) {
-		case "running":
-			return theme.fg("accent", `${theme.status.running} running`);
-		case "idle":
-			return theme.fg("success", `${theme.status.enabled} idle`);
-		case "parked":
-			return theme.fg("muted", `${theme.status.shadowed} parked`);
-		default:
-			return theme.fg("error", `${theme.status.aborted} ${status}`);
-	}
-}
-
-function messageAge(ts: number | undefined): string {
-	if (!ts) return "";
-	return formatAge(Math.max(1, Math.round((Date.now() - ts) / 1000)));
-}
-
-function textContent(result: { content: Array<{ type: string; text?: string }> }): string {
-	return result.content.find(part => part.type === "text")?.text?.trim() ?? "";
-}
-
-/**
- * Quote-bordered message body preview. `tone` separates outbound text (dim)
- * from received text (toolOutput); a trailing dim counter marks elided lines.
- */
-function bodyLines(
-	body: string,
-	expanded: boolean,
-	theme: Theme,
-	options: { indent?: string; tone?: "dim" | "toolOutput"; collapsedLines?: number } = {},
-): string[] {
-	const indent = options.indent ?? "";
-	const tone = options.tone ?? "toolOutput";
-	const max = expanded ? BODY_LINES_EXPANDED : (options.collapsedLines ?? BODY_LINES_COLLAPSED);
-	const total = body.split("\n").filter(line => line.trim()).length;
-	const quote = theme.fg("dim", theme.md.quoteBorder);
-	const lines = getPreviewLines(body, max, BODY_LINE_WIDTH, Ellipsis.Unicode).map(
-		line => `${indent}${quote} ${theme.fg(tone, replaceTabs(line))}`,
-	);
-	const hidden = total - Math.min(total, max);
-	if (hidden > 0) {
-		lines.push(`${indent}${quote} ${theme.fg("dim", `… +${hidden} more ${hidden === 1 ? "line" : "lines"}`)}`);
-	}
-	return lines;
-}
-
-/** Header title carrying the op direction: `IRC ➤ peer` out, `IRC ⟵ peer` in. */
-function callTitle(args: IrcRenderArgs | undefined, theme: Theme): string {
-	switch (args?.op) {
-		case "send":
-			return `IRC ${theme.nav.selected} ${args.to?.trim() || "…"}`;
-		case "wait":
-			return `IRC ${theme.nav.back} ${args.from?.trim() || "anyone"}`;
-		case "inbox":
-			return "IRC inbox";
-		case "list":
-			return "IRC peers";
-		default:
-			return "IRC";
-	}
-}
-
-function callMeta(args: IrcRenderArgs | undefined): string[] {
-	const meta: string[] = [];
-	if (args?.op === "send") {
-		if (args.to === "all") meta.push("broadcast");
-		if (args.await) meta.push("await reply");
-		if (args.replyTo) meta.push("reply");
-	}
-	if (args?.op === "wait" && args.timeoutMs) meta.push(`timeout ${formatDuration(args.timeoutMs)}`);
-	if (args?.op === "inbox" && args.peek) meta.push("peek");
-	return meta;
-}
-
-function renderErrorResult(
-	result: { content: Array<{ type: string; text?: string }> },
-	args: IrcRenderArgs | undefined,
-	theme: Theme,
-): string[] {
-	const text = textContent(result) || "IRC call failed.";
-	return [
-		renderStatusLine({ icon: "error", title: callTitle(args, theme), meta: callMeta(args) }, theme),
-		formatErrorDetail(text, theme),
-	];
-}
-
 /**
  * Display-only transcript card for live IRC traffic: `irc:incoming` DMs
  * delivered to this session, `irc:autoreply` side-channel replies sent on
@@ -585,6 +593,7 @@ export function createIrcMessageCard(
 	},
 	getExpanded: () => boolean,
 	uiTheme: Theme,
+	transcriptDisplay?: TranscriptDisplayContext,
 ): Component {
 	const from = card.from?.trim() || "?";
 	const title =
@@ -604,225 +613,40 @@ export function createIrcMessageCard(
 		(width, expanded) => {
 			const lines = [renderStatusLine({ iconOverride: ircGlyph(uiTheme), title, meta }, uiTheme)];
 			if (body.trim()) {
-				lines.push(...bodyLines(body, expanded, uiTheme, { indent: "  ", collapsedLines: 3 }));
+				lines.push(
+					...renderTranscriptBodyLines(body, expanded, uiTheme, {
+						indent: "  ",
+						collapsedLines: 3,
+						width,
+						transcriptDisplay,
+					}),
+				);
 			}
 			return lines.map(line => truncateToWidth(line, width, Ellipsis.Unicode));
 		},
-		{ paddingX: 1 },
-	);
-}
-
-function renderSendResult(
-	result: { content: Array<{ type: string; text?: string }>; isError?: boolean },
-	details: Partial<IrcDetails>,
-	args: IrcRenderArgs | undefined,
-	expanded: boolean,
-	theme: Theme,
-): string[] {
-	const receipts = details.receipts ?? [];
-	const to = details.to ?? args?.to?.trim() ?? "?";
-	const title = `IRC ${theme.nav.selected} ${to}`;
-
-	// Pre-delivery failures (validation) and empty broadcasts carry no receipts.
-	if (receipts.length === 0) {
-		const text = textContent(result) || (result.isError ? "Send failed." : "Nothing to deliver.");
-		return [
-			renderStatusLine({ icon: result.isError ? "error" : "warning", title }, theme),
-			result.isError ? formatErrorDetail(text, theme) : `  ${theme.fg("muted", replaceTabs(text))}`,
-		];
-	}
-
-	const delivered = receipts.filter(receipt => receipt.outcome !== "failed");
-	const failedCount = receipts.length - delivered.length;
-	const waited = details.waited;
-	const timedOut = waited === null;
-
-	const meta: string[] = [];
-	if (to === "all") meta.push("broadcast");
-	if (receipts.length === 1) {
-		const receipt = receipts[0]!;
-		meta.push(theme.fg(outcomeColor(receipt.outcome), receipt.outcome));
-	} else {
-		if (delivered.length > 0) meta.push(theme.fg("success", `${delivered.length} delivered`));
-		if (failedCount > 0) meta.push(theme.fg("error", `${failedCount} failed`));
-	}
-	if (timedOut) meta.push(theme.fg("warning", "no reply"));
-
-	const icon = result.isError
-		? { icon: "error" as const }
-		: timedOut
-			? { icon: "warning" as const }
-			: { iconOverride: ircGlyph(theme) };
-	const lines = [renderStatusLine({ ...icon, title, meta }, theme)];
-
-	const sent = args?.message?.trim();
-	if (sent) lines.push(...bodyLines(sent, expanded, theme, { indent: "  ", tone: "dim" }));
-
-	if (receipts.length > 1 || failedCount > 0) {
-		lines.push(
-			...renderTreeList<IrcDeliveryReceipt>(
-				{
-					items: receipts,
-					expanded,
-					maxCollapsed: PREVIEW_LIMITS.COLLAPSED_ITEMS,
-					itemType: "recipient",
-					renderItem: receipt => {
-						const badge = formatBadge(receipt.outcome, outcomeColor(receipt.outcome), theme);
-						const error =
-							receipt.outcome === "failed" && receipt.error
-								? ` ${theme.fg("error", `${theme.format.dash} ${receipt.error}`)}`
-								: "";
-						return `${theme.fg("toolOutput", receipt.to)} ${badge}${error}`;
-					},
-				},
-				theme,
-			),
-		);
-	}
-
-	if (waited) {
-		const age = messageAge(waited.ts);
-		lines.push(
-			`  ${theme.fg("dim", theme.nav.back)} ${theme.fg("accent", waited.from)}${age ? ` ${theme.fg("dim", age)}` : ""}`,
-		);
-		lines.push(...bodyLines(waited.body, expanded, theme, { indent: "  " }));
-	} else if (timedOut) {
-		lines.push(`  ${theme.fg("warning", "No reply yet — they may answer later; check inbox or wait again.")}`);
-	}
-	return lines;
-}
-
-function renderWaitResult(
-	result: { content: Array<{ type: string; text?: string }>; isError?: boolean },
-	details: Partial<IrcDetails>,
-	args: IrcRenderArgs | undefined,
-	expanded: boolean,
-	theme: Theme,
-): string[] {
-	const waited = details.waited;
-	if (!waited) {
-		const text = textContent(result) || "No message arrived.";
-		return [
-			renderStatusLine(
-				{ icon: "warning", title: `IRC ${theme.nav.back} ${args?.from?.trim() || "anyone"}`, meta: ["timed out"] },
-				theme,
-			),
-			`  ${theme.fg("muted", replaceTabs(text))}`,
-		];
-	}
-	const meta = [messageAge(waited.ts)];
-	if (waited.replyTo) meta.push("reply");
-	return [
-		renderStatusLine({ iconOverride: ircGlyph(theme), title: `IRC ${theme.nav.back} ${waited.from}`, meta }, theme),
-		...bodyLines(waited.body, expanded, theme, { indent: "  " }),
-	];
-}
-
-function renderInboxResult(
-	details: Partial<IrcDetails>,
-	args: IrcRenderArgs | undefined,
-	expanded: boolean,
-	theme: Theme,
-): string[] {
-	const messages = details.inbox ?? [];
-	if (messages.length === 0) {
-		return [renderStatusLine({ iconOverride: ircGlyph(theme), title: "IRC inbox", meta: ["empty"] }, theme)];
-	}
-	const meta = [`${messages.length} ${messages.length === 1 ? "message" : "messages"}`];
-	if (args?.peek) meta.push("peek");
-	const header = renderStatusLine({ iconOverride: ircGlyph(theme), title: "IRC inbox", meta }, theme);
-	const items = renderTreeList<IrcMessage>(
 		{
-			items: messages,
-			expanded,
-			maxCollapsed: PREVIEW_LIMITS.COLLAPSED_ITEMS,
-			itemType: "message",
-			renderItem: msg => {
-				const age = messageAge(msg.ts);
-				const replyBadge = msg.replyTo ? ` ${formatBadge("reply", "muted", theme)}` : "";
-				const head = `${theme.fg("accent", msg.from)}${age ? ` ${theme.fg("dim", age)}` : ""}${replyBadge}`;
-				return [head, ...bodyLines(msg.body, expanded, theme, { collapsedLines: 1 })];
-			},
+			paddingX: 1,
+			cacheVersion: () => transcriptDisplayCacheVersion(transcriptDisplay),
 		},
-		theme,
 	);
-	return [header, ...items];
-}
-
-function renderListResult(details: Partial<IrcDetails>, expanded: boolean, theme: Theme): string[] {
-	const peers = [...(details.peers ?? [])].sort(
-		(a, b) =>
-			(PEER_STATUS_ORDER[a.status] ?? 9) - (PEER_STATUS_ORDER[b.status] ?? 9) || b.lastActivity - a.lastActivity,
-	);
-	if (peers.length === 0) {
-		return [renderStatusLine({ icon: "info", title: "IRC peers", meta: ["no other agents"] }, theme)];
-	}
-	const counts = new Map<string, number>();
-	for (const peer of peers) counts.set(peer.status, (counts.get(peer.status) ?? 0) + 1);
-	const meta = [...counts].map(([status, count]) => `${count} ${status}`);
-	const unreadTotal = peers.reduce((sum, peer) => sum + peer.unread, 0);
-	if (unreadTotal > 0) meta.push(theme.fg("warning", `${unreadTotal} unread`));
-	const header = renderStatusLine({ iconOverride: ircGlyph(theme), title: "IRC peers", meta }, theme);
-	const items = renderTreeList(
-		{
-			items: peers,
-			expanded,
-			maxCollapsed: PREVIEW_LIMITS.COLLAPSED_ITEMS,
-			itemType: "peer",
-			renderItem: peer => {
-				const kindText = peer.parentId ? `${peer.kind}${theme.sep.dot}of ${peer.parentId}` : peer.kind;
-				const unread = peer.unread > 0 ? ` ${formatBadge(`${peer.unread} unread`, "warning", theme)}` : "";
-				const age = messageAge(peer.lastActivity);
-				const activity = peer.activity ? ` ${theme.fg("dim", replaceTabs(peer.activity))}` : "";
-				const name = theme.fg("dim", replaceTabs(peer.displayName));
-				return `${peerStatusBadge(peer.status, theme)} ${theme.bold(replaceTabs(peer.id))} ${name} ${theme.fg("dim", kindText)}${activity}${unread}${age ? ` ${theme.fg("dim", age)}` : ""}`;
-			},
-		},
-		theme,
-	);
-	return [header, ...items];
-}
-
-function buildResultLines(
-	result: { content: Array<{ type: string; text?: string }>; isError?: boolean },
-	details: Partial<IrcDetails>,
-	args: IrcRenderArgs | undefined,
-	expanded: boolean,
-	theme: Theme,
-): string[] {
-	switch (details.op ?? args?.op) {
-		case "send":
-			return renderSendResult(result, details, args, expanded, theme);
-		case "wait":
-			return renderWaitResult(result, details, args, expanded, theme);
-		case "inbox":
-			return result.isError
-				? renderErrorResult(result, args, theme)
-				: renderInboxResult(details, args, expanded, theme);
-		case "list":
-			return result.isError ? renderErrorResult(result, args, theme) : renderListResult(details, expanded, theme);
-		default: {
-			const text = textContent(result) || (result.isError ? "IRC call failed." : "Done.");
-			return [
-				renderStatusLine({ icon: result.isError ? "error" : "success", title: callTitle(args, theme) }, theme),
-				result.isError ? formatErrorDetail(text, theme) : `  ${theme.fg("muted", replaceTabs(text))}`,
-			];
-		}
-	}
 }
 
 export const ircToolRenderer = {
 	inline: true,
 	mergeCallAndResult: true,
 
-	renderCall(args: IrcRenderArgs, _options: RenderResultOptions, uiTheme: Theme): Component {
-		const lines = [
-			renderStatusLine({ icon: "pending", title: callTitle(args, uiTheme), meta: callMeta(args) }, uiTheme),
-		];
-		if (args?.op === "send" && args.message?.trim()) {
-			lines.push(...bodyLines(args.message, false, uiTheme, { indent: "  ", tone: "dim", collapsedLines: 1 }));
-		}
-		return new Text(lines.join("\n"), 0, 0);
+	renderCall(args: IrcRenderArgs, options: RenderResultOptions, uiTheme: Theme): Component {
+		return createCachedComponent(
+			() => options.expanded,
+			(width, expanded) => {
+				const lines = buildIrcCallLines(args, expanded, width, uiTheme, options.transcriptDisplay);
+				if (options.headline) {
+					lines[0] = renderStatusLine({ icon: "pending", title: options.headline }, uiTheme);
+				}
+				return lines.map(line => truncateToWidth(line, width, Ellipsis.Unicode));
+			},
+			{ cacheVersion: () => transcriptDisplayCacheVersion(options.transcriptDisplay) },
+		);
 	},
 
 	renderResult(
@@ -834,10 +658,29 @@ export const ircToolRenderer = {
 		const details: Partial<IrcDetails> = result.details ?? {};
 		return createCachedComponent(
 			() => options.expanded,
-			(width, expanded) =>
-				buildResultLines(result, details, args, expanded, uiTheme).map(line =>
-					truncateToWidth(line, width, Ellipsis.Unicode),
-				),
+			(width, expanded) => {
+				const lines = buildIrcResultLines(
+					result,
+					details,
+					args,
+					expanded,
+					width,
+					uiTheme,
+					options.transcriptDisplay,
+				);
+				if (options.headline) {
+					lines[0] = renderStatusLine(
+						{
+							icon: result.isError ? "error" : options.isPartial ? "running" : "success",
+							spinnerFrame: options.spinnerFrame,
+							title: options.headline,
+						},
+						uiTheme,
+					);
+				}
+				return lines.map(line => truncateToWidth(line, width, Ellipsis.Unicode));
+			},
+			{ cacheVersion: () => transcriptDisplayCacheVersion(options.transcriptDisplay) },
 		);
 	},
 };

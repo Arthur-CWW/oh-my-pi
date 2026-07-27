@@ -12,9 +12,6 @@ function createContainer() {
 		clear() {
 			this.children = [];
 		},
-		disposeChildren() {
-			this.children = [];
-		},
 	};
 }
 
@@ -79,7 +76,7 @@ describe("/handoff command", () => {
 
 		expect(statusContainer.children).toHaveLength(1);
 		expect(ctx.editor.onEscape).toBe(originalOnEscape);
-		ctx.editor.onEscape?.();
+		ctx.editor.onEscape?.("escape");
 		expect(abortHandoff).toHaveBeenCalledTimes(1);
 
 		handoffDone.resolve({ document: "## Goal\nContinue" });
@@ -88,33 +85,5 @@ describe("/handoff command", () => {
 		expect(statusContainer.children).toHaveLength(0);
 		expect(ctx.editor.onEscape).toBe(originalOnEscape);
 		expect(ctx.session.handoff).toHaveBeenCalledWith("focus on tests");
-	});
-
-	it("refuses to hand off while a response is streaming", async () => {
-		// Bug: /handoff dispatches before the streaming-queue branch, so without a
-		// guard it resets the agent mid-turn and the live stream keeps emitting into
-		// the torn-down session. Streaming must short-circuit with a warning.
-		const handoff = vi.fn();
-		const showWarning = vi.fn();
-		const statusContainer = createContainer();
-		const ctx = {
-			sessionManager: {
-				getEntries: () => [{ type: "message" }, { type: "message" }],
-			},
-			session: { isStreaming: true, handoff },
-			loadingAnimation: undefined,
-			statusContainer,
-			ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
-			showWarning,
-			showError: vi.fn(),
-			showStatus: vi.fn(),
-		} as unknown as InteractiveModeContext;
-		const controller = new CommandController(ctx);
-
-		await controller.handleHandoffCommand();
-
-		expect(handoff).not.toHaveBeenCalled();
-		expect(showWarning).toHaveBeenCalledTimes(1);
-		expect(statusContainer.children).toHaveLength(0);
 	});
 });

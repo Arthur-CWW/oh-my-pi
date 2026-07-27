@@ -25,6 +25,11 @@ const ROOM_PATH_RE = /^\/r\/([A-Za-z0-9_-]{10,64})(?:\.([A-Za-z0-9_-]+))?$/;
 const BARE_LINK_RE = /^([A-Za-z0-9_-]{10,64})[#.]([A-Za-z0-9_-]+)$/;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 const LOCAL_HOSTNAMES: Record<string, true> = { localhost: true, "127.0.0.1": true, "::1": true, "[::1]": true };
+function configuredRelayUrl(): string {
+	return typeof __OMP_COLLAB_RELAY__ === "string" && __OMP_COLLAB_RELAY__.length > 0
+		? __OMP_COLLAB_RELAY__
+		: DEFAULT_RELAY_URL;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // base64url (no Buffer in the browser)
@@ -148,7 +153,7 @@ export function parseCollabLink(link: string): ParsedCollabLink | { error: strin
 	let text = link.trim().replace(/%23/gi, "#");
 	// Bare `<roomId>.<key>` (legacy `<roomId>#<key>`) → default relay.
 	const bare = BARE_LINK_RE.exec(text);
-	if (bare) text = `${DEFAULT_RELAY_URL}/r/${bare[1]}.${bare[2]}`;
+	if (bare) text = `${configuredRelayUrl()}/r/${bare[1]}.${bare[2]}`;
 	// Scheme-less `host[:port]/r/…` → wss.
 	else if (!text.includes("://")) text = `wss://${text}`;
 	let url: URL;
@@ -157,20 +162,15 @@ export function parseCollabLink(link: string): ParsedCollabLink | { error: strin
 	} catch {
 		return { error: `Invalid collab link: ${link}` };
 	}
-	if ((url.protocol === "http:" || url.protocol === "https:") && url.hash) {
-		const inner = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
-		const parsed = parseCollabLink(inner);
-		if (!("error" in parsed)) return parsed;
-	}
 	const normalized = normalizeRelayOrigin(url.origin);
 	if ("error" in normalized) return normalized;
 	const match = ROOM_PATH_RE.exec(url.pathname);
 	if (!match) {
-		// Non-http(s) deep links may also carry a complete collab link in the
-		// fragment. http(s) links are handled once above so invalid fragments
-		// fall through to direct relay validation instead of double-recursing.
+		// Web deep link: `http(s)://<relay>/#<collab-link>` — the fragment holds
+		// the whole link, so recurse on it. The recursion terminates because
+		// the inner text is a strict suffix of the input.
 		const inner = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
-		if (inner && url.protocol !== "http:" && url.protocol !== "https:") return parseCollabLink(inner);
+		if (inner) return parseCollabLink(inner);
 		return { error: "Collab link must contain a /r/<roomId> path" };
 	}
 	const roomId = match[1] as string;

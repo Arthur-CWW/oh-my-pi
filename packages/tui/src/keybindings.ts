@@ -27,6 +27,7 @@ export interface Keybindings {
 	"tui.editor.yank": true;
 	"tui.editor.yankPop": true;
 	"tui.editor.undo": true;
+	"tui.editor.expandPaste": true;
 	// Generic input actions
 	"tui.input.newLine": true;
 	"tui.input.submit": true;
@@ -39,6 +40,12 @@ export interface Keybindings {
 	"tui.select.pageDown": true;
 	"tui.select.confirm": true;
 	"tui.select.cancel": true;
+	"tui.select.vimUp": true;
+	"tui.select.vimDown": true;
+	"tui.select.first": true;
+	"tui.select.last": true;
+	"tui.select.halfPageUp": true;
+	"tui.select.halfPageDown": true;
 }
 
 export type Keybinding = keyof Keybindings;
@@ -66,11 +73,11 @@ export const TUI_KEYBINDINGS = {
 		description: "Move cursor right",
 	},
 	"tui.editor.cursorWordLeft": {
-		defaultKeys: ["alt+left", "ctrl+left", "alt+b"],
+		defaultKeys: ["alt+left", "ctrl+left", "super+alt+left", "alt+b"],
 		description: "Move cursor word left",
 	},
 	"tui.editor.cursorWordRight": {
-		defaultKeys: ["alt+right", "ctrl+right", "alt+f"],
+		defaultKeys: ["alt+right", "ctrl+right", "super+alt+right", "alt+f"],
 		description: "Move cursor word right",
 	},
 	"tui.editor.cursorLineStart": {
@@ -118,6 +125,7 @@ export const TUI_KEYBINDINGS = {
 	"tui.editor.yank": { defaultKeys: "ctrl+y", description: "Yank" },
 	"tui.editor.yankPop": { defaultKeys: "alt+y", description: "Yank pop" },
 	"tui.editor.undo": { defaultKeys: ["ctrl+-", "ctrl+_"], description: "Undo" },
+	"tui.editor.expandPaste": { defaultKeys: "enter", description: "Expand paste marker for editing" },
 	"tui.input.newLine": { defaultKeys: ["shift+enter", "ctrl+j"], description: "Insert newline" },
 	"tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
 	"tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
@@ -129,6 +137,12 @@ export const TUI_KEYBINDINGS = {
 		defaultKeys: "pageDown",
 		description: "Selection page down",
 	},
+	"tui.select.vimUp": { defaultKeys: "k", description: "Move selection up (Vim)" },
+	"tui.select.vimDown": { defaultKeys: "j", description: "Move selection down (Vim)" },
+	"tui.select.first": { defaultKeys: "g", description: "Select first item" },
+	"tui.select.last": { defaultKeys: "shift+g", description: "Select last item" },
+	"tui.select.halfPageUp": { defaultKeys: "ctrl+u", description: "Selection half-page up" },
+	"tui.select.halfPageDown": { defaultKeys: "ctrl+d", description: "Selection half-page down" },
 	"tui.select.confirm": { defaultKeys: "enter", description: "Confirm selection" },
 	"tui.select.cancel": {
 		defaultKeys: ["escape", "ctrl+c"],

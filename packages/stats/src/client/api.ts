@@ -1,102 +1,92 @@
 import type {
 	BehaviorDashboardStats,
 	CostDashboardStats,
-	FolderStats,
-	GainDashboardStats,
+	DashboardStats,
 	MessageStats,
 	ModelDashboardStats,
 	OverviewStats,
 	RequestDetails,
-	TimeRange,
-	ToolDashboardStats,
 } from "./types";
 
 const API_BASE = "/api";
 
-export class ApiError extends Error {
-	status: number;
-	endpoint: string;
+interface ErrorPayload {
+	error?: {
+		code?: string;
+		message?: string;
+	};
+}
 
-	constructor(status: number, endpoint: string, message: string) {
+export class StatsApiError extends Error {
+	constructor(
+		readonly code: string,
+		message: string,
+		readonly status: number,
+	) {
 		super(message);
-		this.name = "ApiError";
-		this.status = status;
-		this.endpoint = endpoint;
+		this.name = "StatsApiError";
 	}
 }
 
-async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T> {
-	const res = await fetch(endpoint, options);
-	if (!res.ok) {
-		throw new ApiError(res.status, endpoint, `HTTP error ${res.status} on ${endpoint}`);
+async function request<T>(url: string): Promise<T> {
+	let response: Response;
+	try {
+		response = await fetch(url);
+	} catch (error) {
+		throw new StatsApiError(
+			"NETWORK_ERROR",
+			error instanceof Error ? error.message : "Unable to reach the stats server",
+			0,
+		);
 	}
-	return res.json() as Promise<T>;
+	if (!response.ok) {
+		let payload: ErrorPayload | undefined;
+		try {
+			payload = (await response.json()) as ErrorPayload;
+		} catch {
+			// Older or intermediary HTTP errors may not have a JSON body.
+		}
+		throw new StatsApiError(
+			payload?.error?.code ?? "HTTP_ERROR",
+			payload?.error?.message ?? `Stats request failed with HTTP ${response.status}`,
+			response.status,
+		);
+	}
+	return response.json() as Promise<T>;
 }
 
-export async function getOverviewStats(range: TimeRange = "24h", signal?: AbortSignal): Promise<OverviewStats> {
-	return fetchJson<OverviewStats>(`${API_BASE}/stats/overview?range=${encodeURIComponent(range)}`, {
-		signal,
-	});
+export function getStats(range = "24h"): Promise<DashboardStats> {
+	return request(`${API_BASE}/stats?range=${encodeURIComponent(range)}`);
 }
 
-export async function getModelDashboardStats(
-	range: TimeRange = "24h",
-	signal?: AbortSignal,
-): Promise<ModelDashboardStats> {
-	return fetchJson<ModelDashboardStats>(`${API_BASE}/stats/model-dashboard?range=${encodeURIComponent(range)}`, {
-		signal,
-	});
+export function getOverviewStats(range = "24h"): Promise<OverviewStats> {
+	return request(`${API_BASE}/stats/overview?range=${encodeURIComponent(range)}`);
 }
 
-export async function getCostDashboardStats(
-	range: TimeRange = "24h",
-	signal?: AbortSignal,
-): Promise<CostDashboardStats> {
-	return fetchJson<CostDashboardStats>(`${API_BASE}/stats/costs?range=${encodeURIComponent(range)}`, { signal });
+export function getModelDashboardStats(range = "24h"): Promise<ModelDashboardStats> {
+	return request(`${API_BASE}/stats/model-dashboard?range=${encodeURIComponent(range)}`);
 }
 
-export async function getRecentRequests(limit = 50, signal?: AbortSignal): Promise<MessageStats[]> {
-	return fetchJson<MessageStats[]>(`${API_BASE}/stats/recent?limit=${limit}`, { signal });
+export function getCostDashboardStats(range = "24h"): Promise<CostDashboardStats> {
+	return request(`${API_BASE}/stats/costs?range=${encodeURIComponent(range)}`);
 }
 
-export async function getRecentErrors(limit = 50, signal?: AbortSignal): Promise<MessageStats[]> {
-	return fetchJson<MessageStats[]>(`${API_BASE}/stats/errors?limit=${limit}`, { signal });
+export function getRecentRequests(limit = 50): Promise<MessageStats[]> {
+	return request(`${API_BASE}/stats/recent?limit=${limit}`);
 }
 
-export async function getRequestDetails(id: number, signal?: AbortSignal): Promise<RequestDetails> {
-	return fetchJson<RequestDetails>(`${API_BASE}/request/${id}`, { signal });
+export function getRecentErrors(limit = 50): Promise<MessageStats[]> {
+	return request(`${API_BASE}/stats/errors?limit=${limit}`);
 }
 
-export async function sync(signal?: AbortSignal): Promise<{ processed: number; files: number; totalMessages: number }> {
-	return fetchJson<{ processed: number; files: number; totalMessages: number }>(`${API_BASE}/sync`, { signal });
+export function getRequestDetails(id: number): Promise<RequestDetails> {
+	return request(`${API_BASE}/request/${id}`);
 }
 
-export async function getBehaviorDashboardStats(
-	range: TimeRange = "24h",
-	signal?: AbortSignal,
-): Promise<BehaviorDashboardStats> {
-	return fetchJson<BehaviorDashboardStats>(`${API_BASE}/stats/behavior?range=${encodeURIComponent(range)}`, {
-		signal,
-	});
+export function sync(): Promise<unknown> {
+	return request(`${API_BASE}/sync`);
 }
 
-export async function getFolderStats(range: TimeRange = "24h", signal?: AbortSignal): Promise<FolderStats[]> {
-	return fetchJson<FolderStats[]>(`${API_BASE}/stats/folders?range=${encodeURIComponent(range)}`, { signal });
-}
-
-export async function getGainDashboardStats(
-	range: TimeRange = "24h",
-	project?: string | null,
-	signal?: AbortSignal,
-): Promise<GainDashboardStats> {
-	const params = new URLSearchParams({ range });
-	if (project) params.set("project", project);
-	return fetchJson<GainDashboardStats>(`${API_BASE}/stats/gain?${params}`, { signal });
-}
-
-export async function getToolDashboardStats(
-	range: TimeRange = "24h",
-	signal?: AbortSignal,
-): Promise<ToolDashboardStats> {
-	return fetchJson<ToolDashboardStats>(`${API_BASE}/stats/tools?range=${encodeURIComponent(range)}`, { signal });
+export function getBehaviorDashboardStats(range = "24h"): Promise<BehaviorDashboardStats> {
+	return request(`${API_BASE}/stats/behavior?range=${encodeURIComponent(range)}`);
 }

@@ -1,12 +1,12 @@
 /**
  * Kagi Web Search Provider
  *
- * Thin wrapper that adapts shared Kagi API utilities to SearchResponse shape.
+ * Browser/account-session search first; Kagi API key search remains as fallback.
  */
 import type { AuthStorage, FetchImpl } from "@oh-my-pi/pi-ai";
 import type { SearchResponse } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
-import { KagiApiError, searchWithKagi } from "../../kagi";
+import { hasAvailableKagiBrowserSession, KagiApiError, searchWithKagi } from "../../kagi";
 import { clampNumResults } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
@@ -17,6 +17,8 @@ type SearchParamsWithFetch = SearchParams & { fetch?: FetchImpl };
 const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 40;
 
+type BrowserSessionAvailability = () => boolean | Promise<boolean>;
+
 /** Execute Kagi web search. */
 export async function searchKagi(params: {
 	query: string;
@@ -26,6 +28,7 @@ export async function searchKagi(params: {
 	authStorage: AuthStorage;
 	sessionId?: string;
 	fetch?: FetchImpl;
+	browserSession?: boolean;
 }): Promise<SearchResponse> {
 	const numResults = clampNumResults(params.num_results, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
 
@@ -38,6 +41,7 @@ export async function searchKagi(params: {
 				sessionId: params.sessionId,
 				signal: params.signal,
 				fetch: params.fetch,
+				browserSession: params.browserSession,
 			},
 			params.authStorage,
 		);
@@ -66,8 +70,15 @@ export class KagiProvider extends SearchProvider {
 	readonly id = "kagi";
 	readonly label = "Kagi";
 
-	isAvailable(authStorage: AuthStorage): boolean {
-		return authStorage.hasAuth("kagi");
+	readonly #browserSessionAvailable: BrowserSessionAvailability;
+
+	constructor(browserSessionAvailable: BrowserSessionAvailability = hasAvailableKagiBrowserSession) {
+		super();
+		this.#browserSessionAvailable = browserSessionAvailable;
+	}
+
+	async isAvailable(authStorage: AuthStorage): Promise<boolean> {
+		return authStorage.hasAuth("kagi") || (await this.#browserSessionAvailable());
 	}
 
 	search(params: SearchParamsWithFetch): Promise<SearchResponse> {

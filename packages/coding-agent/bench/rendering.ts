@@ -7,7 +7,7 @@ import { AssistantMessageComponent } from "../src/modes/components/assistant-mes
 import { TranscriptContainer } from "../src/modes/components/transcript-container";
 import { Settings } from "../src/config/settings";
 import { getEditorTheme } from "../src/modes/theme/theme";
-import { BlockUnitCounter, buildDisplayMessage, nextStep, visibleUnits } from "../src/modes/controllers/streaming-reveal";
+import { buildDisplayMessage, nextStep, visibleUnits } from "../src/modes/controllers/streaming-reveal";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -55,12 +55,11 @@ bench("WelcomeComponent.render", () => {
 
 // ── A2: streaming reveal + editor render baselines ──────────────────────────
 //
-// Diagnostic series, not a fixed-iteration micro-op. The full-reveal loops
-// mirror the controller: a per-episode BlockUnitCounter feeds countOf + sliceOf
-// (memoized, O(delta)/tick). `streamingReveal` (C1) instead measures the DEFAULT
-// pure-sliceGraphemes path at a fixed revealed length — the un-memoized cost the
-// counter avoids. Representative controller-path throughput lives in
-// bench/streaming-throughput.bench.ts.
+// Diagnostic series, not a fixed-iteration micro-op. `streamingReveal` proves
+// or refutes the O(N^2) reveal hypothesis: per-step cost (visibleUnits +
+// buildDisplayMessage, the work every stream delta/30fps tick does) is sampled
+// at growing revealed lengths. Rising per-step ms => O(N) per tick => O(N^2)
+// over the message. Flat per-step => already linear.
 
 function makeMarkdownCorpus(targetGraphemes: number): string {
 	const para =
@@ -107,7 +106,7 @@ const REVEAL_CORPUS = makeMarkdownCorpus(6000);
 const REVEAL_CHECKPOINTS = [1000, 2000, 3000, 4000, 5000, 6000];
 const STEP_REPS = 40;
 
-console.log("\nstreamingReveal (C1: default pure-slice path, fixed revealed length, no memoization):");
+console.log("\nstreamingReveal (isolated C1: visibleUnits + buildDisplayMessage per delta):");
 for (const n of REVEAL_CHECKPOINTS) {
 	const msg = makeTextMessage(REVEAL_CORPUS.slice(0, n));
 	const revealed = Math.floor(n * 0.9);
@@ -118,18 +117,13 @@ for (const n of REVEAL_CHECKPOINTS) {
 	console.log(`  len=${n}: ${ms.toFixed(4)}ms/step`);
 }
 
-// Controller path: a per-episode BlockUnitCounter memoizes count + slice, so
-// buildDisplayMessage is O(delta)/tick. The Markdown render (component.render)
-// still re-lexes the growing text each step here (no { transient: true }), so
-// total ms is dominated by the render, not the slice. Total ms to fully reveal
-// an N-grapheme message in nextStep increments.
-console.log("\nstreamingRevealFull (controller-path counter + Markdown render, growing text):");
+// Real streaming cost: text GROWS every tick, so Markdown's text-keyed cache
+// misses each step (the actual interactive path). Total ms to fully reveal an
+// N-grapheme message in nextStep increments — the number C1+C2 reduce.
+console.log("\nstreamingRevealFull (C1+C2: full incremental reveal, growing text => cache-miss/tick):");
 try {
 	for (const n of REVEAL_CHECKPOINTS) {
 		const full = makeTextMessage(REVEAL_CORPUS.slice(0, n));
-		const counter = new BlockUnitCounter();
-		const countOf = (index: number, text: string): number => counter.count(index, text);
-		const sliceOf = (index: number, text: string, units: number): string => counter.slice(index, text, units);
 		const total = visibleUnits(full, false);
 		const component = new AssistantMessageComponent();
 		const start = Bun.nanoseconds();
@@ -137,7 +131,7 @@ try {
 		let steps = 0;
 		while (revealed < total) {
 			revealed = Math.min(total, revealed + nextStep(total - revealed));
-			component.updateContent(buildDisplayMessage(full, revealed, false, true, countOf, sliceOf));
+			component.updateContent(buildDisplayMessage(full, revealed, false));
 			component.render(WIDTH);
 			steps++;
 		}
@@ -159,9 +153,6 @@ try {
 	const thinking = makeMarkdownCorpus(2500);
 	for (const n of [2000, 4000, 6000]) {
 		const full = makeThinkingPlusText(thinking, REVEAL_CORPUS.slice(0, n));
-		const counter = new BlockUnitCounter();
-		const countOf = (index: number, text: string): number => counter.count(index, text);
-		const sliceOf = (index: number, text: string, units: number): string => counter.slice(index, text, units);
 		const total = visibleUnits(full, false);
 		const component = new AssistantMessageComponent();
 		const start = Bun.nanoseconds();
@@ -169,7 +160,7 @@ try {
 		let steps = 0;
 		while (revealed < total) {
 			revealed = Math.min(total, revealed + nextStep(total - revealed));
-			component.updateContent(buildDisplayMessage(full, revealed, false, true, countOf, sliceOf));
+			component.updateContent(buildDisplayMessage(full, revealed, false));
 			component.render(WIDTH);
 			steps++;
 		}
@@ -208,37 +199,109 @@ try {
 
 // ── E3: long-transcript frame cost ──────────────────────────────────────────
 //
-// E3 root cause: Container.render walks EVERY child and concatenates their line
-// arrays on every frame. Finalized messages hit their Markdown L1 cache (no
-// re-lex) but still pay the tree walk + line-array rebuild/concat per frame.
-// Build N finalized assistant messages (prose + closed code fences) + 1 growing
-// tail, then time one render(WIDTH) of the whole tree per streaming frame.
-// Rising ms/frame in N => the stable history is re-walked/re-concatenated each
-// frame (the cost E3 culls); flat => the walk is already cheap.
-console.log("\nlongTranscriptFrame (E3: whole-tree render cost vs transcript length N):");
+// Each series has finalized history plus one unfinalized growing tail. Alongside
+// frame time, report how many history blocks and rows were rendered per frame:
+// a prefix cache should drive both to zero. `prefixValidationBlocksPerFrame`
+// remains explicit because versioned finalized blocks are checked for late
+// post-finalize mutations before their immutable rows are reused.
+class MeasuredAssistantMessageComponent extends AssistantMessageComponent {
+	renderCalls = 0;
+	renderedRows = 0;
+	versionReads = 0;
+
+	override getTranscriptBlockVersion(): number {
+		this.versionReads++;
+		return super.getTranscriptBlockVersion();
+	}
+
+	override render(width: number): readonly string[] {
+		const rows = super.render(width);
+		this.renderCalls++;
+		this.renderedRows += rows.length;
+		return rows;
+	}
+
+	resetMeasurements(): void {
+		this.renderCalls = 0;
+		this.renderedRows = 0;
+		this.versionReads = 0;
+	}
+}
+
+console.log("\nlongTranscriptFrame (E3: finalized prefix + growing tail):");
 try {
-	const histText = makeMarkdownCorpus(800);
+	const historyText = "Finalized history with `inline` code.\n```ts\nconst settled = true;\n```";
 	const tailCorpus = makeMarkdownCorpus(1200);
-	for (const n of [50, 100, 200]) {
+	const results: Array<{
+		finalizedMessages: number;
+		frameMs: number;
+		historyRenderCallsPerFrame: number;
+		historyRenderedRowsPerFrame: number;
+		mutableRenderedRowsPerFrame: number;
+		prefixValidationBlocksPerFrame: number;
+		retained: {
+			assembledRows: number;
+			segments: number;
+			segmentRawRowRefs: number;
+			segmentContributionRowRefs: number;
+			liveSnapshots: number;
+			liveSnapshotRowRefs: number;
+			historyPrefixCacheEntries: 0 | 1;
+			historyPrefixSegmentRefs: 0;
+		};
+		beforeEditStructuralModel: {
+			/** Derived from the replaced cache shape, not a noisy heap measurement. */
+			evidence: "structural-model";
+			historyPrefixSegmentRefs: number;
+			historyPrefixVersionEntries: number;
+			finalizedSnapshotEntries: number;
+		};
+	}> = [];
+	const frames = 60;
+	for (const finalizedMessages of [100, 1000, 10_000]) {
 		const container = new TranscriptContainer();
-		for (let i = 0; i < n; i++) {
-			const c = new AssistantMessageComponent();
-			c.updateContent(makeTextMessage(histText));
-			container.addChild(c);
+		const history: MeasuredAssistantMessageComponent[] = [];
+		for (let i = 0; i < finalizedMessages; i++) {
+			const block = new MeasuredAssistantMessageComponent();
+			block.updateContent(makeTextMessage(historyText));
+			block.markTranscriptBlockFinalized();
+			container.addChild(block);
+			history.push(block);
 		}
-		const tail = new AssistantMessageComponent();
+		const tail = new MeasuredAssistantMessageComponent();
 		container.addChild(tail);
 		let revealed = Math.floor(tailCorpus.length * 0.5);
 		tail.updateContent(makeTextMessage(tailCorpus.slice(0, revealed)));
-		container.render(WIDTH); // warm finalized history (L1 caches hot)
-		const ms = benchStep(60, () => {
+		container.render(WIDTH); // Build immutable history once before measurement.
+		for (const block of history) block.resetMeasurements();
+		tail.resetMeasurements();
+
+		const frameMs = benchStep(frames, () => {
 			revealed += 20;
 			if (revealed > tailCorpus.length) revealed = Math.floor(tailCorpus.length * 0.5);
 			tail.updateContent(makeTextMessage(tailCorpus.slice(0, revealed)));
 			container.render(WIDTH);
 		});
-		console.log(`  N=${n}: ${ms.toFixed(4)}ms/frame`);
+		const historyRenderCalls = history.reduce((total, block) => total + block.renderCalls, 0);
+		const historyRenderedRows = history.reduce((total, block) => total + block.renderedRows, 0);
+		const prefixVersionReads = history.reduce((total, block) => total + block.versionReads, 0);
+		results.push({
+			finalizedMessages,
+			frameMs,
+			historyRenderCallsPerFrame: historyRenderCalls / frames,
+			historyRenderedRowsPerFrame: historyRenderedRows / frames,
+			mutableRenderedRowsPerFrame: tail.renderedRows / frames,
+			prefixValidationBlocksPerFrame: prefixVersionReads / frames,
+			retained: container.getRetentionMetrics(),
+			beforeEditStructuralModel: {
+				evidence: "structural-model",
+				historyPrefixSegmentRefs: finalizedMessages,
+				historyPrefixVersionEntries: finalizedMessages,
+				finalizedSnapshotEntries: finalizedMessages,
+			},
+		});
 	}
+	console.log(JSON.stringify({ benchmark: "longTranscriptFrame", width: WIDTH, frames, results }));
 } catch (err) {
 	console.log(`  (skipped: ${(err as Error).message})`);
 }

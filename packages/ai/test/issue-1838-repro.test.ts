@@ -104,26 +104,8 @@ async function capturePayload(
 	return promise;
 }
 
-interface CompletionAssistantWireMessage {
-	role: "assistant";
-	reasoning_content?: unknown;
-}
-
 interface CompletionBody {
 	thinking?: { type?: string; keep?: string };
-	messages?: unknown[];
-	stream?: boolean;
-}
-
-function isCompletionAssistantWireMessage(message: unknown): message is CompletionAssistantWireMessage {
-	if (typeof message !== "object" || message === null) return false;
-	return (message as { role?: unknown }).role === "assistant";
-}
-
-function findCompletionAssistantWireMessage(
-	messages: readonly unknown[] | undefined,
-): CompletionAssistantWireMessage | undefined {
-	return messages?.find(isCompletionAssistantWireMessage);
 }
 
 describe("issue #1838 — kimi-k2.6 preserves historical reasoning across tool calls", () => {
@@ -266,11 +248,11 @@ describe("issue #1838 — kimi-k2.6 preserves historical reasoning across tool c
 					},
 				],
 			},
-		)) as CompletionBody;
+		)) as CompletionBody & { messages?: Array<Record<string, unknown>>; stream?: boolean };
 		expect(payload.thinking).toEqual({ type: "enabled", keep: "all" });
 		expect(payload.stream).toBe(true);
-		const assistant = findCompletionAssistantWireMessage(payload.messages);
+		const assistant = payload.messages?.find(m => m.role === "assistant");
 		expect(assistant).toBeDefined();
-		expect(assistant?.reasoning_content).toBe("Need to read the file first.");
+		expect(Reflect.get(assistant as object, "reasoning_content")).toBe("Need to read the file first.");
 	});
 });

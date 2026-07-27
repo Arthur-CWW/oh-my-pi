@@ -1,14 +1,19 @@
 import { describe, expect, it } from "bun:test";
+import { COLLAB_PROTO, type SecureCollabFrame } from "@oh-my-pi/pi-wire";
 import {
+	ChallengeVerifier,
+	ReceiveSequenceWindow,
+	createChallengeResponse,
 	generateRoomKey,
 	generateWriteToken,
 	importRoomKey,
 	open,
 	seal,
+	timingSafeEqualBase64Url,
 } from "@oh-my-pi/pi-coding-agent/collab/crypto";
 import {
-	type CollabFrame,
 	DEFAULT_RELAY_URL,
+	decodeApplicationFrame,
 	formatCollabLink,
 	formatCollabWebLink,
 	generateRoomId,
@@ -18,25 +23,66 @@ import {
 	unpackEnvelope,
 } from "@oh-my-pi/pi-coding-agent/collab/protocol";
 
-describe("collab crypto", () => {
-	it("round-trips a frame through seal/open", async () => {
+const secureContext = { connectionId: "connection-a", direction: "guestToHost" as const, sequence: 1 };
+const secureFrame: SecureCollabFrame = {
+	proto: COLLAB_PROTO,
+	...secureContext,
+	frame: { t: "detach" },
+};
+
+describe("collab crypto v2", () => {
+	it("round-trips with connection, direction, and sequence AAD", async () => {
 		const key = await importRoomKey(generateRoomKey());
-		const frame: CollabFrame = { t: "prompt", text: "check bun.lock — and ünïcode 🚀" };
-		const sealed = await seal(key, frame);
-		expect(await open(key, sealed)).toEqual(frame);
+		expect(await open(key, await seal(key, secureFrame), secureContext)).toEqual(secureFrame);
 	});
 
-	it("rejects tampered ciphertext", async () => {
+	it("rejects tampering and cross-connection replay", async () => {
 		const key = await importRoomKey(generateRoomKey());
-		const sealed = await seal(key, { t: "abort" });
+		const sealed = await seal(key, secureFrame);
+		await expect(open(key, sealed, { ...secureContext, connectionId: "connection-b" })).rejects.toThrow();
+		await expect(open(key, sealed, { ...secureContext, direction: "hostToGuest" })).rejects.toThrow();
+		await expect(open(key, sealed, { ...secureContext, sequence: 2 })).rejects.toThrow();
 		sealed[sealed.length - 1]! ^= 0xff;
-		expect(open(key, sealed)).rejects.toThrow();
+		await expect(open(key, sealed, secureContext)).rejects.toThrow();
 	});
 
-	it("rejects frames sealed with a different key", async () => {
-		const sealed = await seal(await importRoomKey(generateRoomKey()), { t: "abort" });
-		const otherKey = await importRoomKey(generateRoomKey());
-		expect(open(otherKey, sealed)).rejects.toThrow();
+	it("produces challenge responses bound to exact attach fields", async () => {
+		const roomKey = generateRoomKey();
+		const response = await createChallengeResponse(roomKey, "challenge-id", "challenge", "client", "controller");
+		expect(timingSafeEqualBase64Url(response, response)).toBe(true);
+		expect(response).not.toBe(await createChallengeResponse(roomKey, "challenge-id", "challenge", "client", "observer"));
+		expect(response).not.toBe(await createChallengeResponse(roomKey, "challenge-id", "other", "client", "controller"));
+		expect(timingSafeEqualBase64Url(response, `${response}x`)).toBe(false);
+	});
+
+	it("consumes challenges once and rejects forged or expired responses", async () => {
+		const roomKey = generateRoomKey();
+		const verifier = new ChallengeVerifier(roomKey);
+		const first = verifier.issue(10, 100);
+		const valid = await createChallengeResponse(roomKey, first.challengeId, first.challenge, "client", "observer");
+		expect(typeof (await verifier.consume(first.challengeId, valid, "client", "observer", 105))).toBe("string");
+		await expect(verifier.consume(first.challengeId, valid, "client", "observer", 105)).rejects.toThrow("missing or expired");
+
+		const forged = verifier.issue(10, 100);
+		await expect(verifier.consume(forged.challengeId, valid, "client", "observer", 105)).rejects.toThrow("Invalid challenge");
+		const expired = verifier.issue(10, 100);
+		const expiredResponse = await createChallengeResponse(roomKey, expired.challengeId, expired.challenge, "client", "observer");
+		await expect(verifier.consume(expired.challengeId, expiredResponse, "client", "observer", 111)).rejects.toThrow("expired");
+	});
+
+	it("drops duplicates and lower values while surfacing gaps", () => {
+		const window = new ReceiveSequenceWindow();
+		expect(window.accept(1).kind).toBe("accepted");
+		expect(window.accept(1).kind).toBe("dropped");
+		expect(window.accept(3)).toEqual({ kind: "gap", expectedSequence: 2, observedSequence: 3 });
+		expect(window.lastAccepted).toBe(1);
+		expect(window.accept(2).kind).toBe("accepted");
+		expect(() => window.accept(Number.MAX_SAFE_INTEGER + 1)).toThrow();
+	});
+
+	it("strictly rejects v1 and unknown application fields", () => {
+		expect(() => decodeApplicationFrame({ t: "hello", proto: 1, name: "legacy" })).toThrow();
+		expect(() => decodeApplicationFrame({ t: "detach", legacy: true })).toThrow("Unknown field");
 	});
 });
 
@@ -123,47 +169,6 @@ describe("collab link format", () => {
 		}
 	});
 
-	it("wraps custom relay links in an explicit web UI origin", () => {
-		const webLink = formatCollabWebLink(
-			"wss://relay.example.com:8443",
-			roomId,
-			key,
-			undefined,
-			"https://web.example",
-		);
-		expect(webLink.startsWith("https://web.example/#relay.example.com:8443/r/")).toBe(true);
-		const parsed = parseCollabLink(webLink);
-		if ("error" in parsed) throw new Error(parsed.error);
-		expect(parsed.wsUrl).toBe(`wss://relay.example.com:8443/r/${roomId}`);
-	});
-
-	it("parses non-local http web UI wrappers by their relay fragment", () => {
-		const keyText = Buffer.from(key).toString("base64url");
-		const parsed = parseCollabLink(`http://web.example/collab/#relay.example.com:8443/r/${roomId}.${keyText}`);
-		if ("error" in parsed) throw new Error(parsed.error);
-		expect(parsed.wsUrl).toBe(`wss://relay.example.com:8443/r/${roomId}`);
-	});
-
-	it("parses split web UI wrappers with full relay URLs in the fragment", () => {
-		const keyText = Buffer.from(key).toString("base64url");
-		const parsed = parseCollabLink(`https://web.example/collab/#wss://relay.example.com/r/${roomId}.${keyText}`);
-		if ("error" in parsed) throw new Error(parsed.error);
-		expect(parsed.wsUrl).toBe(`wss://relay.example.com/r/${roomId}`);
-	});
-
-	it("falls through invalid http wrapper fragments without reparsing them", () => {
-		expect(parseCollabLink("https://web.example/#not-a-collab-link")).toEqual({
-			error: "Collab link must contain a /r/<roomId> path",
-		});
-	});
-
-	it("prefers browser wrapper fragments over relay-like web paths", () => {
-		const inner = formatCollabLink("wss://relay.example.com", roomId, key);
-		const parsed = parseCollabLink(`https://web.example/r/abcdefghij#${inner}`);
-		if ("error" in parsed) throw new Error(parsed.error);
-		expect(parsed.wsUrl).toBe(`wss://relay.example.com/r/${roomId}`);
-	});
-
 	it("parses the scheme-less display form of web deep links", () => {
 		const parsed = parseCollabLink(`my.omp.sh/#${formatCollabLink(DEFAULT_RELAY_URL, roomId, key)}`);
 		if ("error" in parsed) throw new Error(parsed.error);
@@ -204,46 +209,6 @@ describe("collab link format", () => {
 		expect(url.pathname).toBe("/");
 		expect(url.search).toBe("");
 		expect(url.hash).toBe(`#${roomId}.${Buffer.from(key).toString("base64url")}`);
-	});
-
-	it("normalizes explicit web UI roots, paths, trailing slashes, and ports", () => {
-		const rootLink = formatCollabWebLink(DEFAULT_RELAY_URL, roomId, key, undefined, " https://web.example/ ");
-		expect(rootLink.startsWith("https://web.example/#")).toBe(true);
-
-		const pathLink = formatCollabWebLink(
-			DEFAULT_RELAY_URL,
-			roomId,
-			key,
-			undefined,
-			"https://web.example:8443/collab///",
-		);
-		expect(pathLink.startsWith("https://web.example:8443/collab/#")).toBe(true);
-
-		const localHttpLink = formatCollabWebLink(
-			DEFAULT_RELAY_URL,
-			roomId,
-			key,
-			undefined,
-			"http://localhost:5173/app/",
-		);
-		expect(localHttpLink.startsWith("http://localhost:5173/app/#")).toBe(true);
-	});
-
-	it("rejects web UI URLs without an http or https protocol", () => {
-		expect(() => formatCollabWebLink(DEFAULT_RELAY_URL, roomId, key, undefined, "ftp://web.example")).toThrow(
-			"collab.webUrl must start with http:// or https://",
-		);
-	});
-
-	it("rejects non-local plain-http web UI URLs", () => {
-		expect(() => formatCollabWebLink(DEFAULT_RELAY_URL, roomId, key, undefined, "http://web.example")).toThrow(
-			"collab.webUrl must use https:// unless it targets localhost",
-		);
-	});
-	it("rejects web UI URLs with query strings or fragments", () => {
-		expect(() => formatCollabWebLink(DEFAULT_RELAY_URL, roomId, key, undefined, "https://web.example/?x=1")).toThrow(
-			"collab.webUrl must not include a query string or fragment",
-		);
 	});
 });
 

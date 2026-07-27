@@ -3,7 +3,7 @@ import { replaceTabs } from "../../tools/render-utils";
 import { highlightCode, theme } from "../theme/theme";
 import type { CopyTarget } from "../utils/copy-targets";
 import {
-	matchesSelectCancel,
+	matchesUiDismiss,
 	matchesSelectDown,
 	matchesSelectPageDown,
 	matchesSelectPageUp,
@@ -27,34 +27,17 @@ export interface CopySelectorCallbacks {
 interface FlatNode {
 	target: CopyTarget;
 	depth: number;
-	/** Last among its siblings (drives └─ vs ├─). */
-	isLast: boolean;
-	/** Per-ancestor flag: does ancestor at that level have a following sibling? */
-	ancestorHasNext: boolean[];
-}
-
-/** Render one tree connector as exactly three cells (e.g. "├─ ", "└─ ", "|--"). */
-function connectorCells(symbol: string): string {
-	const chars = Array.from(symbol);
-	return (chars[0] ?? " ") + (chars[1] ?? theme.tree.horizontal) + (chars[2] ?? " ");
-}
-
-/** The 3-cell ancestor gutter: a vertical guide when the ancestor continues. */
-function gutterCells(hasNext: boolean): string {
-	return `${hasNext ? theme.tree.vertical : " "}  `;
 }
 
 /**
- * Fullscreen `/copy` picker rendered as a `/tree`-style tree inside one
- * outlined box: a title, the tree of copy targets (recent assistant messages
- * with their code blocks nested beneath), a live preview of the highlighted
- * node, and a keybinding footer. Every node copies its `content` on Enter.
+ * Fullscreen `/copy` picker rendered as a `/tree`-style tree: a heading, the
+ * tree of copy targets (recent assistant messages with their code blocks nested
+ * beneath via indentation), a live preview of the highlighted node, and a
+ * keybinding footer. Every node copies its `content` on Enter.
  */
 export class CopySelectorComponent implements Component {
 	#roots: CopyTarget[];
 	#cursorId: string;
-	#lastSourceTarget?: CopyTarget;
-	#lastSource?: string;
 	#treeRows = MIN_TREE_ROWS;
 	// Reused across renders to wrap preview content to the pane width.
 	#previewText = new Text("", 0, 0);
@@ -67,26 +50,22 @@ export class CopySelectorComponent implements Component {
 		this.#cursorId = roots[0]?.id ?? "";
 	}
 
-	invalidate(): void {
-		this.#lastSourceTarget = undefined;
-		this.#lastSource = undefined;
-	}
+	invalidate(): void {}
 
 	#flatten(): FlatNode[] {
 		const out: FlatNode[] = [];
-		const walk = (nodes: CopyTarget[], depth: number, ancestorHasNext: boolean[]) => {
-			nodes.forEach((target, i) => {
-				const isLast = i === nodes.length - 1;
-				out.push({ target, depth, isLast, ancestorHasNext });
-				if (target.children?.length) walk(target.children, depth + 1, [...ancestorHasNext, !isLast]);
-			});
+		const walk = (nodes: CopyTarget[], depth: number) => {
+			for (const target of nodes) {
+				out.push({ target, depth });
+				if (target.children?.length) walk(target.children, depth + 1);
+			}
 		};
-		walk(this.#roots, 0, []);
+		walk(this.#roots, 0);
 		return out;
 	}
 
 	handleInput(keyData: string): void {
-		if (matchesSelectCancel(keyData)) {
+		if (matchesUiDismiss(keyData)) {
 			this.callbacks.onCancel();
 			return;
 		}
@@ -126,9 +105,7 @@ export class CopySelectorComponent implements Component {
 			const target = node.target;
 			const isSelected = i === cursorIdx;
 
-			let prefix = "";
-			for (let l = 0; l < node.depth - 1; l++) prefix += gutterCells(node.ancestorHasNext[l]!);
-			if (node.depth > 0) prefix += connectorCells(node.isLast ? theme.tree.last : theme.tree.branch);
+			const prefix = "   ".repeat(node.depth);
 
 			const cursor = isSelected ? "❯ " : "  ";
 			const hint = target.hint ?? "";
@@ -158,16 +135,9 @@ export class CopySelectorComponent implements Component {
 		// Code/command previews are syntax-highlighted; everything else is shown
 		// as plain text. Both are wrapped (not hard-truncated) to the pane width.
 		const isCode = target.language !== undefined;
-		let source: string;
-		if (target === this.#lastSourceTarget && this.#lastSource !== undefined) {
-			source = this.#lastSource;
-		} else {
-			source = isCode
-				? highlightCode(replaceTabs(target.preview), target.language).join("\n")
-				: replaceTabs(target.preview);
-			this.#lastSourceTarget = target;
-			this.#lastSource = source;
-		}
+		const source = isCode
+			? highlightCode(replaceTabs(target.preview), target.language).join("\n")
+			: replaceTabs(target.preview);
 		this.#previewText.setText(source);
 		const wrapped = this.#previewText.render(Math.max(1, width - 4));
 
@@ -202,7 +172,7 @@ export class CopySelectorComponent implements Component {
 		const footer = [
 			rawKeyHint("↑↓", "move"),
 			keyHint("tui.select.confirm", "copy"),
-			keyHint("tui.select.cancel", "quit"),
+			keyHint("ui.dismiss", "quit"),
 		].join(theme.fg("dim", " · "));
 
 		return [

@@ -93,55 +93,6 @@ def test_blank_bot_login_rejected(monkeypatch: pytest.MonkeyPatch, env: dict[str
         Settings()  # type: ignore[call-arg]
 
 
-@pytest.mark.parametrize(
-    "raw_login",
-    [
-        "roboomp",
-        " @roboomp ",
-        " @ROBOOMP ",
-        "roboomp[bot]",
-        "@roboomp[bot]",
-        " @ROBOOMP[BOT] ",
-    ],
-)
-def test_bot_login_normalizes_mention_case_and_app_suffix(
-    monkeypatch: pytest.MonkeyPatch, env: dict[str, str], raw_login: str
-) -> None:
-    monkeypatch.setenv("ROBOMP_BOT_LOGIN", raw_login)
-    reset_settings_cache()
-    cfg = Settings()  # type: ignore[call-arg]
-    assert cfg.bot_login == "roboomp"
-
-
-def test_maintainer_logins_normalize_csv_entries(
-    monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
-) -> None:
-    monkeypatch.setenv("ROBOMP_MAINTAINER_LOGINS", " can1357, @ROBOOMP , @Alice[bot] ,, ")
-    reset_settings_cache()
-    cfg = Settings()  # type: ignore[call-arg]
-    assert cfg.maintainer_logins == frozenset({"can1357", "roboomp", "alice"})
-
-
-@pytest.mark.parametrize(
-    ("raw_login", "expected"),
-    [
-        ("roboomp", "roboomp"),
-        (" @roboomp ", "roboomp"),
-        (" @ROBOOMP ", "roboomp"),
-        ("roboomp[bot]", "roboomp"),
-        ("@roboomp[bot]", "roboomp"),
-        (" @ROBOOMP[BOT] ", "roboomp"),
-    ],
-)
-def test_maintainer_logins_common_entry_forms(
-    monkeypatch: pytest.MonkeyPatch, env: dict[str, str], raw_login: str, expected: str
-) -> None:
-    monkeypatch.setenv("ROBOMP_MAINTAINER_LOGINS", raw_login)
-    reset_settings_cache()
-    cfg = Settings()  # type: ignore[call-arg]
-    assert cfg.maintainer_logins == frozenset({expected})
-
-
 def test_model_pool_single(env: dict[str, str]) -> None:
     cfg = Settings()  # type: ignore[call-arg]
     assert cfg.model_pool == (cfg.model,)
@@ -181,3 +132,20 @@ def test_task_timeout_hard_grace_env_parses(monkeypatch: pytest.MonkeyPatch, env
     reset_settings_cache()
     cfg = Settings()  # type: ignore[call-arg]
     assert cfg.task_timeout_hard_grace_seconds == 12.5
+
+
+def test_thinking_effort_preserves_exact_value(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    monkeypatch.setenv("ROBOMP_THINKING", "custom-effort")
+    reset_settings_cache()
+    assert Settings().thinking_level == "custom-effort"  # type: ignore[call-arg]
+
+
+def test_blank_thinking_effort_rejected(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    monkeypatch.setenv("ROBOMP_THINKING", "   ")
+    reset_settings_cache()
+    with pytest.raises(ValueError, match="ROBOMP_THINKING"):
+        Settings()  # type: ignore[call-arg]

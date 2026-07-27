@@ -120,28 +120,22 @@ def test_resolve_model_alias_no_match() -> None:
     assert resolve_model_alias("", pool) is None
 
 
-def test_resolve_thinking_level_aliases() -> None:
-    # Spec from the user: xhi|xhigh|hi|high|med|medium|lo|low|none|off|no.
-    assert resolve_thinking_level("off") == "off"
-    assert resolve_thinking_level("none") == "off"
-    assert resolve_thinking_level("no") == "off"
-    assert resolve_thinking_level("lo") == "low"
-    assert resolve_thinking_level("low") == "low"
-    assert resolve_thinking_level("med") == "medium"
-    assert resolve_thinking_level("medium") == "medium"
-    assert resolve_thinking_level("hi") == "high"
-    assert resolve_thinking_level("high") == "high"
-    assert resolve_thinking_level("xhi") == "xhigh"
-    assert resolve_thinking_level("xhigh") == "xhigh"
+def test_resolve_thinking_level_preserves_advertised_efforts() -> None:
+    supported = ("low", "max", "ultra", "custom-effort")
+    assert resolve_thinking_level("max", supported) == "max"
+    assert resolve_thinking_level("ULTRA", supported) == "ultra"
+    assert resolve_thinking_level("  Max  ", supported) == "max"
+    assert resolve_thinking_level("custom-effort", supported) == "custom-effort"
 
 
-def test_resolve_thinking_level_case_insensitive() -> None:
-    assert resolve_thinking_level("HIGH") == "high"
-    assert resolve_thinking_level("  Hi  ") == "high"
-    assert resolve_thinking_level("XHi") == "xhigh"
+def test_resolve_thinking_level_rejects_unadvertised_or_aliased_efforts() -> None:
+    supported = ("low", "ultra")
+    assert resolve_thinking_level("high", supported) is None
+    assert resolve_thinking_level("custom-effort", supported) is None
+    assert resolve_thinking_level("hi", supported) is None
+    assert resolve_thinking_level("", supported) is None
 
 
-def test_resolve_thinking_level_rejects_unknown() -> None:
-    assert resolve_thinking_level("ultra") is None
-    assert resolve_thinking_level("") is None
-    assert resolve_thinking_level("minimal") is None
+def test_resolve_thinking_level_preserves_custom_casing_without_capabilities() -> None:
+    assert resolve_thinking_level("Custom-Effort") == "Custom-Effort"
+    assert resolve_thinking_level("ultra") == "ultra"

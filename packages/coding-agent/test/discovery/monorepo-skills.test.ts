@@ -13,7 +13,6 @@ import { clearCache } from "@oh-my-pi/pi-coding-agent/capability/fs";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/capability/skill";
 import type { LoadContext, LoadResult } from "@oh-my-pi/pi-coding-agent/capability/types";
 import { scanSkillsFromDir } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
-import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
 function writeSkill(dir: string, name: string, description: string): void {
 	const skillDir = path.join(dir, name);
@@ -43,7 +42,7 @@ describe("monorepo skill discovery", () => {
 
 	afterEach(() => {
 		clearCache();
-		removeSyncWithRetries(tempDir);
+		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
 	test("finds skills in ancestor .omp/skills/ directories", async () => {

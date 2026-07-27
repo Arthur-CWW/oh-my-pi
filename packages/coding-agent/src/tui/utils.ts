@@ -2,7 +2,7 @@
  * Shared helpers for tool-rendered UI components.
  */
 import { padding, visibleWidth } from "@oh-my-pi/pi-tui";
-import type { Theme, ThemeBg } from "../modes/theme/theme";
+import type { ThemeBg } from "../modes/theme/theme";
 import type { State } from "./types";
 
 export { Ellipsis, truncateToWidth } from "@oh-my-pi/pi-tui";
@@ -75,18 +75,6 @@ export class Hasher {
 export interface RenderCache {
 	key: bigint;
 	lines: string[];
-}
-
-export function buildTreePrefix(ancestors: boolean[], theme: Theme): string {
-	return ancestors.map(hasNext => (hasNext ? `${theme.tree.vertical}  ` : "   ")).join("");
-}
-
-export function getTreeBranch(isLast: boolean, theme: Theme): string {
-	return isLast ? theme.tree.last : theme.tree.branch;
-}
-
-export function getTreeContinuePrefix(isLast: boolean, theme: Theme): string {
-	return isLast ? "   " : `${theme.tree.vertical}  `;
 }
 
 export function padToWidth(text: string, width: number, bgFn?: (s: string) => string): string {

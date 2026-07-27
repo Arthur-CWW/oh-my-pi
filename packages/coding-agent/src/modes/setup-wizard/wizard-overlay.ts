@@ -1,17 +1,10 @@
-import {
-	type Component,
-	matchesKey,
-	type OverlayFocusOwner,
-	padding,
-	routeSgrMouseInput,
-	type SgrMouseEvent,
-	truncateToWidth,
-	visibleWidth,
-} from "@oh-my-pi/pi-tui";
+import { type Component, matchesKey, padding, parseSgrMouse, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { gradientLogo, PI_LOGO } from "../components/welcome";
+import { keyHint } from "../components/keybinding-hints";
 import { theme } from "../theme/theme";
 import type { InteractiveModeContext } from "../types";
+import { matchesUiDismiss } from "../utils/keybinding-matchers";
 import { renderSetupOutro, SETUP_OUTRO_MS } from "./scenes/outro";
 import { renderSetupSplash, SETUP_SPLASH_MS, SETUP_TICK_MS } from "./scenes/splash";
 import type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult } from "./scenes/types";
@@ -62,7 +55,7 @@ function dissolveFrames(from: string[], to: string[], progress: number, height: 
 	return out;
 }
 
-export class SetupWizardComponent implements Component, OverlayFocusOwner {
+export class SetupWizardComponent implements Component {
 	#phase: WizardPhase = "splash";
 	#phaseStartedAt = performance.now();
 	#sceneIndex = 0;
@@ -72,7 +65,6 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	#disposed = false;
 	/** Screen row where the active scene's body began in the last rendered frame. */
 	#bodyRowStart = 0;
-	#sceneFocusTarget: Component | undefined;
 
 	constructor(
 		readonly ctx: InteractiveModeContext,
@@ -97,17 +89,10 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 		this.#activeScene?.invalidate?.();
 	}
 
-	ownsOverlayFocusTarget(component: Component): boolean {
-		if (this.#sceneFocusTarget !== component) return false;
-		return true;
-	}
-
 	handleInput(data: string): void {
 		if (this.#phase === "done") return;
 		if (data.startsWith("\x1b[<")) {
-			routeSgrMouseInput(data, event => {
-				this.#routeMouseEvent(event);
-			});
+			this.#handleMouse(data);
 			return;
 		}
 		if (matchesKey(data, "ctrl+c")) {
@@ -119,7 +104,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 				matchesKey(data, "enter") ||
 				matchesKey(data, "return") ||
 				matchesKey(data, "space") ||
-				matchesKey(data, "escape")
+				matchesUiDismiss(data)
 			) {
 				this.#beginScene();
 			}
@@ -130,7 +115,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 				matchesKey(data, "enter") ||
 				matchesKey(data, "return") ||
 				matchesKey(data, "space") ||
-				matchesKey(data, "escape")
+				matchesUiDismiss(data)
 			) {
 				this.#complete();
 			}
@@ -149,7 +134,9 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	 * advances the splash/outro like Enter. Raw reports never reach scene
 	 * keyboard input.
 	 */
-	#routeMouseEvent(event: SgrMouseEvent): void {
+	#handleMouse(data: string): void {
+		const event = parseSgrMouse(data);
+		if (!event) return;
 		if (this.#phase === "splash" || this.#phase === "outro") {
 			if (!event.leftClick) return;
 			if (this.#phase === "splash") this.#beginScene();
@@ -218,7 +205,10 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 
 		const footer = [
 			"",
-			centerLine(theme.fg("dim", "↑/↓ select · enter confirm · esc skip · ctrl+c exit setup"), width),
+			centerLine(
+				`${theme.fg("dim", "↑/↓ select · enter confirm · ")}${keyHint("ui.dismiss", "skip")}${theme.fg("dim", " · ctrl+c exit setup")}`,
+				width,
+			),
 		];
 		const maxBodyLines = Math.max(0, height - header.length - footer.length);
 		const body = this.#activeScene?.render(contentWidth).slice(0, maxBodyLines) ?? [];
@@ -275,19 +265,12 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 			ctx: this.ctx,
 			requestRender: () => this.ctx.ui.requestRender(),
 			finish: (_result: SetupSceneResult) => this.#finishScene(),
-			setFocus: component => {
-				this.#sceneFocusTarget = component ?? undefined;
-				this.ctx.ui.setFocus(component);
-			},
-			restoreFocus: () => {
-				this.#sceneFocusTarget = undefined;
-				this.ctx.ui.setFocus(this);
-			},
+			setFocus: component => this.ctx.ui.setFocus(component),
+			restoreFocus: () => this.ctx.ui.setFocus(this),
 		};
 		this.#activeScene = scene.mount(host);
 		this.#phase = targetPhase;
 		this.#phaseStartedAt = performance.now();
-		this.#sceneFocusTarget = undefined;
 		this.ctx.ui.setFocus(this);
 		void this.#activeScene.onMount?.();
 		this.ctx.ui.requestRender();
@@ -310,7 +293,6 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	}
 
 	#unmountActiveScene(): void {
-		this.#sceneFocusTarget = undefined;
 		this.#activeScene?.onUnmount?.();
 		this.#activeScene?.dispose?.();
 		this.#activeScene = undefined;

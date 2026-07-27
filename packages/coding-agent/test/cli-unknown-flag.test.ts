@@ -51,6 +51,30 @@ describe("parseArgs — unrecognized flag tracking (#2459)", () => {
 		expect(parsed.messages).toEqual(["hi"]);
 	});
 
+	it("consumes exactly one disposable TUI manifest path", () => {
+		const parsed = parseArgs(["--tui-bundle-manifest", "./current.json", "hello"]);
+
+		expect(parsed.unrecognizedFlags).toEqual([]);
+		expect(parsed.tuiBundleManifest).toBe("./current.json");
+		expect(parsed.messages).toEqual(["hello"]);
+	});
+
+	it("parses runner-backed collaboration hosting without consuming the prompt", () => {
+		const parsed = parseArgs(["--tui-bundle-manifest", "./current.json", "--collab-host", "hello"]);
+
+		expect(parsed.unrecognizedFlags).toEqual([]);
+		expect(parsed.collabHost).toBe(true);
+		expect(parsed.messages).toEqual(["hello"]);
+	});
+
+	it("parses a runner-backed collaboration relay without consuming the prompt", () => {
+		const parsed = parseArgs(["--collab-host", "--collab-relay", "ws://localhost:1355", "hello"]);
+
+		expect(parsed.unrecognizedFlags).toEqual([]);
+		expect(parsed.collabRelay).toBe("ws://localhost:1355");
+		expect(parsed.messages).toEqual(["hello"]);
+	});
+
 	it("treats `-` (stdin marker) and `--` (POSIX separator) as non-flags, not unrecognized", () => {
 		// `-` is a stdin marker by convention and shows up in pipelines; `--`
 		// is the POSIX positional separator. Neither is a typo and neither

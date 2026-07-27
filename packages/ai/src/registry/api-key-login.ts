@@ -6,7 +6,6 @@
  * optionally validate it, and return the trimmed key.
  */
 
-import * as AIError from "../error";
 import {
 	validateAnthropicCompatibleApiKey,
 	validateApiKeyAgainstModelsEndpoint,
@@ -32,7 +31,6 @@ type ModelsEndpointValidation = {
 	kind: "models-endpoint";
 	provider: string;
 	modelsUrl: string;
-	headers?: Record<string, string> | (() => Record<string, string> | undefined);
 };
 
 export type ApiKeyLoginConfig = {
@@ -53,7 +51,7 @@ export type ApiKeyLoginConfig = {
 export function createApiKeyLogin(config: ApiKeyLoginConfig): (options: OAuthController) => Promise<string> {
 	return async function login(options: OAuthController): Promise<string> {
 		if (!options.onPrompt) {
-			throw new AIError.OnPromptRequiredError(config.providerLabel);
+			throw new Error(`${config.providerLabel} login requires onPrompt callback`);
 		}
 
 		options.onAuth?.({
@@ -67,12 +65,12 @@ export function createApiKeyLogin(config: ApiKeyLoginConfig): (options: OAuthCon
 		});
 
 		if (options.signal?.aborted) {
-			throw new AIError.LoginCancelledError();
+			throw new Error("Login cancelled");
 		}
 
 		const trimmed = apiKey.trim();
 		if (!trimmed) {
-			throw new AIError.ApiKeyRequiredError();
+			throw new Error("API key is required");
 		}
 
 		if (config.validation) {
@@ -100,7 +98,6 @@ export function createApiKeyLogin(config: ApiKeyLoginConfig): (options: OAuthCon
 					provider: config.validation.provider,
 					apiKey: trimmed,
 					modelsUrl: config.validation.modelsUrl,
-					headers: config.validation.headers,
 					signal: options.signal,
 					fetch: options.fetch,
 				});

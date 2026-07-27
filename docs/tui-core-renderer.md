@@ -110,7 +110,7 @@ updates never rewrite anything a scrolled reader could be looking at.
 
 | Emitter | Bytes | When |
 |---|---|---|
-| `#emitFullPaint` | home + `frame[0, C')` + window rows; with `clearScrollback`, ED3 clears history without an ED2 viewport blank | gestures only |
+| `#emitFullPaint` | clears + `frame[0, C')` + window rows | gestures only. `clearScrollback` ⇒ `\x1b[2J\x1b[H\x1b[3J`; otherwise ED22 (when supported) + `\x1b[2J\x1b[H` |
 | `#emitUpdate` scroll-append | `\r\n` + new bottom rows + changed-row range | the rows leaving the screen are exactly the chunk, content untouched since painted |
 | `#emitUpdate` in-window diff | relative move + changed-row range rewrite | nothing scrolls, nothing commits (cursor-only when nothing changed) |
 | `#emitUpdate` seam rewrite | chunk rows + full window rewrite | commit advance, window re-anchor, hidden-gap backfill, mux resize |
@@ -118,11 +118,9 @@ updates never rewrite anything a scrolled reader could be looking at.
 **ED3 (`CSI 3 J`) is emitted in exactly one place** — `#emitFullPaint` with
 `clearScrollback: true` — and is reached only by user gestures: session
 replace/branch/resume (`requestRender(true, { clearScrollback: true })`),
-resize outside a multiplexer, `resetDisplay()` (Ctrl+L). It clears native
-history without `ED2` first; the replay overwrites every row from home so
-terminals without synchronized output do not expose a blank viewport. A gesture
-pins the user to the tail, so the history snap is acceptable; multiplexers never
-get ED3 (it is a no-op there and a replay would duplicate pane history).
+resize outside a multiplexer, `resetDisplay()` (Ctrl+L). A gesture pins the
+user to the tail, so the snap is acceptable; multiplexers never get ED3 (it is
+a no-op there and a replay would duplicate pane history).
 
 The ordinary update path never emits ED2/ED3 or an absolute cursor home —
 several terminal families snap a scrolled reader to the bottom on those.
@@ -253,20 +251,13 @@ cosmetic, not corrupting.
 ## 5. Width model
 
 `visibleWidth` / `truncateToWidth` / `sliceByColumn` / `wrapTextWithAnsi`
-(`utils.ts`) all agree on **one UAX#11 width model**. Slicing, truncation,
-wrapping, and segment extraction run on the native engine
-(`@oh-my-pi/pi-natives`, Rust `unicode-width`); `visibleWidth` measures with
-`Bun.stringWidth` **pinned to that same model** (`STRING_WIDTH_OPTS`:
-`countAnsiEscapeCodes: false`, `ambiguousIsNarrow: true`) — a JSC builtin that
-shares the native width tables without the per-call N-API box the native
-scanner traps on under Bun 1.3.x. The two must never disagree; mixing unpinned
-width models in measure-vs-slice produced crashes.
+(`utils.ts`) all route through **one native UAX#11 engine**
+(`@oh-my-pi/pi-natives`, Rust `unicode-width`). `Bun.stringWidth` was dropped
+deliberately — mixing two width models in measure-vs-slice produced crashes.
 
 - Fast path: printable ASCII is one cell per code unit.
-- Anything past the ASCII prefix measures through `Bun.stringWidth` (CSI/OSC
-  stripped to zero); tabs are added back at the fixed `DEFAULT_TAB_WIDTH` columns.
-- OSC 66 sized spans are added back as `scale × (explicit w ?? payload width)` —
-  `Bun.stringWidth` would otherwise strip the whole span to zero.
+- ZWJ pictographic emoji take the `visibleWidthByGrapheme` override.
+- OSC 66 sized text takes the native path.
 
 **Rule:** any new measuring code routes through these helpers, and the hot
 path clamps instead of throwing. Known residual: combining-heavy scripts
@@ -349,7 +340,6 @@ default-on only for kitty/ghostty (`PI_NO_KITTY_PLACEHOLDERS` /
 | `PI_HARDWARE_CURSOR=1` | Show the real hardware cursor instead of a rendered one. |
 | `PI_NOTIFICATIONS=off\|0\|false` | Suppress terminal notifications. |
 | `PI_DEBUG_REDRAW=1` | Log the chosen render intent + ledger state per frame to the debug log. |
-| `PI_TUI_RESIZE_IN_PLACE=1\|0` | Force resize to repaint in place (no alt-screen borrow, no ED3 rewrap) on / off. Default-on for terminals that re-report size on alt-screen toggles (Warp). |
 
 Removed with the old engine: `PI_TUI_ED3_SAFE` (no ED3-risk lever exists),
 `PI_CLEAR_ON_SHRINK` (shrinks always clear exactly), `PI_TUI_DEBUG` (per-render

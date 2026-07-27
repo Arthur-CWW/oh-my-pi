@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { compareVersions, enumerateChangelogVersions, mergePackageSection } from "./ci-release-notes";
+import {
+	compareVersions,
+	enumerateChangelogVersions,
+	mergePackageSection,
+} from "./ci-release-notes";
 
 const FIXTURE = [
 	"# Changelog",
@@ -82,7 +86,9 @@ describe("mergePackageSection", () => {
 	it("includes every silent-tag section above floor up to target inclusive", () => {
 		const merged = mergePackageSection(FIXTURE, "15.12.4", "15.13.0");
 		// 15.12.6 and 15.12.5 unique fingerprints must land.
-		expect(merged).toContain("Removed `writeLine`/`writeLineSync` from the public SessionStorageWriter contract.");
+		expect(merged).toContain(
+			"Removed `writeLine`/`writeLineSync` from the public SessionStorageWriter contract.",
+		);
 		expect(merged).toContain("Added package-level exports for session context.");
 		expect(merged).toContain("Changed terminal resize handling to paint only the visible viewport.");
 		// 15.12.4 entry stays excluded — it is the floor.
@@ -114,7 +120,8 @@ describe("mergePackageSection", () => {
 	});
 
 	it("returns empty string when no version in the requested range carries body content", () => {
-		const empty = ["# Changelog", "", "## [15.13.0] - 2026-06-14", "", "## [15.12.6] - 2026-06-14"].join("\n");
+		const empty = ["# Changelog", "", "## [15.13.0] - 2026-06-14", "", "## [15.12.6] - 2026-06-14"]
+			.join("\n");
 		expect(mergePackageSection(empty, "15.12.5", "15.13.0")).toBe("");
 	});
 

@@ -3,7 +3,6 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { TaskTool, taskSchema } from "@oh-my-pi/pi-coding-agent/task";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { type } from "arktype";
 
 // Contract: the single-spawn schema (`task.batch: false`; the exported
 // `taskSchema` instance) carries no batch fields. The batch shape (`tasks[]` +
@@ -13,38 +12,49 @@ import { type } from "arktype";
 
 describe("task schema (single-spawn)", () => {
 	it("accepts {agent, assignment}", () => {
-		const parsed = taskSchema({ agent: "explore", assignment: "Map the auth module." });
-		expect(parsed instanceof type.errors).toBe(false);
+		const parsed = taskSchema.safeParse({ agent: "explore", assignment: "Map the auth module." });
+		expect(parsed.success).toBe(true);
 	});
 
-	it("defaults agent to `task` when omitted", () => {
-		const parsed = taskSchema({ assignment: "Map the auth module." });
-		expect(parsed instanceof type.errors).toBe(false);
-		if (!(parsed instanceof type.errors)) {
-			expect(parsed.agent).toBe("task");
-		}
+	it("accepts timeoutSec within the per-spawn bounds", () => {
+		const parsed = taskSchema.safeParse({ agent: "explore", assignment: "Map the auth module.", timeoutSec: 600 });
+		expect(parsed.success).toBe(true);
+	});
+
+	it("rejects timeoutSec outside the per-spawn bounds", () => {
+		expect(
+			taskSchema.safeParse({ agent: "explore", assignment: "Map the auth module.", timeoutSec: 59 }).success,
+		).toBe(false);
+		expect(
+			taskSchema.safeParse({ agent: "explore", assignment: "Map the auth module.", timeoutSec: 3601 }).success,
+		).toBe(false);
+	});
+
+	it("requires agent", () => {
+		const parsed = taskSchema.safeParse({ assignment: "Map the auth module." });
+		expect(parsed.success).toBe(false);
 	});
 
 	it("requires assignment", () => {
-		const parsed = taskSchema({ agent: "explore" });
-		expect(parsed instanceof type.errors).toBe(true);
+		const parsed = taskSchema.safeParse({ agent: "explore" });
+		expect(parsed.success).toBe(false);
 	});
 
 	it("strips tasks/context/schema from the single-spawn schema", () => {
-		const parsed = taskSchema({
+		const parsed = taskSchema.safeParse({
 			agent: "explore",
 			assignment: "Map the auth module.",
 			context: "shared background",
 			tasks: [{ id: "A", assignment: "..." }],
 			schema: '{"properties":{}}',
 		});
-		expect(parsed instanceof type.errors).toBe(false);
-		if (!(parsed instanceof type.errors)) {
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
 			// Unknown keys are stripped: batch/context exist only on the batch
 			// schema and the per-call schema input was removed outright.
-			expect("tasks" in parsed).toBe(false);
-			expect("context" in parsed).toBe(false);
-			expect("schema" in parsed).toBe(false);
+			expect("tasks" in parsed.data).toBe(false);
+			expect("context" in parsed.data).toBe(false);
+			expect("schema" in parsed.data).toBe(false);
 		}
 	});
 });
@@ -71,11 +81,9 @@ describe("task spawn validation", () => {
 		return result.content.find(part => part.type === "text")?.text ?? "";
 	}
 
-	it("defaults a missing agent to `task`", async () => {
-		// With no `agent`, execute() normalizes to the `task` default, so the
-		// failure is unknown-agent (none discovered), not missing-agent.
+	it("rejects a missing agent", async () => {
 		const text = await executeText({ assignment: "..." });
-		expect(text).toContain('Unknown agent "task"');
+		expect(text).toContain("Missing `agent`");
 	});
 
 	it("rejects a missing assignment", async () => {

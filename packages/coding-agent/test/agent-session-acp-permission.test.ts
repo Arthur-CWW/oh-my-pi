@@ -22,7 +22,7 @@ import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 
 // ---------------------------------------------------------------------------
 // Shared setup
@@ -37,7 +37,7 @@ function makeFakeTool(name: string): AgentTool & { executeCalls: number } {
 		name,
 		label: name,
 		description: `Fake ${name}`,
-		parameters: type({ "command?": "string" }),
+		parameters: z.object({ command: z.string().optional() }),
 		executeCalls: 0,
 		async execute() {
 			tool.executeCalls++;
@@ -103,7 +103,7 @@ async function createSession(
 		toolRegistry: new Map(tools.map(t => [t.name, t])),
 	});
 
-	if (bridge) sess.setClientBridge(bridge);
+	if (bridge) await sess.setClientBridge(bridge);
 	return sess;
 }
 
@@ -134,7 +134,7 @@ async function createSessionWithMockModel(
 		modelRegistry: { getApiKey: () => "test-key" } as never,
 		toolRegistry: new Map(tools.map(t => [t.name, t])),
 	});
-	sess.setClientBridge(bridge);
+	await sess.setClientBridge(bridge);
 	return sess;
 }
 
@@ -671,7 +671,7 @@ it("setClientBridge wraps tools that were already active", async () => {
 	const permissionSpy = spyOn(bridge, "requestPermission");
 	session = await createSession([bashTool]);
 
-	session.setClientBridge(bridge);
+	await session.setClientBridge(bridge);
 	const wrappedBash = session.agent.state.tools.find(t => t.name === "bash");
 	expect(wrappedBash).toBeDefined();
 
@@ -784,14 +784,4 @@ it("read tool: requestPermission is never called for non-gated tools", async () 
 
 	expect(permissionSpy).toHaveBeenCalledTimes(0);
 	expect(readTool.executeCalls).toBe(1);
-});
-
-it("setActiveToolsByName normalizes legacy tool names", async () => {
-	const grepTool = makeFakeTool("grep");
-	const globTool = makeFakeTool("glob");
-	session = await createSession([grepTool, globTool]);
-
-	await session.setActiveToolsByName(["Search", "find", "grep"]);
-
-	expect(session.getActiveToolNames()).toEqual(["grep", "glob"]);
 });

@@ -193,7 +193,14 @@ export type AgentEvent =
 	| { type: "notice"; level: "info" | "warning" | "error"; message: string; source?: string }
 	| { type: "auto_compaction_start"; reason: string; action: string }
 	| { type: "auto_compaction_end"; aborted: boolean; willRetry: boolean; errorMessage?: string; skipped?: boolean }
-	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
+	| {
+			type: "auto_retry_start";
+			cause: "network" | "rate-limit" | "provider";
+			attempt: number;
+			maxAttempts: number;
+			delayMs: number;
+			errorMessage: string;
+	  }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
 	| { type: "thinking_level_changed"; thinkingLevel?: string };
 
@@ -235,16 +242,69 @@ export interface SessionState {
 	isAborting?: boolean;
 }
 
+export type AgentOperationAction = "reconcile" | "retry" | "cancel" | "inspect";
+
+export interface AgentActivity {
+	kind: string;
+	fromId?: string;
+	toId?: string;
+	at?: number;
+}
+
+export interface AgentRecovery {
+	state: string;
+	reason?: string;
+	attempt?: number;
+	task?: string;
+	model?: string;
+	thinkingLevel?: string | null;
+	hotswapModel?: string;
+}
+
+export interface AgentQuota {
+	originalProvider?: string;
+	routedProvider?: string;
+	originalModel?: string;
+	routedModel?: string;
+	ratePerHour?: number;
+	projectedEmptyAt?: number;
+	resetAt?: number;
+	deficitPerHour?: number;
+	decisionReason?: string;
+	quotaPoolId?: string;
+	limitWindowId?: string;
+}
+
+export interface AgentOperation {
+	inputId?: string;
+	state: "blocked" | "uncertain" | "retrying";
+	resetAt?: number;
+	reason?: string;
+	supportedActions: readonly AgentOperationAction[];
+}
+
 export interface AgentSnapshot {
 	id: string;
 	displayName: string;
 	kind: "main" | "sub";
 	parentId?: string;
+	/** Stable owning tree root, derived from parentId; omitted by older hosts. */
+	group?: string;
 	status: "running" | "idle" | "parked" | "aborted";
 	/** Whether the host has a transcript file for this agent (gates remote transcript fetch). */
 	hasSessionFile: boolean;
 	createdAt: number;
 	lastActivity: number;
+	/** Stable registration order; lower values appeared first. */
+	spawnIndex?: number;
+	/** Work-aware display metadata; omitted by older hosts. */
+	activity?: AgentActivity;
+	/** Durable restart recovery metadata; omitted when not recovering. */
+	recovery?: AgentRecovery;
+	/** Admission/quota decision metadata; omitted when no quota decision exists. */
+	quota?: AgentQuota;
+	/** Only present when the host can safely operate on a real durable condition. */
+	operation?: AgentOperation;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -295,109 +355,105 @@ export interface SubagentLifecyclePayload {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Frames (JSON inside the AES-GCM seal)
+// Collaboration protocol v2
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type CollabUiSelectItem = string | { label: string; description?: string };
+export const COLLAB_PROTO = 2 as const;
 
-export type CollabUiResponseValue = string | undefined;
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | { readonly [key: string]: JsonValue } | readonly JsonValue[];
+export type CollabCapability = "observer" | "controller";
+export type CollabDirection = "guestToHost" | "hostToGuest";
 
-export type CollabUiRequestDraft =
-	| {
-			kind: "select";
-			title: string;
-			options: CollabUiSelectItem[];
-			initialIndex?: number;
-			selectionMarker?: "radio" | "checkbox";
-			checkedIndices?: number[];
-			markableCount?: number;
-			helpText?: string;
-	  }
-	| {
-			kind: "editor";
-			title: string;
-			prefill?: string;
-	  };
+/** Sent in plaintext by the host. It contains fresh entropy, but no secret. */
+export interface CollabChallengeFrame {
+	readonly t: "challenge";
+	readonly proto: typeof COLLAB_PROTO;
+	readonly challengeId: string;
+	readonly challenge: string;
+}
 
-export type CollabUiRequest = CollabUiRequestDraft & { reqId: number };
+/** First authenticated guest payload. A challenge is valid for one attach only. */
+export interface CollabAttachFrame {
+	readonly t: "attach";
+	readonly proto: typeof COLLAB_PROTO;
+	readonly clientId: string;
+	readonly viewId: string;
+	readonly requestedCapability: CollabCapability;
+	readonly writeToken?: string;
+	readonly challengeId: string;
+	readonly challengeResponse: string;
+	readonly afterSequence?: number;
+}
+
+/** JSON-only runner projection. Live runner objects must never cross this boundary. */
+export interface CollabRunnerSnapshot {
+	readonly revision: number;
+	readonly runnerSequence: number;
+	readonly sessionRevision: number;
+	readonly transcript: JsonValue;
+	readonly durableInputs: readonly JsonValue[];
+	readonly activeOperations: readonly JsonValue[];
+	readonly workflow: JsonValue;
+	readonly tools: JsonValue;
+	readonly todos: JsonValue;
+	readonly model: JsonValue;
+	readonly session: JsonValue;
+}
+
+export interface CollabRunnerEventDelivery {
+	readonly kind: "event";
+	readonly event: JsonValue;
+}
 
 export type GuestFrame =
-	| {
-			t: "hello";
-			proto: number;
-			name: string;
-			/**
-			 * base64url write token proving full-link possession; absent for
-			 * read-only (view) links. The host marks peers without a valid token
-			 * read-only and rejects their mutating frames.
-			 */
-			writeToken?: string;
-	  }
-	| { t: "prompt"; text: string; images?: ImageContent[] }
-	| { t: "ui-response"; reqId: number; value?: CollabUiResponseValue }
-	| { t: "abort" }
-	| { t: "agent-cmd"; cmd: "chat" | "kill" | "revive"; agentId: string; text?: string }
-	| { t: "fetch-transcript"; reqId: number; agentId: string; fromByte: number };
-
-/** EventBus channels mirrored to guests (task subagent traffic only). */
-export type BusChannel = "task:subagent:progress" | "task:subagent:lifecycle";
+	| CollabAttachFrame
+	| { readonly t: "command"; readonly requestId: string; readonly command: JsonValue }
+	| { readonly t: "acquireController"; readonly requestId: string }
+	| { readonly t: "releaseController"; readonly requestId: string; readonly controllerEpoch: number }
+	| { readonly t: "detach" }
+	| { readonly t: "resyncRequest"; readonly afterSequence: number };
 
 export type HostFrame =
 	| {
-			t: "welcome";
-			proto: number;
-			header: SessionHeader;
-			state: SessionState;
-			agents: AgentSnapshot[];
-			/**
-			 * Total number of `SessionEntry` items the host will deliver in the
-			 * `snapshot-chunk` frames that follow. Guests stay in the loading
-			 * phase until they have accumulated all of them (or a chunk arrives
-			 * with `final: true`).
-			 */
-			entryCount: number;
-			/** True when this peer joined through a read-only (view) link. */
-			readOnly?: boolean;
+			readonly t: "welcome";
+			readonly connectionId: string;
+			readonly viewId: string;
+			readonly capability: CollabCapability;
+			readonly controllerEpoch?: number;
+			readonly snapshot: CollabRunnerSnapshot;
+			readonly sequence: number;
 	  }
-	/**
-	 * Targeted snapshot fragment delivered after `welcome`. Hosts split the
-	 * transcript into chunks bounded by byte size so a multi-MB session is not
-	 * forced through one giant frame the relay may stall on. The last chunk
-	 * carries `final: true`; guests finalize the replica on that frame.
-	 */
-	| { t: "snapshot-chunk"; entries: SessionEntry[]; final: boolean }
-	| { t: "entry"; entry: SessionEntry }
-	| { t: "event"; event: AgentEvent }
-	| { t: "state"; state: SessionState }
-	/** Mirrored EventBus traffic (task subagent lifecycle/progress channels only). */
-	| { t: "bus"; channel: BusChannel; data: unknown }
-	| { t: "agents"; agents: AgentSnapshot[] }
-	| { t: "ui-request"; request: CollabUiRequest }
-	| { t: "ui-request-end"; reqId: number }
-	/** Targeted reply to fetch-transcript; `text` is decoded JSONL from `fromByte`, `newSize` the next offset base. */
-	| { t: "transcript"; reqId: number; text: string; newSize: number; error?: string }
-	| { t: "bye"; reason: string }
-	| { t: "error"; message: string };
+	| { readonly t: "delta"; readonly delivery: CollabRunnerEventDelivery }
+	| {
+			readonly t: "resync";
+			readonly snapshot: CollabRunnerSnapshot;
+			readonly expectedSequence: number;
+			readonly observedSequence: number;
+	  }
+	| {
+			readonly t: "commandResult";
+			readonly requestId: string;
+			readonly ok: boolean;
+			readonly receipt?: JsonValue;
+			readonly error?: { readonly code: string; readonly message: string };
+	  }
+	| { readonly t: "controllerChanged"; readonly capability: CollabCapability; readonly controllerEpoch?: number }
+	| { readonly t: "bye"; readonly reason: string }
+	| { readonly t: "error"; readonly code: string; readonly message: string; readonly requestId?: string };
 
-export type WireFrame = GuestFrame | HostFrame;
+export type CollabApplicationFrame = GuestFrame | HostFrame;
 
-/**
- * Wire protocol version carried in `hello`; the host rejects mismatches.
- *
- * - `1` (legacy): `welcome` carried the full `entries` array inline.
- * - `2`: `welcome` carries only metadata (header/state/agents/entryCount);
- *   transcript entries follow in `snapshot-chunk` frames, so multi-MB
- *   sessions are not gated on a single welcome frame fitting under the
- *   guest's first-welcome timeout.
- * - `3`: host asks guests through `ui-request`/`ui-request-end` host frames
- *   answered by the `ui-response` guest frame. Guests that predate the
- *   grammar would silently drop `ui-request` (asks hang forever on the
- *   host), so they must be rejected at hello.
- */
-export const COLLAB_PROTO = 3;
+/** Authenticated plaintext. Routing metadata is duplicated as AES-GCM AAD. */
+export interface SecureCollabFrame {
+	readonly proto: typeof COLLAB_PROTO;
+	readonly connectionId: string;
+	readonly direction: CollabDirection;
+	readonly sequence: number;
+	readonly frame: CollabApplicationFrame;
+}
 
-/** Parameter key used for intent tracing (e.g. prompt explanation/reasoning) */
-export const INTENT_FIELD = "i";
+export type WireFrame = CollabChallengeFrame | SecureCollabFrame;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Envelope & link constants

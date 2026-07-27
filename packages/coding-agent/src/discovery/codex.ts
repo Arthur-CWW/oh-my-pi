@@ -6,6 +6,7 @@
  *
  * User directory: ~/.codex
  */
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import { registerProvider } from "../capability";
@@ -42,6 +43,83 @@ const PROVIDER_ID = "codex";
 const DISPLAY_NAME = "OpenAI Codex";
 const PRIORITY = 70;
 
+const APPLE_PLUGIN_NAMES = ["build-ios-apps", "build-macos-apps"] as const;
+const APPLE_PLUGIN_NAMESPACES = ["openai-curated-remote", "openai-curated"] as const;
+const APPLE_PROJECT_SUFFIXES = [".xcodeproj", ".xcworkspace"];
+
+interface CodexPluginManifest {
+	name?: unknown;
+	skills?: unknown;
+}
+
+async function hasAppleWorkspaceContext(cwd: string): Promise<boolean> {
+	if (cwd.endsWith(".swift")) return true;
+	try {
+		const entries = await fs.promises.readdir(cwd, { withFileTypes: true });
+		return entries.some(
+			entry =>
+				entry.name === "Package.swift" ||
+				entry.name.endsWith(".swift") ||
+				APPLE_PROJECT_SUFFIXES.some(suffix => entry.name.endsWith(suffix)),
+		);
+	} catch {
+		return false;
+	}
+}
+
+async function resolveCodexPluginSkillsDir(
+	ctx: LoadContext,
+	pluginName: (typeof APPLE_PLUGIN_NAMES)[number],
+): Promise<string | null> {
+	const pluginCacheDir = path.join(ctx.home, SOURCE_PATHS.codex.userBase, "plugins", "cache");
+	const candidates: string[] = [];
+	for (const namespace of APPLE_PLUGIN_NAMESPACES) {
+		const pluginDir = path.join(pluginCacheDir, namespace, pluginName);
+		let versions: fs.Dirent[];
+		try {
+			versions = await fs.promises.readdir(pluginDir, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const version of versions) {
+			if (version.isDirectory() && !version.name.startsWith(".")) {
+				candidates.push(path.join(pluginDir, version.name));
+			}
+		}
+	}
+
+	candidates.sort();
+	for (let index = candidates.length - 1; index >= 0; index -= 1) {
+		const root = candidates[index];
+		const manifestPath = path.join(root, ".codex-plugin", "plugin.json");
+		const manifestContent = await readFile(manifestPath);
+		if (!manifestContent) continue;
+		try {
+			const manifest = JSON.parse(manifestContent) as CodexPluginManifest;
+			if (manifest.name !== pluginName || typeof manifest.skills !== "string") continue;
+			const skillsDir = path.resolve(root, manifest.skills);
+			const relative = path.relative(root, skillsDir);
+			if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+			if ((await fs.promises.stat(skillsDir)).isDirectory()) return skillsDir;
+		} catch {}
+	}
+	return null;
+}
+
+async function loadApplePluginSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
+	if (!(await hasAppleWorkspaceContext(ctx.cwd))) return { items: [], warnings: [] };
+	const dirs = await Promise.all(APPLE_PLUGIN_NAMES.map(name => resolveCodexPluginSkillsDir(ctx, name)));
+	const results = await Promise.all(
+		dirs
+			.filter((dir): dir is string => dir !== null)
+			.map(dir => scanSkillsFromDir(ctx, { dir, providerId: PROVIDER_ID, level: "user" })),
+	);
+	return {
+		items: results.flatMap(result => result.items),
+		warnings: results.flatMap(result => result.warnings ?? []),
+	};
+}
+
 function getProjectCodexDir(ctx: LoadContext): string {
 	return path.join(ctx.cwd, ".codex");
 }
@@ -73,6 +151,7 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 // MCP Servers (config.toml)
 // =============================================================================
 
+// MCP config.toml is a compatibility source; mcp/config.ts excludes this provider unless opted in.
 async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
 	const warnings: string[] = [];
 
@@ -211,7 +290,7 @@ function extractMCPServersFromToml(toml: Record<string, unknown>): Record<string
 // Skills (skills/)
 // =============================================================================
 
-async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
+export async function loadCodexSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 	const userSkillsDir = path.join(ctx.home, SOURCE_PATHS.codex.userBase, "skills");
 	const codexDir = getProjectCodexDir(ctx);
 	const projectSkillsDir = path.join(codexDir, "skills");
@@ -227,6 +306,7 @@ async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 			providerId: PROVIDER_ID,
 			level: "project",
 		}),
+		loadApplePluginSkills(ctx),
 	]);
 
 	const items = results.flatMap(r => r.items);
@@ -342,20 +422,12 @@ async function loadHooks(ctx: LoadContext): Promise<LoadResult<Hook>> {
 	const codexDir = getProjectCodexDir(ctx);
 	const projectHooksDir = path.join(codexDir, "hooks");
 
-	// OMP hooks must be named `pre-<tool>.<ts|js>` or `post-<tool>.<ts|js>`.
-	// Files without that prefix are not OMP hooks (e.g. the standalone Codex
-	// hook scripts users keep alongside) — silently dropping the prefix and
-	// defaulting to `pre:<basename>` caused those scripts to be imported as
-	// extension factories and any top-level `process.exit()` killed startup
-	// (#3680).
 	const transformHook =
-		(level: "user" | "project") =>
-		(name: string, _content: string, path: string, source: SourceMeta): Hook | null => {
+		(level: "user" | "project") => (name: string, _content: string, path: string, source: SourceMeta) => {
 			const baseName = name.replace(/\.(ts|js)$/, "");
 			const match = baseName.match(/^(pre|post)-(.+)$/);
-			if (!match) return null;
-			const hookType = match[1] as "pre" | "post";
-			const toolName = match[2];
+			const hookType = (match?.[1] as "pre" | "post") || "pre";
+			const toolName = match?.[2] || baseName;
 			return {
 				name,
 				path,
@@ -367,11 +439,11 @@ async function loadHooks(ctx: LoadContext): Promise<LoadResult<Hook>> {
 		};
 
 	const results = await Promise.all([
-		loadFilesFromDir<Hook>(ctx, userHooksDir, PROVIDER_ID, "user", {
+		loadFilesFromDir(ctx, userHooksDir, PROVIDER_ID, "user", {
 			extensions: ["ts", "js"],
 			transform: transformHook("user"),
 		}),
-		loadFilesFromDir<Hook>(ctx, projectHooksDir, PROVIDER_ID, "project", {
+		loadFilesFromDir(ctx, projectHooksDir, PROVIDER_ID, "project", {
 			extensions: ["ts", "js"],
 			transform: transformHook("project"),
 		}),
@@ -476,9 +548,9 @@ registerProvider<MCPServer>(mcpCapability.id, {
 registerProvider<Skill>(skillCapability.id, {
 	id: PROVIDER_ID,
 	displayName: DISPLAY_NAME,
-	description: "Load skills from ~/.codex/skills and .codex/skills/",
+	description: "Load skills from Codex user/project directories and installed Apple-development plugins",
 	priority: PRIORITY,
-	load: loadSkills,
+	load: loadCodexSkills,
 });
 
 registerProvider<ExtensionModule>(extensionModuleCapability.id, {

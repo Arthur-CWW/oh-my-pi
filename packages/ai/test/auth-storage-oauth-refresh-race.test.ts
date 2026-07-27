@@ -1,15 +1,16 @@
-import { afterEach, beforeEach, describe, expect, setSystemTime, test, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
 	type AuthCredentialStore,
 	AuthStorage,
+	type AuthStorageOptions,
 	type CredentialDisabledEvent,
 	SqliteAuthCredentialStore,
 } from "@oh-my-pi/pi-ai/auth-storage";
 import * as oauthUtils from "@oh-my-pi/pi-ai/registry/oauth";
-import { removeWithRetries } from "../../utils/src/temp";
+import type { OAuthCredentials } from "@oh-my-pi/pi-ai/registry/oauth/types";
 import { withEnv } from "./helpers";
 
 const SUPPRESS_ANTHROPIC_ENV = {
@@ -23,6 +24,18 @@ describe("AuthStorage OAuth refresh race", () => {
 	let authStorage: AuthStorage | null = null;
 	let events: CredentialDisabledEvent[] = [];
 
+	const failingRefreshForRace: NonNullable<AuthStorageOptions["refreshOAuthCredential"]> = async (
+		_provider,
+		_credentialId,
+		credential,
+	) => {
+		if (credential.refresh === "stale-refresh") {
+			throw new Error(
+				'HTTP 400 invalid_grant {"error":"invalid_grant","error_description":"Refresh token not found or invalid"}',
+			);
+		}
+		return credential;
+	};
 	beforeEach(async () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-auth-oauth-race-"));
 		store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
@@ -36,13 +49,12 @@ describe("AuthStorage OAuth refresh race", () => {
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
-		setSystemTime();
 		oauthUtils.unregisterOAuthProviders("auth-storage-oauth-refresh-race-test");
 		store?.close();
 		store = null;
 		authStorage = null;
 		if (tempDir) {
-			await removeWithRetries(tempDir);
+			await fs.rm(tempDir, { recursive: true, force: true });
 			tempDir = "";
 		}
 	});
@@ -118,6 +130,15 @@ describe("AuthStorage OAuth refresh race", () => {
 				expires: Date.now() - 60_000,
 			},
 		]);
+		// Drive the refresh failure deterministically so the test does not depend
+		// on the Anthropic token endpoint being reachable from the sanitized runner.
+		authStorage = new AuthStorage(store, {
+			onCredentialDisabled: event => {
+				events.push(event);
+			},
+			refreshOAuthCredential: failingRefreshForRace,
+		});
+		await authStorage.reload();
 		const storedBefore = store.listAuthCredentials("anthropic");
 		expect(storedBefore).toHaveLength(1);
 		const credentialId = storedBefore[0]!.id;
@@ -173,6 +194,46 @@ describe("AuthStorage OAuth refresh race", () => {
 		});
 	});
 
+	test("reports provider refresh lifecycle around the actual async request", async () => {
+		if (!store) throw new Error("test setup failed");
+		const refreshStarted = Promise.withResolvers<void>();
+		const refreshResult = Promise.withResolvers<OAuthCredentials>();
+		await authStorage!.set("anthropic", {
+			type: "oauth",
+			access: "expired-access",
+			refresh: "refresh-token",
+			expires: Date.now() - 60_000,
+		});
+		authStorage = new AuthStorage(store, {
+			refreshOAuthCredential: async () => {
+				refreshStarted.resolve();
+				return refreshResult.promise;
+			},
+		});
+		await authStorage.reload();
+		const observedStates: string[][] = [];
+		const unsubscribe = authStorage.onGenerationChanged(() => {
+			observedStates.push([...authStorage!.getRefreshState().refreshingProviders]);
+		});
+
+		await withEnv(SUPPRESS_ANTHROPIC_ENV, async () => {
+			const request = authStorage!.getApiKey("anthropic", "refresh-lifecycle");
+			await refreshStarted.promise;
+			expect(authStorage!.getRefreshState().refreshingProviders).toEqual(["anthropic"]);
+			refreshResult.resolve({
+				access: "fresh-access",
+				refresh: "fresh-refresh",
+				expires: Date.now() + 60 * 60_000,
+			});
+			expect(await request).toBe("fresh-access");
+		});
+
+		expect(authStorage.getRefreshState().refreshingProviders).toEqual([]);
+		expect(observedStates).toContainEqual(["anthropic"]);
+		expect(observedStates.at(-1)).toEqual([]);
+		unsubscribe();
+	});
+
 	test("still disables when the failure is real (no concurrent rotation)", async () => {
 		if (!authStorage) throw new Error("test setup failed");
 
@@ -186,6 +247,16 @@ describe("AuthStorage OAuth refresh race", () => {
 				expires: Date.now() - 60_000,
 			},
 		]);
+
+		// Drive the refresh failure deterministically so the test does not depend
+		// on the Anthropic token endpoint being reachable from the sanitized runner.
+		authStorage = new AuthStorage(store!, {
+			onCredentialDisabled: event => {
+				events.push(event);
+			},
+			refreshOAuthCredential: failingRefreshForRace,
+		});
+		await authStorage.reload();
 
 		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async () => {
 			throw new Error('invalid_grant {"error":"invalid_grant"}');
@@ -385,236 +456,5 @@ describe("AuthStorage OAuth refresh race", () => {
 
 		const retryKey = await authStorage.getApiKey("unit-oauth-rotation", sessionId);
 		expect(retryKey).toBe("access-b");
-	});
-
-	test("persists a refreshed token by id when a concurrent disable shifts indices", async () => {
-		if (!authStorage || !store) throw new Error("test setup failed");
-		const now = Date.now();
-		// Three distinct expired accounts → index order A, B, C by id ascending.
-		await authStorage.set("anthropic", [
-			{ type: "oauth", access: "a-acc", refresh: "a-ref", expires: now - 60_000, accountId: "acc-a", email: "a@x" },
-			{ type: "oauth", access: "b-acc", refresh: "b-ref", expires: now - 60_000, accountId: "acc-b", email: "b@x" },
-			{ type: "oauth", access: "c-acc", refresh: "c-ref", expires: now - 60_000, accountId: "acc-c", email: "c@x" },
-		]);
-		const seeded = store.listAuthCredentials("anthropic");
-		expect(seeded).toHaveLength(3);
-		const idA = seeded[0]!.id;
-		const idB = seeded[1]!.id;
-		const idC = seeded[2]!.id;
-
-		// While B refreshes, a definitive failure disables A — removing index 0 and
-		// shifting B from index 1 to index 0. A pre-await positional write would
-		// land B's rotated token on C; the id-addressed write must hit B and leave
-		// C untouched.
-		vi.spyOn(oauthUtils, "refreshOAuthToken").mockImplementation(async (_provider, credential) => {
-			if (credential.refresh === "b-ref") {
-				authStorage!.disableCredentialById(idA, "test: concurrent disable");
-				return {
-					access: "b-fresh",
-					refresh: "b-fresh-ref",
-					expires: now + 60 * 60_000,
-					accountId: "acc-b",
-					email: "b@x",
-				};
-			}
-			return { ...credential, expires: now + 60 * 60_000 };
-		});
-
-		await withEnv(SUPPRESS_ANTHROPIC_ENV, async () => {
-			const refreshed = await authStorage!.forceRefreshCredentialById(idB);
-			expect(refreshed.id).toBe(idB);
-		});
-
-		const after = store.listAuthCredentials("anthropic");
-		const bRow = after.find(row => row.id === idB);
-		const cRow = after.find(row => row.id === idC);
-		expect(bRow?.credential.type).toBe("oauth");
-		if (bRow?.credential.type === "oauth") expect(bRow.credential.refresh).toBe("b-fresh-ref");
-		expect(cRow?.credential.type).toBe("oauth");
-		if (cRow?.credential.type === "oauth") expect(cRow.credential.refresh).toBe("c-ref");
-	});
-
-	test("propagates CAS update storage errors instead of treating them as peer refresh wins", async () => {
-		if (!authStorage || !store) throw new Error("test setup failed");
-
-		await authStorage.set("unit-oauth-cas-update-error", [
-			{
-				type: "oauth",
-				access: "access-old",
-				refresh: "refresh-old",
-				expires: Date.now() - 60_000,
-			},
-		]);
-
-		const failure = new Error("sqlite update failed");
-		vi.spyOn(store, "tryUpdateAuthCredentialIfMatches").mockImplementation(() => {
-			throw failure;
-		});
-
-		await expect(
-			authStorage.refreshStoredOAuthCredential("unit-oauth-cas-update-error", {
-				credentialFromRow: row => row,
-				forceRefresh: true,
-				refresh: async credential => ({
-					...credential,
-					access: "access-fresh",
-					refresh: "refresh-fresh",
-					expires: Date.now() + 60 * 60_000,
-				}),
-			}),
-		).rejects.toThrow("sqlite update failed");
-
-		const stored = store.listAuthCredentials("unit-oauth-cas-update-error");
-		expect(stored).toHaveLength(1);
-		expect(stored[0]?.credential).toMatchObject({
-			type: "oauth",
-			access: "access-old",
-			refresh: "refresh-old",
-		});
-	});
-
-	test("propagates CAS disable storage errors instead of treating them as peer rotations", async () => {
-		if (!authStorage || !store) throw new Error("test setup failed");
-
-		await authStorage.set("unit-oauth-cas-disable-error", [
-			{
-				type: "oauth",
-				access: "access-old",
-				refresh: "refresh-old",
-				expires: Date.now() - 60_000,
-			},
-		]);
-
-		const failure = new Error("sqlite disable failed");
-		vi.spyOn(store, "tryDisableAuthCredentialIfMatches").mockImplementation(() => {
-			throw failure;
-		});
-
-		await expect(
-			authStorage.refreshStoredOAuthCredential("unit-oauth-cas-disable-error", {
-				credentialFromRow: row => row,
-				forceRefresh: true,
-				refresh: async () => {
-					throw new Error('HTTP 400 invalid_grant {"error":"invalid_grant"}');
-				},
-				isDefinitiveFailure: error => error instanceof Error && error.message.includes("invalid_grant"),
-				disabledCause: error => `oauth refresh failed: ${error instanceof Error ? error.message : String(error)}`,
-			}),
-		).rejects.toThrow("sqlite disable failed");
-
-		expect(events).toHaveLength(0);
-		const stored = store.listAuthCredentials("unit-oauth-cas-disable-error");
-		expect(stored).toHaveLength(1);
-		expect(stored[0]?.credential).toMatchObject({
-			type: "oauth",
-			access: "access-old",
-			refresh: "refresh-old",
-		});
-	});
-
-	test("does not persist a refresh when durable lease ownership is lost before CAS update", async () => {
-		if (!authStorage || !store) throw new Error("test setup failed");
-
-		const now = Date.parse("2026-07-10T12:00:00.000Z");
-		setSystemTime(new Date(now));
-		await authStorage.set("unit-oauth-lease-update", [
-			{
-				type: "oauth",
-				access: "access-old",
-				refresh: "refresh-old",
-				expires: now - 60_000,
-			},
-		]);
-		const storedBefore = store.listAuthCredentials("unit-oauth-lease-update");
-		expect(storedBefore).toHaveLength(1);
-		const credentialId = storedBefore[0]!.id;
-		const stealLease = store.tryAcquireCredentialRefreshLease?.bind(store);
-		if (!stealLease) throw new Error("test store does not support refresh leases");
-		const updateSpy = vi.spyOn(store, "tryUpdateAuthCredentialIfMatches");
-
-		const result = await authStorage.refreshStoredOAuthCredential("unit-oauth-lease-update", {
-			credentialFromRow: row => row,
-			forceRefresh: true,
-			refresh: async credential => {
-				// Keep the credential row bytes unchanged while expiring owner A's
-				// lease. A non-lease-fenced final CAS would still persist this token.
-				setSystemTime(new Date(now + 16_000));
-				expect(stealLease(credentialId, "peer-owner", now + 31_000)).toBe(true);
-				return {
-					...credential,
-					access: "access-from-lost-owner",
-					refresh: "refresh-from-lost-owner",
-					expires: now + 60 * 60_000,
-				};
-			},
-		});
-
-		expect(updateSpy).toHaveBeenCalled();
-		expect(result).toMatchObject({ refreshed: false, removed: false });
-		expect(result.credential).toMatchObject({
-			type: "oauth",
-			access: "access-old",
-			refresh: "refresh-old",
-		});
-		const stored = store.listAuthCredentials("unit-oauth-lease-update");
-		expect(stored).toHaveLength(1);
-		expect(stored[0]?.id).toBe(credentialId);
-		expect(stored[0]?.credential).toMatchObject({
-			type: "oauth",
-			access: "access-old",
-			refresh: "refresh-old",
-		});
-	});
-
-	test("does not terminal-disable a credential when durable lease ownership is lost before CAS disable", async () => {
-		if (!authStorage || !store) throw new Error("test setup failed");
-
-		const now = Date.parse("2026-07-10T12:30:00.000Z");
-		setSystemTime(new Date(now));
-		await authStorage.set("unit-oauth-lease-disable", [
-			{
-				type: "oauth",
-				access: "access-old",
-				refresh: "refresh-old",
-				expires: now - 60_000,
-			},
-		]);
-		const storedBefore = store.listAuthCredentials("unit-oauth-lease-disable");
-		expect(storedBefore).toHaveLength(1);
-		const credentialId = storedBefore[0]!.id;
-		const stealLease = store.tryAcquireCredentialRefreshLease?.bind(store);
-		if (!stealLease) throw new Error("test store does not support refresh leases");
-		const disableSpy = vi.spyOn(store, "tryDisableAuthCredentialIfMatches");
-
-		const result = await authStorage.refreshStoredOAuthCredential("unit-oauth-lease-disable", {
-			credentialFromRow: row => row,
-			forceRefresh: true,
-			refresh: async () => {
-				// The row still contains the same stale refresh token. Only the lease
-				// fence distinguishes stale owner A from the current row owner.
-				setSystemTime(new Date(now + 16_000));
-				expect(stealLease(credentialId, "peer-owner", now + 31_000)).toBe(true);
-				throw new Error('HTTP 400 invalid_grant {"error":"invalid_grant"}');
-			},
-			isDefinitiveFailure: error => error instanceof Error && error.message.includes("invalid_grant"),
-			disabledCause: error => `oauth refresh failed: ${error instanceof Error ? error.message : String(error)}`,
-		});
-
-		expect(disableSpy).toHaveBeenCalled();
-		expect(result).toMatchObject({ refreshed: false, removed: false });
-		expect(result.credential).toMatchObject({
-			type: "oauth",
-			access: "access-old",
-			refresh: "refresh-old",
-		});
-		expect(events).toHaveLength(0);
-		const stored = store.listAuthCredentials("unit-oauth-lease-disable");
-		expect(stored).toHaveLength(1);
-		expect(stored[0]?.id).toBe(credentialId);
-		expect(stored[0]?.credential).toMatchObject({
-			type: "oauth",
-			access: "access-old",
-			refresh: "refresh-old",
-		});
 	});
 });

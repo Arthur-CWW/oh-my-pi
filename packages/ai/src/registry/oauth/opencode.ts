@@ -9,7 +9,6 @@
  * 3. User pastes the API key back into the CLI
  */
 
-import * as AIError from "../../error";
 import type { OAuthController } from "./types";
 
 const AUTH_URL = "https://opencode.ai/auth";
@@ -22,7 +21,7 @@ const AUTH_URL = "https://opencode.ai/auth";
  */
 export async function loginOpenCode(options: OAuthController): Promise<string> {
 	if (!options.onPrompt) {
-		throw new AIError.OnPromptRequiredError("OpenCode Zen");
+		throw new Error("OpenCode Zen login requires onPrompt callback");
 	}
 
 	// Open browser to auth page
@@ -38,12 +37,12 @@ export async function loginOpenCode(options: OAuthController): Promise<string> {
 	});
 
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 
 	const trimmed = apiKey.trim();
 	if (!trimmed) {
-		throw new AIError.ApiKeyRequiredError();
+		throw new Error("API key is required");
 	}
 
 	return trimmed;

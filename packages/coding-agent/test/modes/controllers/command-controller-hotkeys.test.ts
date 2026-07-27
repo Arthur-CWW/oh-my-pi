@@ -9,7 +9,14 @@ describe("buildHotkeysMarkdown", () => {
 			"app.plan.toggle": "Alt+Shift+P",
 			"app.tools.expand": "Ctrl+O",
 			"app.display.reset": "Ctrl+L",
-			"app.interrupt": "Esc",
+			"ui.dismiss": "Esc",
+			"app.interrupt": "Ctrl+Q",
+			"app.navigation.down": "j",
+			"app.navigation.up": "k",
+			"app.navigation.pageDown": "Ctrl+D",
+			"app.navigation.pageUp": "Ctrl+U",
+			"app.navigation.top": "g",
+			"app.navigation.bottom": "G",
 			"app.clear": "Ctrl+C",
 			"app.exit": "Ctrl+D",
 			"app.suspend": "Ctrl+Z",
@@ -21,7 +28,6 @@ describe("buildHotkeysMarkdown", () => {
 			"app.history.search": "Ctrl+R",
 			"app.thinking.toggle": "Ctrl+T",
 			"app.editor.external": "Ctrl+G",
-			"app.retry": "Alt+R",
 			"app.clipboard.pasteImage": "Ctrl+V",
 			"app.stt.toggle": "Alt+H",
 		};
@@ -39,10 +45,16 @@ describe("buildHotkeysMarkdown", () => {
 		expect(markdown).toContain("| `Ctrl+Shift+L` | Select model (temporary) |");
 		expect(markdown).toContain("| `Alt+M` | Select model (set roles) |");
 		expect(markdown).toContain("| `Ctrl+L` | Reset terminal display |");
-		expect(markdown).toContain("| `Alt+R` | Retry last failed assistant turn |");
 		expect(markdown).toContain("| `Alt+Shift+P` | Toggle plan mode |");
-		expect(markdown).toContain("| `#<number>` | GitHub issue/PR reference");
-		expect(markdown).toContain("| `#` / `#<text>` | Prompt actions");
+		expect(markdown).toContain("| `Esc` | Dismiss autocomplete / active UI |");
+		expect(markdown).toContain("| `Ctrl+Q` | Interrupt active work |");
+		expect(markdown).toContain("| `#` | Open prompt actions |");
+		expect(markdown).toContain("| `j` | scroll one line down |");
+		expect(markdown).toContain("| `k` | scroll one line up |");
+		expect(markdown).toContain("| `n` | next orchestrator root |");
+		expect(markdown).toContain("| `p` | previous orchestrator root |");
+		expect(markdown).toContain("| `gg` | jump to the first line |");
+		expect(markdown).toContain("| `G` | jump to the last line |");
 		for (const line of lines) {
 			if (line.length === 0) continue;
 			expect(line.startsWith(" ")).toBe(false);

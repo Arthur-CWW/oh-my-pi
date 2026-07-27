@@ -3,7 +3,6 @@ import { type PtyRunResult, PtySession } from "@oh-my-pi/pi-natives";
 import {
 	type Component,
 	extractPrintableText,
-	matchesKey,
 	padding,
 	parseKey,
 	parseKittySequence,
@@ -14,7 +13,9 @@ import { sanitizeText } from "@oh-my-pi/pi-utils";
 import type * as XtermModule from "@xterm/headless";
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import { Settings } from "../config/settings";
+import { editorKey } from "../modes/components/keybinding-hints";
 import type { Theme } from "../modes/theme/theme";
+import { matchesAppInterrupt } from "../modes/utils/keybinding-matchers";
 import { OutputSink, type OutputSummary } from "../session/streaming-output";
 import { sanitizeWithOptionalSixelPassthrough } from "../utils/sixel";
 import { resolveOutputMaxColumns, resolveOutputSinkHeadBytes } from "./output-meta";
@@ -103,7 +104,7 @@ function normalizeInputForPty(data: string, applicationCursorKeysMode: boolean):
 	}
 	return data;
 }
-class BashInteractiveOverlayComponent implements Component {
+export class BashInteractiveOverlayComponent implements Component {
 	#terminal: XtermTerminalType;
 	#state: "running" | "complete" | "timed_out" | "killed" = "running";
 	#exitCode: number | undefined;
@@ -201,7 +202,7 @@ class BashInteractiveOverlayComponent implements Component {
 	}
 
 	handleInput(data: string): void {
-		if (this.#state === "running" && (matchesKey(data, "escape") || matchesKey(data, "esc"))) {
+		if (this.#state === "running" && matchesAppInterrupt(data)) {
 			this.#onDismiss();
 			return;
 		}
@@ -236,9 +237,9 @@ class BashInteractiveOverlayComponent implements Component {
 	}
 	render(width: number): readonly string[] {
 		const safeWidth = Math.max(20, width);
-		const innerWidth = Math.max(1, safeWidth - 2);
+		const innerWidth = Math.max(1, safeWidth - 1);
 		const maxOverlayRows = Math.max(5, Math.floor(this.getTerminalRows() * 0.8));
-		const chromeRows = 4;
+		const chromeRows = 2; // header + footer (no frame rules)
 		const maxContentRows = Math.max(1, maxOverlayRows - chromeRows);
 		// Propagate terminal resize to PTY session
 		const currentCols = innerWidth;
@@ -268,23 +269,14 @@ class BashInteractiveOverlayComponent implements Component {
 		const footer =
 			this.#state === "running"
 				? truncateToWidth(
-						`${this.uiTheme.fg("warning", "esc")} ${this.uiTheme.fg("dim", "force-kill")} ${this.uiTheme.fg("dim", "· input forwarded to PTY")}`,
+						`${this.uiTheme.fg("warning", editorKey("app.interrupt"))} ${this.uiTheme.fg("dim", "force-kill")} ${this.uiTheme.fg("dim", "· input forwarded to PTY")}`,
 						innerWidth,
 					)
 				: truncateToWidth(this.uiTheme.fg("dim", "session finished"), innerWidth);
 		const visibleLines = this.#readViewport(innerWidth, maxContentRows);
 		const content = visibleLines.length > 0 ? visibleLines : [padding(innerWidth)];
-		const borderHorizontal = this.uiTheme.fg("border", this.uiTheme.boxRound.horizontal.repeat(innerWidth));
-		const borderVertical = this.uiTheme.fg("border", this.uiTheme.boxRound.vertical);
-		const boxLine = (line: string) =>
-			`${borderVertical}${line}${padding(Math.max(0, innerWidth - visibleWidth(line)))}${borderVertical}`;
-		return [
-			`${this.uiTheme.fg("border", this.uiTheme.boxRound.topLeft)}${borderHorizontal}${this.uiTheme.fg("border", this.uiTheme.boxRound.topRight)}`,
-			boxLine(header),
-			...content.map(boxLine),
-			boxLine(footer),
-			`${this.uiTheme.fg("border", this.uiTheme.boxRound.bottomLeft)}${borderHorizontal}${this.uiTheme.fg("border", this.uiTheme.boxRound.bottomRight)}`,
-		];
+		const row = (line: string) => ` ${line}${padding(Math.max(0, innerWidth - visibleWidth(line)))}`;
+		return [row(header), ...content.map(row), row(footer)];
 	}
 
 	invalidate(): void {}
@@ -295,12 +287,44 @@ class BashInteractiveOverlayComponent implements Component {
 	}
 }
 
+export function buildInteractivePtyEnv(
+	shellEnv: Readonly<Record<string, string>>,
+	commandEnv?: Readonly<Record<string, string>>,
+): Record<string, string> {
+	return {
+		...shellEnv,
+		TERM: "xterm-256color",
+		...commandEnv,
+	};
+}
+function quotePosixShellValue(value: string): string {
+	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+export function buildInteractivePtyCommand(
+	command: string,
+	shell: string,
+	env: Readonly<Record<string, string>>,
+): string {
+	const path = env.PATH;
+	if (path === undefined) return command;
+
+	const basename = shell.replaceAll("\\", "/").split("/").pop()?.toLowerCase() ?? "";
+	if (basename.includes("fish")) {
+		return `set -gx PATH ${quotePosixShellValue(path)}; ${command}`;
+	}
+	if (basename.includes("bash") || basename.includes("zsh") || basename === "sh") {
+		return `PATH=${quotePosixShellValue(path)}; export PATH; ${command}`;
+	}
+	return command;
+}
+
 export async function runInteractiveBashPty(
 	ui: NonNullable<AgentToolContext["ui"]>,
 	options: {
 		command: string;
 		cwd: string;
-		timeoutMs?: number;
+		timeoutMs: number;
 		signal?: AbortSignal;
 		env?: Record<string, string>;
 		artifactPath?: string;
@@ -310,7 +334,8 @@ export async function runInteractiveBashPty(
 	const settings = await Settings.init();
 	// Load the xterm Terminal ctor here (async boundary) — the ui.custom factory below is sync.
 	const XtermTerminal = await loadXtermTerminal();
-	const { shell: resolvedShell } = settings.getShellConfig();
+	const { shell: resolvedShell, env: shellEnv } = settings.getShellConfig();
+	const ptyEnv = buildInteractivePtyEnv(shellEnv, options.env);
 	const sink = new OutputSink({
 		artifactPath: options.artifactPath,
 		artifactId: options.artifactId,
@@ -372,16 +397,12 @@ export async function runInteractiveBashPty(
 			void session
 				.start(
 					{
-						command: options.command,
+						command: buildInteractivePtyCommand(options.command, resolvedShell, ptyEnv),
 						cwd: options.cwd,
 						timeoutMs: options.timeoutMs,
-						// Interactive PTY: inherit the user's environment (the Rust side
-						// applies these as overrides), with a real TERM so editors,
-						// pagers, and TUIs behave like a normal terminal.
-						env: {
-							TERM: "xterm-256color",
-							...options.env,
-						},
+						// Start from the same resolved session environment as non-PTY
+						// execution, then apply PTY defaults and command overrides.
+						env: ptyEnv,
 						signal: options.signal,
 						cols,
 						rows,

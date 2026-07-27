@@ -27,7 +27,7 @@ export class ErrorBannerComponent extends Container {
 		for (const line of lines.slice(1)) {
 			this.addChild(new Text(theme.fg("error", `  ${line}`), 1, 0));
 		}
-		this.addChild(new Text(theme.fg("dim", "Dismissed when you send your next message."), 1, 0));
+		this.addChild(new Text(theme.fg("dim", "Dismissed when you send your next message. :errors for history."), 1, 0));
 		this.addChild(new DynamicBorder(str => theme.fg("error", str)));
 	}
 }

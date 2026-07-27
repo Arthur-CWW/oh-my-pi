@@ -1,4 +1,3 @@
-import * as AIError from "../error";
 import type { OAuthController, OAuthLoginCallbacks } from "./oauth/types";
 import type { ProviderDefinition } from "./types";
 
@@ -12,7 +11,7 @@ const AUTH_URL = "https://kagi.com/settings/api";
  */
 export async function loginKagi(options: OAuthController): Promise<string> {
 	if (!options.onPrompt) {
-		throw new AIError.OnPromptRequiredError("Kagi");
+		throw new Error("Kagi login requires onPrompt callback");
 	}
 
 	options.onAuth?.({
@@ -27,12 +26,12 @@ export async function loginKagi(options: OAuthController): Promise<string> {
 	});
 
 	if (options.signal?.aborted) {
-		throw new AIError.LoginCancelledError();
+		throw new Error("Login cancelled");
 	}
 
 	const trimmed = apiKey.trim();
 	if (!trimmed) {
-		throw new AIError.ApiKeyRequiredError();
+		throw new Error("API key is required");
 	}
 
 	return trimmed;

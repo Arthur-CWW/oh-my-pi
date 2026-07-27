@@ -1,7 +1,7 @@
 /**
  * Reusable countdown timer for dialog components.
  */
-import type { TUI } from "@oh-my-pi/pi-tui";
+import type { Component, TUI } from "@oh-my-pi/pi-tui";
 
 export class CountdownTimer {
 	#intervalId: NodeJS.Timeout | undefined;
@@ -15,6 +15,7 @@ export class CountdownTimer {
 		private tui: TUI | undefined,
 		private onTick: (seconds: number) => void,
 		private onExpire: () => void,
+		private component?: Component,
 	) {
 		this.#initialMs = timeoutMs;
 		this.#remainingSeconds = Math.ceil(timeoutMs / 1000);
@@ -31,7 +32,7 @@ export class CountdownTimer {
 		this.#deadlineMs = now + this.#initialMs;
 		this.#remainingSeconds = this.#calculateRemainingSeconds(now);
 		this.onTick(this.#remainingSeconds);
-		this.tui?.requestRender();
+		if (this.component) this.tui?.requestComponentRender(this.component);
 
 		this.#expireTimeoutId = setTimeout(() => {
 			this.dispose();
@@ -52,7 +53,7 @@ export class CountdownTimer {
 				this.#remainingSeconds = remainingSeconds;
 				this.onTick(this.#remainingSeconds);
 			}
-			this.tui?.requestRender();
+			if (this.component) this.tui?.requestComponentRender(this.component);
 		}, 1000);
 	}
 

@@ -1,14 +1,7 @@
-import { beforeAll, describe, expect, it } from "bun:test";
-import { stripVTControlCharacters } from "node:util";
+import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { renderSegment } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
+import { getMainTokenRateViewModel } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/main-token-rate";
 import { calculateTokensPerSecond } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/token-rate";
-import type { SegmentContext } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/types";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-
-beforeAll(async () => {
-	await initTheme();
-});
 
 function assistantMessage(overrides?: Partial<AssistantMessage>): AssistantMessage {
 	return {
@@ -30,33 +23,6 @@ function assistantMessage(overrides?: Partial<AssistantMessage>): AssistantMessa
 		...overrides,
 	};
 }
-
-function ctxWithTokenRate(tokensPerSecond: number | null): SegmentContext {
-	return {
-		usageStats: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			premiumRequests: 0,
-			cost: 0,
-			tokensPerSecond,
-		},
-	} as unknown as SegmentContext;
-}
-
-describe("token_rate status-line segment", () => {
-	it("renders per-second throughput without a numeric slash path", () => {
-		const rendered = renderSegment("token_rate", ctxWithTokenRate(35.5));
-		const content = stripVTControlCharacters(rendered.content);
-
-		expect(rendered.visible).toBe(true);
-		expect(content).toContain("35.5");
-		expect(content).toMatch(/(?:\/s|\bs\b|\bsec(?:ond)?s?\b|\btps\b)/i);
-		expect(content).not.toContain("35.5/s");
-		expect(content).not.toMatch(/\b\d+(?:\.\d+)?\/s\b/);
-	});
-});
 
 describe("token rate calculation", () => {
 	it("computes from completed message duration metadata", () => {
@@ -99,5 +65,29 @@ describe("token rate calculation", () => {
 			false,
 		);
 		expect(rate).toBeNull();
+	});
+});
+
+describe("main token-rate segment view model", () => {
+	it("shows a rounded badge while the main turn is streaming", () => {
+		const base = assistantMessage();
+		const viewModel = getMainTokenRateViewModel(
+			[assistantMessage({ timestamp: 10_000, duration: undefined, usage: { ...base.usage, output: 37 } })],
+			true,
+			13_000,
+		);
+
+		expect(viewModel).toEqual({ label: "12.3 tok/s" });
+		expect(viewModel?.label.length).toBeLessThanOrEqual(14);
+	});
+
+	it("stays absent when the main turn is idle", () => {
+		const base = assistantMessage();
+		const viewModel = getMainTokenRateViewModel(
+			[assistantMessage({ duration: 2_000, usage: { ...base.usage, output: 120 } })],
+			false,
+		);
+
+		expect(viewModel).toBeNull();
 	});
 });

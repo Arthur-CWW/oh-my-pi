@@ -2,7 +2,7 @@ import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallb
 import type { ToolExample } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { prompt } from "@oh-my-pi/pi-utils";
-import { type } from "arktype";
+import { z } from "zod/v4";
 import type { SSHHost } from "../capability/ssh";
 import { sshCapability } from "../capability/ssh";
 import { loadCapability } from "../discovery";
@@ -23,11 +23,11 @@ import { ToolError } from "./tool-errors";
 import { toolResult } from "./tool-result";
 import { clampTimeout } from "./tool-timeouts";
 
-const sshSchema = type({
-	host: type("string").describe("ssh host"),
-	command: type("string").describe("remote command"),
-	"cwd?": type("string").describe("remote working directory; omit unless required, never ~ or ~/..."),
-	"timeout?": type("number").describe("timeout in seconds"),
+const sshSchema = z.object({
+	host: z.string().describe("ssh host"),
+	command: z.string().describe("remote command"),
+	cwd: z.string().optional().describe("remote working directory"),
+	timeout: z.number().optional().describe("timeout in seconds").default(60),
 });
 
 export interface SSHToolDetails {
@@ -89,12 +89,6 @@ function quoteCmdPath(value: string): string {
 	const escaped = value.replace(/"/g, '""');
 	return `"${escaped}"`;
 }
-function assertValidSshCwd(cwd: string | undefined): void {
-	if (!cwd) return;
-	if (cwd === "~" || cwd.startsWith("~/")) {
-		throw new ToolError("SSH cwd must be an absolute remote path; omit cwd instead of using ~.");
-	}
-}
 
 function buildRemoteCommand(command: string, cwd: string | undefined, info: SSHHostInfo): string {
 	if (!cwd) return command;
@@ -124,7 +118,7 @@ async function loadHosts(session: ToolSession): Promise<{
 	return { hostNames, hostsByName };
 }
 
-type SshToolParams = typeof sshSchema.infer;
+type SshToolParams = z.infer<typeof sshSchema>;
 
 export class SshTool implements AgentTool<typeof sshSchema, SSHToolDetails> {
 	readonly name = "ssh";
@@ -142,7 +136,7 @@ export class SshTool implements AgentTool<typeof sshSchema, SSHToolDetails> {
 	readonly concurrency = "exclusive";
 	readonly strict = true;
 
-	readonly examples: readonly ToolExample<SshToolParams>[] = [
+	readonly examples: readonly ToolExample<z.input<typeof sshSchema>>[] = [
 		{
 			caption: "List files: Linux (on server1 (10.0.0.1) | linux/bash)",
 			call: { host: "server1", command: "ls -la /home/user" },
@@ -183,7 +177,6 @@ export class SshTool implements AgentTool<typeof sshSchema, SSHToolDetails> {
 		if (!hostConfig) {
 			throw new ToolError(`SSH host not loaded: ${host}`);
 		}
-		assertValidSshCwd(cwd);
 
 		const hostInfo = await ensureHostInfo(hostConfig);
 		const remoteCommand = buildRemoteCommand(command, cwd, hostInfo);
@@ -244,13 +237,6 @@ interface SshRenderArgs {
 	timeout?: number;
 }
 
-/** Whether the painted call args still carry the streamed raw-JSON buffer —
- *  the shape that renders the `⏳ SSH: […]` / `$ …` placeholder. */
-function hasStreamedRenderArgs(args: unknown): boolean {
-	if (args == null || typeof args !== "object" || !("__partialJson" in args)) return false;
-	return typeof args.__partialJson === "string";
-}
-
 interface SshRenderContext {
 	/** Visual lines for truncated output (pre-computed by tool-execution) */
 	visualLines?: string[];
@@ -268,33 +254,23 @@ function formatSshCommandLines(command: string, uiTheme: Theme): string[] {
 }
 
 export const sshToolRenderer = {
-	animatedPendingPreview: true,
-	renderCall(args: SshRenderArgs, options: RenderResultOptions, uiTheme: Theme): Component {
+	renderCall(args: SshRenderArgs, _options: RenderResultOptions, uiTheme: Theme): Component {
 		const host = args.host || "…";
 		const command = args.command ?? "";
+		const header = renderStatusLine({ icon: "pending", title: "SSH", description: `[${host}]` }, uiTheme);
 		const cmdLines = formatSshCommandLines(command, uiTheme);
 		const outputBlock = new CachedOutputBlock();
 		return markFramedBlockComponent({
-			render: (width: number): readonly string[] => {
-				const header = renderStatusLine(
-					{
-						icon: options.spinnerFrame !== undefined ? "running" : "pending",
-						spinnerFrame: options.spinnerFrame,
-						title: "SSH",
-						description: `[${host}]`,
-					},
-					uiTheme,
-				);
-				return outputBlock.render(
+			render: (width: number): readonly string[] =>
+				outputBlock.render(
 					{
 						header,
-						state: options.spinnerFrame !== undefined ? "running" : "pending",
-						sections: [{ lines: capPreviewLines(cmdLines, uiTheme, { expanded: options.expanded }) }],
+						state: "pending",
+						sections: [{ lines: capPreviewLines(cmdLines, uiTheme, { expanded: _options.expanded }) }],
 						width,
 					},
 					uiTheme,
-				);
-			},
+				),
 			invalidate: () => {
 				outputBlock.invalidate();
 			},
@@ -305,7 +281,6 @@ export const sshToolRenderer = {
 		result: {
 			content: Array<{ type: string; text?: string }>;
 			details?: SSHToolDetails;
-			isError?: boolean;
 		},
 		options: RenderResultOptions & { renderContext?: SshRenderContext },
 		uiTheme: Theme,
@@ -314,14 +289,8 @@ export const sshToolRenderer = {
 		const details = result.details;
 		const host = args?.host || "…";
 		const command = args?.command ?? "";
-		const isError = result.isError === true;
-		const isPartial = options.isPartial === true;
 		const header = renderStatusLine(
-			isPartial
-				? { icon: "pending", title: "SSH", description: `[${host}]` }
-				: isError
-					? { icon: "error", title: "SSH", description: `[${host}]` }
-					: { iconOverride: uiTheme.styledSymbol("tool.ssh", "accent"), title: "SSH", description: `[${host}]` },
+			{ iconOverride: uiTheme.styledSymbol("tool.ssh", "accent"), title: "SSH", description: `[${host}]` },
 			uiTheme,
 		);
 		const cmdLines = formatSshCommandLines(command, uiTheme);
@@ -373,7 +342,7 @@ export const sshToolRenderer = {
 				return outputBlock.render(
 					{
 						header,
-						state: isPartial ? "pending" : isError ? "error" : "success",
+						state: "success",
 						sections: [
 							{
 								// Viewport-sized tail window in every state — streaming and final
@@ -393,12 +362,8 @@ export const sshToolRenderer = {
 		});
 	},
 	mergeCallAndResult: true,
-	// Streamed args can initially render the SSH placeholder (`⏳ SSH: […]` /
-	// `$ …`), then the first partial result inserts the `Output` section and
-	// re-anchors the frame. Force a full repaint only at that streamed-placeholder
-	// seam so placeholder rows do not survive in viewport/native scrollback.
-	forceFirstResultViewportRepaint: hasStreamedRenderArgs,
-	// The provisional pending-result frame settles into the final `⇄ SSH: [host]`
-	// frame, so clear/replay the viewport at that topology flip too.
-	forceResultViewportRepaintOnSettle: true,
+	// Collapsed pending preview caps the command to a viewport-sized tail window
+	// that shifts while args stream. Expanded output is top-anchored enough for
+	// the transcript to commit its settled prefix.
+	provisionalPendingPreview: "collapsed",
 };

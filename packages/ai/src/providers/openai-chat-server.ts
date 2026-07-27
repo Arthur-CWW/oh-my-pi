@@ -1,19 +1,18 @@
+import { toReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import { randomUUID } from "node:crypto";
-import { type } from "arktype";
 import { resolvePromptCacheKey } from "../auth-gateway/http";
 /**
  * Parsed inbound OpenAI chat-completions request, ready to feed into pi-ai
  * `stream(model, context, options)`.
  */
 import type { AuthGatewayStreamControl, AuthGatewayParsedRequest as ParsedRequest } from "../auth-gateway/types";
-import * as AIError from "../error";
 import type {
 	AssistantMessage,
 	AssistantMessageEventStream,
 	Context,
 	ImageContent,
 	Message,
-	ServiceTier,
+	ResolvedServiceTier,
 	StopReason,
 	TextContent,
 	Tool,
@@ -32,20 +31,8 @@ import {
 
 export type { ParsedRequest };
 
-type ReasoningEffort = NonNullable<ParsedRequest["options"]["reasoning"]>;
 
-function isReasoningEffort(value: unknown): value is ReasoningEffort {
-	return (
-		value === "minimal" ||
-		value === "low" ||
-		value === "medium" ||
-		value === "high" ||
-		value === "xhigh" ||
-		value === "max"
-	);
-}
-
-function isServiceTier(value: unknown): value is ServiceTier {
+function isServiceTier(value: unknown): value is ResolvedServiceTier {
 	return value === "auto" || value === "default" || value === "flex" || value === "scale" || value === "priority";
 }
 
@@ -59,11 +46,11 @@ export function parseRequest(body: unknown, headers?: Headers): ParsedRequest {
 	// land on `options.headers` automatically). We consult `headers` here too
 	// for `resolvePromptCacheKey` to pull a cache identity out of inbound
 	// vendor-neutral headers when the body doesn't carry one.
-	const parsed = openaiChatRequestSchema(body);
-	if (parsed instanceof type.errors) {
-		throw new AIError.ValidationError(`openai-chat: ${parsed.summary}`);
+	const parsed = openaiChatRequestSchema.safeParse(body);
+	if (!parsed.success) {
+		throw new Error(`openai-chat: ${parsed.error.message}`);
 	}
-	const data = parsed;
+	const data = parsed.data;
 
 	const now = Date.now();
 	const systemParts: string[] = [];
@@ -165,8 +152,9 @@ export function parseRequest(body: unknown, headers?: Headers): ParsedRequest {
 	if (data.user !== undefined) options.user = data.user;
 	if (data.response_format !== undefined) options.responseFormat = data.response_format;
 	if (data.parallel_tool_calls !== undefined) options.parallelToolCalls = data.parallel_tool_calls;
-	if (data.reasoning_effort !== undefined && isReasoningEffort(data.reasoning_effort)) {
-		options.reasoning = data.reasoning_effort;
+	const reasoningEffort = toReasoningEffort(data.reasoning_effort);
+	if (reasoningEffort !== undefined) {
+		options.reasoning = reasoningEffort;
 	}
 	if (data.service_tier !== undefined && isServiceTier(data.service_tier)) {
 		options.serviceTier = data.service_tier;

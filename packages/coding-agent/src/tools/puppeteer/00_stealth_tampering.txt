@@ -1,5 +1,8 @@
-// Register native-looking source for common fingerprinted functions without
-// adding own toString properties.
+// Helper to generate native code string
+const makeNativeString = (name) =>
+  "function " + (name || "") + "() { [native code] }";
+
+// Patch toString for common fingerprinted functions
 const patchedFns = [
   [window.alert, "alert"],
   [window.prompt, "prompt"],
@@ -17,28 +20,44 @@ const patchedFns = [
 ];
 
 for (const [fn, name] of patchedFns) {
-  patchToString(fn, name);
+  if (typeof fn === "function") {
+    const nativeStr = makeNativeString(name);
+    Object_defineProperty(fn, "toString", {
+      value: function toString() { return nativeStr; },
+      writable: false,
+      configurable: true,
+      enumerable: false,
+    });
+  }
 }
 
-// Patch Object.getOwnPropertyDescriptor to return native-looking accessor
-// source through the shared Function.prototype.toString registry.
-const patchedGetOwnPropertyDescriptor = function getOwnPropertyDescriptor(obj, prop) {
-  const descriptor = Reflect_apply(Object_getOwnPropertyDescriptor, this, [obj, prop]);
+// Patch Object.getOwnPropertyDescriptor to return native-looking descriptors
+Object.getOwnPropertyDescriptor = function (obj, prop) {
+  const descriptor = Object_getOwnPropertyDescriptor.call(this, obj, prop);
   if (!descriptor) return descriptor;
 
+  // Make patched descriptors look native
   if (descriptor.get && typeof descriptor.get === "function") {
-    patchToString(descriptor.get, "get " + String(prop));
+    const getStr = makeNativeString("get " + String(prop));
+    Object_defineProperty(descriptor.get, "toString", {
+      value: function toString() { return getStr; },
+      writable: false,
+      configurable: true,
+      enumerable: false,
+    });
   }
   if (descriptor.set && typeof descriptor.set === "function") {
-    patchToString(descriptor.set, "set " + String(prop));
+    const setStr = makeNativeString("set " + String(prop));
+    Object_defineProperty(descriptor.set, "toString", {
+      value: function toString() { return setStr; },
+      writable: false,
+      configurable: true,
+      enumerable: false,
+    });
   }
 
   return descriptor;
 };
-patchToString(patchedGetOwnPropertyDescriptor, "getOwnPropertyDescriptor");
-Object_defineProperty(Object, "getOwnPropertyDescriptor", {
-  value: patchedGetOwnPropertyDescriptor,
-  writable: true,
-  configurable: true,
-  enumerable: false,
-});
+
+// Cleanup
+document.head.removeChild(iframe);

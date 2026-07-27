@@ -1,3 +1,8 @@
+import { Effect, Option } from "effect";
+import { Command, Flag } from "effect/unstable/cli";
+import * as CliErr from "effect/unstable/cli/CliError";
+import { NodeServices } from "@effect/platform-node";
+
 import { getToolDefinitions, handleToolCall, type ToolArguments, type ToolDefinition } from "./mcp-tools";
 
 export interface JsonRpcRequest {
@@ -135,21 +140,30 @@ export function runMcpServer(
 	return runStdio();
 }
 
-export function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<void> {
-	let transport = "stdio";
-	let port: number | undefined;
-	let bank: string | undefined;
-	let host: string | undefined;
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		if (arg === "--transport") transport = argv[++i] ?? "stdio";
-		else if (arg === "--port") {
-			const parsed = Number(argv[++i] ?? "");
-			if (Number.isFinite(parsed)) port = parsed;
-		} else if (arg === "--bank") bank = argv[++i] ?? "";
-		else if (arg === "--host") host = argv[++i] ?? "";
-	}
-	return runMcpServer(transport, { port, bank, host });
-}
+// ── Effect CLI command for standalone execution ──────────────────────────────
 
-if (import.meta.main) await main();
+export const mcpServerCommand = Command.make(
+	"mnemopi-mcp",
+	{
+		transport: Flag.string("transport").pipe(Flag.withDefault("stdio"), Flag.withDescription("Transport protocol")),
+		port: Flag.integer("port").pipe(Flag.optional, Flag.withDescription("Server port")),
+		bank: Flag.string("bank").pipe(Flag.optional, Flag.withDescription("Memory bank")),
+		host: Flag.string("host").pipe(Flag.optional, Flag.withDescription("Server host")),
+	},
+	config =>
+		Effect.promise(() =>
+			runMcpServer(config.transport, {
+				port: Option.getOrUndefined(config.port),
+				bank: Option.getOrUndefined(config.bank),
+				host: Option.getOrUndefined(config.host),
+			}),
+		),
+).pipe(Command.withDescription("Mnemopi MCP Server"));
+
+if (import.meta.main) {
+	const program = Command.runWith(mcpServerCommand, { version: "16.0.1" })(Bun.argv.slice(2));
+	Effect.runPromise(program.pipe(Effect.provide(NodeServices.layer))).catch((error: unknown) => {
+		if (!CliErr.isCliError(error)) console.error("Error:", error);
+		process.exit(1);
+	});
+}

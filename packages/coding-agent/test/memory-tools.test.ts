@@ -8,7 +8,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { HindsightApi } from "@oh-my-pi/pi-coding-agent/hindsight/client";
@@ -29,8 +30,6 @@ import { MemoryEditTool } from "@oh-my-pi/pi-coding-agent/tools/memory-edit";
 import { MemoryRecallTool } from "@oh-my-pi/pi-coding-agent/tools/memory-recall";
 import { MemoryReflectTool } from "@oh-my-pi/pi-coding-agent/tools/memory-reflect";
 import { MemoryRetainTool } from "@oh-my-pi/pi-coding-agent/tools/memory-retain";
-import { resetMemoryForTests } from "@oh-my-pi/pi-mnemopi";
-import { TempDir } from "@oh-my-pi/pi-utils";
 
 // Mnemopi is lazy-loaded at runtime; preload it so the sync construction in
 // registerMnemopiState() and getMnemopiScopedDbPaths() can resolve the module.
@@ -40,7 +39,6 @@ const TEST_SESSION_ID = "test-session-id";
 let registeredState: HindsightSessionState | undefined;
 let registeredMnemopiState: MnemopiSessionState | undefined;
 let tempDbPath: string | undefined;
-let tempDbDir: TempDir | undefined;
 
 function makeConfig(overrides: Partial<HindsightConfig> = {}): HindsightConfig {
 	return {
@@ -119,8 +117,9 @@ function makeMnemopiConfig(
 	overrides: (Partial<MnemopiBackendConfig> & Record<string, unknown>) | undefined = {},
 ): MnemopiBackendConfig {
 	if (!tempDbPath) {
-		tempDbDir = TempDir.createSync(`@mnemopi-test-${Date.now()}-`);
-		tempDbPath = tempDbDir.join("mnemopi.db");
+		const tempDir = path.join(tmpdir(), `mnemopi-test-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+		tempDbPath = path.join(tempDir, "mnemopi.db");
 	}
 	return {
 		dbPath: tempDbPath,
@@ -129,7 +128,6 @@ function makeMnemopiConfig(
 		autoRetain: true,
 		polyphonicRecall: false,
 		enhancedRecall: false,
-		proactiveLinking: false,
 		retainEveryNTurns: 3,
 		recallLimit: 10,
 		recallContextTurns: 1,
@@ -212,16 +210,18 @@ describe("Mnemopi tool factories", () => {
 		resetSettingsForTest();
 		registeredMnemopiState = undefined;
 		tempDbPath = undefined;
-		tempDbDir = undefined;
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		vi.restoreAllMocks();
-		await registeredMnemopiState?.dispose();
 		registeredMnemopiState = undefined;
-		await tempDbDir?.remove();
-		tempDbDir = undefined;
-		tempDbPath = undefined;
+		if (tempDbPath) {
+			try {
+				const tempDir = path.dirname(tempDbPath);
+				rmSync(tempDir, { recursive: true, force: true });
+			} catch {}
+			tempDbPath = undefined;
+		}
 	});
 
 	it("memory tool factories gate on supported backends", () => {
@@ -338,16 +338,19 @@ describe("retain.execute (Mnemopi backend)", () => {
 		resetSettingsForTest();
 		registeredMnemopiState = undefined;
 		tempDbPath = undefined;
-		tempDbDir = undefined;
 	});
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		await registeredMnemopiState?.dispose();
 		registeredMnemopiState = undefined;
-		await tempDbDir?.remove();
-		tempDbDir = undefined;
-		tempDbPath = undefined;
+		if (tempDbPath) {
+			try {
+				const tempDir = path.dirname(tempDbPath);
+				rmSync(tempDir, { recursive: true, force: true });
+			} catch {}
+			tempDbPath = undefined;
+		}
 	});
 
 	it("writes memories synchronously and returns a stored success message", async () => {
@@ -432,33 +435,28 @@ describe("Mnemopi backend lifecycle", () => {
 		resetSettingsForTest();
 		registeredMnemopiState = undefined;
 		tempDbPath = undefined;
-		tempDbDir = undefined;
-		// Close any leaked default Mnemopi instance from a prior test so its
-		// SQLite handle doesn't keep the next test's DB files locked on Windows.
-		resetMemoryForTests();
 	});
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		await registeredMnemopiState?.dispose();
 		registeredMnemopiState = undefined;
-		// Close the mnemopi default instance so its SQLite handle doesn't keep
-		// the temp DB files locked on Windows.
-		resetMemoryForTests();
-		await tempDbDir?.remove().catch(() => {});
-		tempDbDir = undefined;
-		tempDbPath = undefined;
+		if (tempDbPath) {
+			try {
+				rmSync(path.dirname(tempDbPath), { recursive: true, force: true });
+			} catch {}
+			tempDbPath = undefined;
+		}
 	});
 
-	it("auto-retain stores only the not-yet-retained suffix", async () => {
+	it("auto-retain uses the cumulative transcript turn count", async () => {
 		const entries = Array.from({ length: 4 }, (_, index) => ({
 			type: "message",
 			message: { role: "user", content: `turn ${index + 1}` },
 		}));
-		const state = registerMnemopiState(makeMnemopiConfig({ retainEveryNTurns: 2 }), {
+		const state = registerMnemopiState(makeMnemopiConfig({ retainEveryNTurns: 4 }), {
 			cwd: "/work/project-alpha",
 		});
-		state.lastRetainedTurn = 2;
 		(state.session.sessionManager as { getEntries: () => unknown[] }).getEntries = () => entries;
 		const retainSpy = vi.spyOn(state, "retainMessages").mockResolvedValue();
 
@@ -466,40 +464,12 @@ describe("Mnemopi backend lifecycle", () => {
 
 		expect(retainSpy).toHaveBeenCalledTimes(1);
 		expect(retainSpy.mock.calls[0][0]).toEqual([
+			{ role: "user", content: "turn 1" },
+			{ role: "user", content: "turn 2" },
 			{ role: "user", content: "turn 3" },
 			{ role: "user", content: "turn 4" },
 		]);
 		expect(state.lastRetainedTurn).toBe(4);
-	});
-
-	it("retains the full transcript but extracts and embeds clean projections", async () => {
-		const state = registerMnemopiState(makeMnemopiConfig(), { cwd: "/work/project-alpha" });
-		const rememberSpy = vi.spyOn(state, "rememberInScope").mockReturnValue("memory-id");
-
-		await state.retainMessages(
-			[
-				{ role: "user", content: "I always prefer tabs" },
-				{ role: "assistant", content: "the parser never initializes and reorder never activates" },
-				{ role: "user", content: "I never use semicolons" },
-			],
-			"source-1",
-		);
-
-		expect(rememberSpy).toHaveBeenCalledTimes(1);
-		const [storedTranscript, options] = rememberSpy.mock.calls[0];
-		if (options === undefined) throw new Error("retainMessages did not pass remember options");
-		expect(storedTranscript).toContain("[role: assistant]");
-		expect(storedTranscript).toContain("reorder never activates");
-		expect(options.extract).toBe(true);
-		expect(options.extractEntities).toBe(true);
-		expect(options.extractText).toContain("I always prefer tabs");
-		expect(options.extractText).toContain("I never use semicolons");
-		expect(options.extractText).not.toContain("parser never initializes");
-		expect(options.embedText).toContain("I always prefer tabs");
-		expect(options.embedText).toContain("parser never initializes");
-		expect(options.embedText).toContain("I never use semicolons");
-		expect(options.embedText).not.toContain("[role:");
-		expect(options.embedText).not.toContain(":end]");
 	});
 
 	it("registers subagent aliases from parent Mnemopi state without Hindsight", async () => {
@@ -575,61 +545,6 @@ describe("Mnemopi backend lifecycle", () => {
 		}
 		// State already consumed its owned resources; the afterEach hook would
 		// otherwise re-enter dispose on closed handles.
-		registeredMnemopiState = undefined;
-	});
-
-	it("dispose({ timeoutMs }) returns within the budget when consolidate stalls (#3641)", async () => {
-		const state = registerMnemopiState();
-		const retainMemory = state.getScopedRetainTarget().memory;
-		// Hold flushExtractions hostage longer than any reasonable shutdown budget
-		// so the race exclusively settles via the timeout branch.
-		const flushStall = Promise.withResolvers<void>();
-		let flushCalls = 0;
-		const flushSpy = vi.spyOn(retainMemory, "flushExtractions").mockImplementation(async () => {
-			flushCalls++;
-			await flushStall.promise;
-		});
-		const closeSpy = vi.spyOn(retainMemory, "close");
-
-		const BUDGET_MS = 100;
-		const start = Bun.nanoseconds();
-		await state.dispose({ timeoutMs: BUDGET_MS });
-		const elapsedMs = (Bun.nanoseconds() - start) / 1_000_000;
-
-		// Dispose must surrender within the budget (plus a generous slack); the
-		// in-flight consolidate is detached, not awaited.
-		expect(elapsedMs).toBeLessThan(BUDGET_MS * 5);
-		expect(elapsedMs).toBeGreaterThanOrEqual(BUDGET_MS - 10);
-		expect(flushSpy).toHaveBeenCalled();
-		expect(flushCalls).toBe(1);
-		// `close()` is deferred so SQLite writes don't race a closed handle.
-		expect(closeSpy).not.toHaveBeenCalled();
-
-		// Release the stall and confirm the deferred close runs once consolidate
-		// settles — i.e. the SQLite handle still ends up released eventually.
-		flushStall.resolve();
-		await Bun.sleep(50);
-		expect(closeSpy).toHaveBeenCalledTimes(1);
-
-		registeredMnemopiState = undefined;
-	});
-
-	it("dispose with no timeoutMs awaits consolidate to completion (#3641 — preserves #2320 contract)", async () => {
-		const state = registerMnemopiState();
-		const retainMemory = state.getScopedRetainTarget().memory;
-		const flushSpy = vi.spyOn(retainMemory, "flushExtractions").mockResolvedValue();
-		const sleepSpy = vi.spyOn(retainMemory, "sleepAllSessions");
-		const closeSpy = vi.spyOn(retainMemory, "close");
-
-		await state.dispose();
-
-		// Unbounded dispose still runs the full consolidate-then-close pipeline,
-		// matching the #2320 contract for non-shutdown callers (state replacement
-		// during `mnemopiBackend.start`, etc.).
-		expect(flushSpy).toHaveBeenCalledTimes(1);
-		expect(sleepSpy).toHaveBeenCalledTimes(1);
-		expect(closeSpy).toHaveBeenCalledTimes(1);
-
 		registeredMnemopiState = undefined;
 	});
 
@@ -729,21 +644,11 @@ describe("Mnemopi backend lifecycle", () => {
 
 		await mnemopiBackend.clear(path.dirname(config.dbPath), "/work/project-alpha", session);
 
-		// The clear() contract: all scoped DB files are deleted. On Windows under
-		// bun:test, SQLite handle release may lag behind the await; poll briefly
-		// before asserting rather than failing on a transient lock.
-		const assertGone = async (p: string): Promise<void> => {
-			for (let i = 0; i < 40; i++) {
-				if (!existsSync(p)) return;
-				await Bun.sleep(25);
-			}
-		};
 		for (const dbPath of dbPaths) {
-			await assertGone(dbPath);
-			await assertGone(`${dbPath}-wal`);
-			await assertGone(`${dbPath}-shm`);
+			expect(existsSync(dbPath)).toBe(false);
+			expect(existsSync(`${dbPath}-wal`)).toBe(false);
+			expect(existsSync(`${dbPath}-shm`)).toBe(false);
 		}
-		// Assert state was cleared even if file deletion is still in-flight.
 		expect(getMnemopiSessionState(session)).toBeUndefined();
 		registeredMnemopiState = undefined;
 	});
@@ -867,8 +772,7 @@ describe("Mnemopi backend lifecycle", () => {
 	});
 
 	it("derives valid project banks from the absolute project root", async () => {
-		const rootDir = TempDir.createSync(`@mnemopi-bank-${Date.now()}-`);
-		const root = rootDir.path();
+		const root = path.join(tmpdir(), `mnemopi-bank-${Date.now()}`);
 		const alphaCwd = path.join(root, "a", "api");
 		const betaCwd = path.join(root, "b", "api");
 		mkdirSync(alphaCwd, { recursive: true });
@@ -892,7 +796,7 @@ describe("Mnemopi backend lifecycle", () => {
 			}
 			expect(alpha.globalBank).toBe("bad-bank-name-with-spaces-and-punctuation");
 		} finally {
-			rootDir.removeSync();
+			rmSync(root, { recursive: true, force: true });
 		}
 	});
 });
@@ -969,16 +873,19 @@ describe("recall.execute (Mnemopi backend)", () => {
 		resetSettingsForTest();
 		registeredMnemopiState = undefined;
 		tempDbPath = undefined;
-		tempDbDir = undefined;
 	});
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		await registeredMnemopiState?.dispose();
 		registeredMnemopiState = undefined;
-		await tempDbDir?.remove();
-		tempDbDir = undefined;
-		tempDbPath = undefined;
+		if (tempDbPath) {
+			try {
+				const tempDir = path.dirname(tempDbPath);
+				rmSync(tempDir, { recursive: true, force: true });
+			} catch {}
+			tempDbPath = undefined;
+		}
 	});
 
 	it("returns the no-results sentinel when empty", async () => {
@@ -1087,16 +994,19 @@ describe("memory_edit.execute (Mnemopi backend)", () => {
 		resetSettingsForTest();
 		registeredMnemopiState = undefined;
 		tempDbPath = undefined;
-		tempDbDir = undefined;
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		vi.restoreAllMocks();
-		await registeredMnemopiState?.dispose();
+		registeredMnemopiState?.dispose();
 		registeredMnemopiState = undefined;
-		await tempDbDir?.remove();
-		tempDbDir = undefined;
-		tempDbPath = undefined;
+		if (tempDbPath) {
+			try {
+				const tempDir = path.dirname(tempDbPath);
+				rmSync(tempDir, { recursive: true, force: true });
+			} catch {}
+			tempDbPath = undefined;
+		}
 	});
 
 	async function retainAndRecallId(settings: Settings, content: string, query: string): Promise<string> {
@@ -1237,16 +1147,19 @@ describe("reflect.execute (Mnemopi backend)", () => {
 		resetSettingsForTest();
 		registeredMnemopiState = undefined;
 		tempDbPath = undefined;
-		tempDbDir = undefined;
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		vi.restoreAllMocks();
-		await registeredMnemopiState?.dispose();
+		registeredMnemopiState?.dispose();
 		registeredMnemopiState = undefined;
-		await tempDbDir?.remove();
-		tempDbDir = undefined;
-		tempDbPath = undefined;
+		if (tempDbPath) {
+			try {
+				const tempDir = path.dirname(tempDbPath);
+				rmSync(tempDir, { recursive: true, force: true });
+			} catch {}
+			tempDbPath = undefined;
+		}
 	});
 
 	it("returns the no-results sentinel when empty", async () => {

@@ -5,24 +5,24 @@ import {
 	type ExecutorBackendResult,
 	resolveEvalUrlRoots,
 } from "../backend";
-import {
-	readSetting,
-	namespaceSessionId as sharedNamespace,
-	readInterpreterSetting as sharedReadInterpreterSetting,
-	toExecutorBackendResult,
-} from "../backend-helpers";
 import { executePython, type PythonExecutorOptions } from "./executor";
 import { checkPythonKernelAvailability } from "./kernel";
 
 const PYTHON_SESSION_PREFIX = "python:";
 
 export function namespaceSessionId(sessionId: string): string {
-	return sharedNamespace(sessionId, PYTHON_SESSION_PREFIX);
+	return sessionId.startsWith(PYTHON_SESSION_PREFIX) ? sessionId : `${PYTHON_SESSION_PREFIX}${sessionId}`;
+}
+
+function readSetting<T>(session: ToolSession, key: string): T | undefined {
+	const settings = session.settings as { get?: (key: string) => T | undefined } | undefined;
+	return settings?.get?.(key);
 }
 
 function readInterpreterSetting(session: ToolSession): string | undefined {
-	return sharedReadInterpreterSetting(session, "python.interpreter");
+	return readSetting<string>(session, "python.interpreter")?.trim() || undefined;
 }
+
 export default {
 	id: "python",
 	label: "Python",
@@ -52,6 +52,17 @@ export default {
 			toolSession: opts.session,
 		};
 		const result = await executePython(code, executorOptions);
-		return toExecutorBackendResult(result);
+		return {
+			output: result.output,
+			exitCode: result.exitCode,
+			cancelled: result.cancelled,
+			truncated: result.truncated,
+			artifactId: result.artifactId,
+			totalLines: result.totalLines,
+			totalBytes: result.totalBytes,
+			outputLines: result.outputLines,
+			outputBytes: result.outputBytes,
+			displayOutputs: result.displayOutputs,
+		};
 	},
 } satisfies ExecutorBackend;

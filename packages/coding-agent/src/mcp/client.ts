@@ -8,7 +8,6 @@ import * as url from "node:url";
 import { getProjectDir, logger, withTimeout } from "@oh-my-pi/pi-utils";
 import { describeMCPTimeout, isMCPTimeoutEnabled, resolveMCPTimeoutMs } from "./timeout";
 import { createHttpTransport } from "./transports/http";
-import { createSseTransport } from "./transports/sse";
 import { createStdioTransport } from "./transports/stdio";
 import type {
 	MCPGetPromptParams,
@@ -78,9 +77,8 @@ async function createTransport(config: MCPServerConfig): Promise<MCPTransport> {
 		case "stdio":
 			return createStdioTransport(config as MCPStdioServerConfig);
 		case "http":
-			return createHttpTransport(config as MCPHttpServerConfig);
 		case "sse":
-			return createSseTransport(config as MCPSseServerConfig);
+			return createHttpTransport(config as MCPHttpServerConfig | MCPSseServerConfig);
 		default:
 			throw new Error(`Unknown server type: ${serverType}`);
 	}
@@ -305,22 +303,8 @@ export async function listResources(
 	return allResources;
 }
 
-/** True when an error is a JSON-RPC "method not found" (-32601) response. */
-function isMethodNotFoundError(error: unknown): boolean {
-	const message = error instanceof Error ? error.message : String(error);
-	return message.includes("-32601") || /method not found/i.test(message);
-}
-
 /**
  * List resource templates from a connected server.
- *
- * A server MAY advertise the `resources` capability without implementing the
- * optional `resources/templates/list` method (it is optional in the MCP spec).
- * Such servers reject the request with JSON-RPC -32601 ("Method not found").
- * Treat that as "no templates" and return `[]` rather than throwing — otherwise
- * a caller that loads resources and templates together (see `MCPManager`'s
- * `Promise.all([listResources, listResourceTemplates])`) would discard the
- * server's concrete resources too. Any other error still propagates.
  */
 export async function listResourceTemplates(
 	connection: MCPServerConnection,
@@ -337,31 +321,20 @@ export async function listResourceTemplates(
 	const allTemplates: MCPResourceTemplate[] = [];
 	let cursor: string | undefined;
 
-	try {
-		do {
-			const params: Record<string, unknown> = {};
-			if (cursor) {
-				params.cursor = cursor;
-			}
-
-			const result = await connection.transport.request<MCPResourceTemplatesListResult>(
-				"resources/templates/list",
-				params,
-				options,
-			);
-			allTemplates.push(...result.resourceTemplates);
-			cursor = result.nextCursor;
-		} while (cursor);
-	} catch (error) {
-		// A server that doesn't implement the optional templates method answers
-		// -32601; cache an empty list so we neither retry nor let the failure
-		// bubble up and discard the server's concrete resources.
-		if (isMethodNotFoundError(error)) {
-			connection.resourceTemplates = [];
-			return [];
+	do {
+		const params: Record<string, unknown> = {};
+		if (cursor) {
+			params.cursor = cursor;
 		}
-		throw error;
-	}
+
+		const result = await connection.transport.request<MCPResourceTemplatesListResult>(
+			"resources/templates/list",
+			params,
+			options,
+		);
+		allTemplates.push(...result.resourceTemplates);
+		cursor = result.nextCursor;
+	} while (cursor);
 
 	connection.resourceTemplates = allTemplates;
 	return allTemplates;

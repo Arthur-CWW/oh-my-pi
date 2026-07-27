@@ -1,5 +1,5 @@
-import { parseJsonWithRepair } from "@oh-my-pi/pi-utils";
 import type { Message, ToolCall } from "../types";
+import { parseJsonWithRepair } from "../utils/json-parse";
 import { asRecord, mintToolCallId, partialSuffixOverlapAny } from "./coercion";
 import dialectPrompt from "./deepseek.md" with { type: "text" };
 import { assistantTranscriptParts, collectToolResultRun, messageContentText, stringifyJson } from "./rendering";
@@ -99,7 +99,6 @@ export class DeepSeekInbandScanner implements InbandScanner {
 	#dsmlArgs: Record<string, unknown> = {};
 	#dsmlParamName = "";
 	#dsmlParamIsString = true;
-	#dsmlParamRaw = "";
 	#rawBlock = "";
 	#stripLeadingWhitespace = false;
 
@@ -154,7 +153,7 @@ export class DeepSeekInbandScanner implements InbandScanner {
 				if (!this.#consumeDsmlInvoke(final, events)) break;
 				continue;
 			}
-			if (!this.#consumeDsmlParam(final, events)) break;
+			if (!this.#consumeDsmlParam(final)) break;
 		}
 		if (final && this.#state === "thinking") this.#endThinking(events);
 		if (final && this.#buffer.length === 0 && this.#rawBlock.length > 0) this.#rawBlock = "";
@@ -397,23 +396,18 @@ export class DeepSeekInbandScanner implements InbandScanner {
 		return final;
 	}
 
-	#consumeDsmlParam(final: boolean, events: InbandScanEvent[]): boolean {
+	#consumeDsmlParam(final: boolean): boolean {
 		const close = findEarliestToken(this.#buffer, DSML_PARAMETER_CLOSE_TOKENS);
 		if (!close) {
-			const hold = final ? 0 : partialSuffixOverlapAny(this.#buffer, DSML_PARAMETER_CLOSE_TOKENS);
-			const chunk = this.#buffer.slice(0, this.#buffer.length - hold);
-			this.#streamDsmlParam(chunk, events);
-			this.#buffer = this.#buffer.slice(this.#buffer.length - hold);
 			if (final) this.#resetDsmlTool();
 			return false;
 		}
-		this.#streamDsmlParam(this.#buffer.slice(0, close.index), events);
-		this.#dsmlArgs[this.#dsmlParamName] = coerceDsmlValue(this.#dsmlParamRaw, this.#dsmlParamIsString);
-		this.#rawBlock += close.token;
+		const rawValue = this.#buffer.slice(0, close.index);
+		this.#dsmlArgs[this.#dsmlParamName] = coerceDsmlValue(rawValue, this.#dsmlParamIsString);
+		this.#rawBlock += rawValue + close.token;
 		this.#buffer = this.#buffer.slice(close.index + close.token.length);
 		this.#dsmlParamName = "";
 		this.#dsmlParamIsString = true;
-		this.#dsmlParamRaw = "";
 		this.#state = "dsmlInvoke";
 		return true;
 	}
@@ -422,13 +416,6 @@ export class DeepSeekInbandScanner implements InbandScanner {
 		this.#name = name;
 		this.#id = mintToolCallId();
 		events.push({ type: "toolStart", id: this.#id, name: this.#name });
-	}
-
-	#streamDsmlParam(chunk: string, events: InbandScanEvent[]): void {
-		if (chunk.length === 0) return;
-		this.#dsmlParamRaw += chunk;
-		this.#rawBlock += chunk;
-		events.push({ type: "toolArgDelta", id: this.#id, name: this.#name, key: this.#dsmlParamName, delta: chunk });
 	}
 
 	#emitThinking(delta: string, events: InbandScanEvent[]): void {
@@ -522,7 +509,6 @@ export class DeepSeekInbandScanner implements InbandScanner {
 		this.#dsmlArgs = {};
 		this.#dsmlParamName = "";
 		this.#dsmlParamIsString = true;
-		this.#dsmlParamRaw = "";
 		this.#rawBlock = "";
 	}
 }

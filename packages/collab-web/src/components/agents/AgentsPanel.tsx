@@ -1,79 +1,51 @@
-import type {
-	AgentProgress,
-	AgentSnapshot,
-	SubagentLifecyclePayload,
-	SubagentProgressPayload,
-} from "@oh-my-pi/pi-wire";
+import type { AgentSnapshot, SubagentLifecyclePayload, SubagentProgressPayload } from "@oh-my-pi/pi-wire";
+import { ChevronDown, ChevronRight, CircleAlert, RefreshCcw, Search, Square } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { fmtCost, fmtDuration, fmtTokens, relTime } from "../../lib/format";
+import { useMemo, useState } from "react";
+import { fmtCost, fmtTokens, relTime } from "../../lib/format";
 import "./agents.css";
 
-/** Re-render tick so running-tool durations and relative times stay live. */
-function useNow(intervalMs: number): number {
-	const [now, setNow] = useState(() => Date.now());
-	useEffect(() => {
-		const timer = setInterval(() => setNow(Date.now()), intervalMs);
-		return () => clearInterval(timer);
-	}, [intervalMs]);
-	return now;
+type OperationAction = "retry" | "reconcile" | "cancel" | "inspect";
+type DeckAgent = AgentSnapshot & {
+	parentId?: string;
+	group?: string;
+	activity?: { fromId?: string; toId?: string; kind?: string; at?: number };
+	recovery?: { state?: string; reason?: string; attempt?: number };
+	quota?: { originalModel?: string; routedModel?: string; quotaPoolId?: string; limitWindowId?: string; resetAt?: number; decisionReason?: string };
+	operation?: { inputId?: string; state?: string; resetAt?: number; reason?: string; supportedActions?: OperationAction[] };
+};
+
+const ACTION_ICONS = { retry: RefreshCcw, reconcile: RefreshCcw, cancel: Square, inspect: Search } as const;
+const ATTENTION_STATES = new Set(["blocked", "uncertain", "retrying"]);
+
+function resetLabel(at?: number): string | null {
+	if (!at) return null;
+	return at <= Date.now() ? "reset due" : `resets ${relTime(at)}`;
 }
 
-/**
- * Best-effort start timestamp for the in-flight tool. The host serializes the
- * full AgentProgress (which carries `currentToolStartMs`); the wire mirror
- * omits it, so read it tolerantly and fall back to the last tool's end time.
- */
-function toolStartMs(p: AgentProgress): number | null {
-	const start = (p as { currentToolStartMs?: unknown }).currentToolStartMs;
-	if (typeof start === "number") return start;
-	const lastEnd = p.recentTools[0]?.endMs;
-	return typeof lastEnd === "number" ? lastEnd : null;
-}
-
-function activityLine(
-	agent: AgentSnapshot,
-	p: AgentProgress | undefined,
-	lc: SubagentLifecyclePayload | undefined,
-	now: number,
-): string {
-	if (p?.currentTool) {
-		const start = toolStartMs(p);
-		if (start !== null) return `${p.currentTool} · ${fmtDuration(Math.max(0, now - start))}`;
-		return p.currentTool;
-	}
-	if (p?.lastIntent) return p.lastIntent;
-	if (lc) return lc.status;
-	return agent.status;
-}
-
-function AgentRow(props: {
-	agent: AgentSnapshot;
-	payload: SubagentProgressPayload | undefined;
-	lifecycle: SubagentLifecyclePayload | undefined;
+function AgentNode({ agent, progress, lifecycle, selected, onSelect }: {
+	agent: DeckAgent;
+	progress?: SubagentProgressPayload;
+	lifecycle?: SubagentLifecyclePayload;
 	selected: boolean;
-	now: number;
-	onSelect(id: string | null): void;
+	onSelect(id: string): void;
 }): ReactNode {
-	const { agent, payload, lifecycle, selected, now, onSelect } = props;
-	const p = payload?.progress;
+	const p = progress?.progress;
+	const op = agent.operation;
+	const state = op?.state ?? agent.recovery?.state ?? agent.status;
+	const activity = p?.currentTool ?? p?.lastIntent ?? lifecycle?.status ?? agent.status;
+	const routed = agent.quota?.routedModel;
+	const original = agent.quota?.originalModel;
 	return (
-		<button
-			type="button"
-			className={selected ? "ag-row ag-row--selected" : "ag-row"}
-			onClick={() => onSelect(selected ? null : agent.id)}
-		>
-			<span className="ag-row-head">
-				<span className={`ag-dot ag-dot--${agent.status}`} />
-				<span className="ag-row-name">{agent.displayName}</span>
-				<span className="ag-chip">{agent.kind}</span>
+		<button type="button" className={`ag-node ag-node--${state}${selected ? " ag-node--selected" : ""}`} onClick={() => onSelect(agent.id)} aria-pressed={selected}>
+			<span className="ag-node-signal" aria-hidden="true" />
+			<span className="ag-node-head"><strong>{agent.displayName}</strong><span className={`ag-chip ag-chip--${agent.status}`}>{state}</span></span>
+			<span className="ag-node-activity">{activity}</span>
+			<span className="ag-node-route">
+				{routed ? <span className="ag-route" title={agent.quota?.decisionReason}>{original && original !== routed ? `${original} → ` : ""}{routed}</span> : p?.resolvedModel ? <span>{p.resolvedModel}</span> : null}
+				{agent.quota?.quotaPoolId ? <span className="ag-pool">pool {agent.quota.quotaPoolId}</span> : null}
 			</span>
-			<span className="ag-row-activity">{activityLine(agent, p, lifecycle, now)}</span>
-			<span className="ag-row-meta">
-				{p ? <span>{fmtTokens(p.tokens)} tok</span> : null}
-				{p ? <span>{fmtCost(p.cost)}</span> : null}
-				<span className="ag-row-meta-when">{relTime(agent.lastActivity)}</span>
-			</span>
+			<span className="ag-node-meta"><span>{p ? `${fmtTokens(p.tokens)} tok · ${fmtCost(p.cost)}` : agent.kind}</span><span>{relTime(agent.lastActivity)}</span></span>
 		</button>
 	);
 }
@@ -84,48 +56,28 @@ export function AgentsPanel(props: {
 	lifecycle: ReadonlyMap<string, SubagentLifecyclePayload>;
 	selectedId: string | null;
 	onSelect(id: string | null): void;
+	onAction?(action: OperationAction, agent: AgentSnapshot, inputId?: string): void;
 }): ReactNode {
-	const { agents, progress, lifecycle, selectedId, onSelect } = props;
-	const now = useNow(1000);
-
-	const sorted = useMemo(() => {
-		const mains: AgentSnapshot[] = [];
-		const subs: AgentSnapshot[] = [];
-		for (const agent of agents) (agent.kind === "main" ? mains : subs).push(agent);
-		subs.sort((a, b) => {
-			const ar = a.status === "running" ? 0 : 1;
-			const br = b.status === "running" ? 0 : 1;
-			if (ar !== br) return ar - br;
-			return b.lastActivity - a.lastActivity;
-		});
-		return { mains, subs };
+	const { progress, lifecycle, selectedId, onSelect, onAction } = props;
+	const agents = props.agents as readonly DeckAgent[];
+	const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
+	const groups = useMemo(() => {
+		const result = new Map<string, DeckAgent[]>();
+		for (const agent of agents) {
+			const key = agent.group ?? (agent.kind === "main" ? "command" : agent.parentId ?? "field agents");
+			const list = result.get(key) ?? [];
+			list.push(agent); result.set(key, list);
+		}
+		return [...result.entries()];
 	}, [agents]);
-
+	const attention = agents.filter(a => ATTENTION_STATES.has(a.operation?.state ?? a.recovery?.state ?? ""));
+	const toggle = (key: string) => setFolded(old => { const next = new Set(old); next.has(key) ? next.delete(key) : next.add(key); return next; });
 	return (
-		<div className="ag-panel">
-			{sorted.mains.map(agent => (
-				<AgentRow
-					key={agent.id}
-					agent={agent}
-					payload={progress.get(agent.id)}
-					lifecycle={lifecycle.get(agent.id)}
-					selected={selectedId === agent.id}
-					now={now}
-					onSelect={onSelect}
-				/>
-			))}
-			{sorted.subs.map(agent => (
-				<AgentRow
-					key={agent.id}
-					agent={agent}
-					payload={progress.get(agent.id)}
-					lifecycle={lifecycle.get(agent.id)}
-					selected={selectedId === agent.id}
-					now={now}
-					onSelect={onSelect}
-				/>
-			))}
-			{sorted.subs.length === 0 ? <div className="ag-empty">no subagents</div> : null}
-		</div>
+		<section className="ag-deck" aria-label="Operations Deck">
+			<header className="ag-deck-header"><div><span className="ag-kicker">LIVE CONTROL SURFACE</span><h1>Operations Deck</h1></div><div className="ag-telemetry"><span><b>{agents.filter(a => a.status === "running").length}</b> active</span><span><b>{attention.length}</b> attention</span></div></header>
+			{attention.length > 0 ? <section className="ag-attention" aria-labelledby="ag-attention-title"><h2 id="ag-attention-title"><CircleAlert size={14} /> Needs attention</h2><div className="ag-attention-list">{attention.map(agent => <article className={`ag-alert ag-alert--${agent.operation?.state ?? agent.recovery?.state}`} key={agent.id}><button type="button" className="ag-alert-main" onClick={() => onSelect(agent.id)}><strong>{agent.displayName}</strong><span>{agent.operation?.reason ?? agent.recovery?.reason ?? "Operation requires review"}</span><small>{resetLabel(agent.operation?.resetAt ?? agent.quota?.resetAt)}</small></button>{!props.onAction || agent.operation?.supportedActions?.length === 0 ? null : <div className="ag-alert-actions">{agent.operation?.supportedActions?.map(action => { const Icon = ACTION_ICONS[action]; return <button type="button" className="ag-control" key={action} onClick={() => onAction?.(action, agent, agent.operation?.inputId)} title={`${action} ${agent.displayName}`}><Icon size={12} />{action}</button>; })}</div>}</article>)}</div></section> : null}
+			<div className="ag-board">{groups.map(([key, lane]) => { const closed = folded.has(key); return <section className="ag-lane" key={key}><button type="button" className="ag-lane-toggle" onClick={() => toggle(key)} aria-expanded={!closed}>{closed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}<span>{key}</span><small>{lane.length}</small></button>{closed ? null : <div className="ag-lane-track">{lane.map((agent, i) => <div className="ag-node-wrap" key={agent.id}>{i > 0 ? <span className="ag-link" aria-hidden="true" /> : null}<AgentNode agent={agent} progress={progress.get(agent.id)} lifecycle={lifecycle.get(agent.id)} selected={selectedId === agent.id} onSelect={onSelect} /></div>)}</div>}</section>; })}</div>
+			{agents.length === 0 ? <div className="ag-empty"><strong>Deck is quiet</strong><span>Agents appear here as operations are dispatched.</span></div> : null}
+		</section>
 	);
 }

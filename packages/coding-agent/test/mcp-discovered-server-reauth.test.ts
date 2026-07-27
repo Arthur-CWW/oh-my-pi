@@ -21,7 +21,6 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 import type { SourceMeta } from "../src/capability/types";
 import { readMCPConfigFile, updateMCPServer, validateServerName } from "../src/mcp/config-writer";
 import { MCPManager } from "../src/mcp/manager";
@@ -64,7 +63,7 @@ describe("MCP discovered-server reauth", () => {
 				expect(manager.getSource(NAMESPACED_NAME)).toEqual(source);
 			} finally {
 				await manager.disconnectAll();
-				removeSyncWithRetries(workDir);
+				fs.rmSync(workDir, { recursive: true, force: true });
 			}
 		}, 15_000);
 
@@ -102,7 +101,7 @@ describe("MCP discovered-server reauth", () => {
 				const readBack = await readMCPConfigFile(filePath);
 				expect(readBack.mcpServers?.[NAMESPACED_NAME]).toEqual(persisted);
 			} finally {
-				removeSyncWithRetries(workDir);
+				fs.rmSync(workDir, { recursive: true, force: true });
 			}
 		});
 	});

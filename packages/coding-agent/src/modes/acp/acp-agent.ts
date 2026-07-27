@@ -42,7 +42,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
-import { getBlobsDir, isEnoent, logger, VERSION } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger, VERSION } from "@oh-my-pi/pi-utils";
 import { disableProvider, enableProvider, reset as resetCapabilities } from "../../capability";
 import { Settings } from "../../config/settings";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
@@ -53,7 +53,7 @@ import {
 } from "../../extensibility/extensions";
 import { runExtensionCompact } from "../../extensibility/extensions/compact-handler";
 import { getSessionSlashCommands } from "../../extensibility/extensions/get-commands-handler";
-import { buildSkillPromptMessage, parseSkillInvocation } from "../../extensibility/skills";
+import { buildSkillPromptMessage } from "../../extensibility/skills";
 import { loadSlashCommands } from "../../extensibility/slash-commands";
 import { resolveLocalUrlToPath } from "../../internal-urls";
 import { MCPManager } from "../../mcp/manager";
@@ -62,29 +62,20 @@ import { loadAllExtensions } from "../../modes/components/extensions/state-manag
 import { theme } from "../../modes/theme/theme";
 import { type PlanApprovalDetails, resolveApprovedPlan } from "../../plan-mode/approved-plan";
 import type { AgentSession, AgentSessionEvent } from "../../session/agent-session";
-import { BlobStore, resolveImageDataSync } from "../../session/blob-store";
 import { isSilentAbort, SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
 import type { UsageStatistics } from "../../session/session-entries";
 import type { SessionInfo as StoredSessionInfo } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
 import { buildAvailableSlashCommands, toAcpAvailableCommands } from "../../slash-commands/available-commands";
-import { DEFAULT_STT_MODEL_KEY, STT_MODEL_OPTIONS } from "../../stt/models";
 import { AUTO_THINKING, parseConfiguredThinkingLevel } from "../../thinking";
 import { normalizeLocalScheme } from "../../tools/path-utils";
 import { runResolveInvocation } from "../../tools/resolve";
 import { ToolError } from "../../tools/tool-errors";
-import {
-	DEFAULT_TTS_LOCAL_MODEL_KEY,
-	DEFAULT_TTS_VOICE,
-	TTS_LOCAL_MODELS,
-	TTS_LOCAL_VOICE_OPTIONS,
-} from "../../tts/models";
-import { canonicalizeMessage } from "../../utils/thinking-display";
+import { normalizeThinkingDisplay } from "../../utils/thinking-display";
 import { createAcpClientBridge } from "./acp-client-bridge";
 import {
 	buildToolCallStartUpdate,
-	extractAssistantMessageText,
 	mapAgentSessionEventToAcpSessionUpdates,
 	normalizeReplayToolArguments,
 } from "./acp-event-mapper";
@@ -100,7 +91,6 @@ const MODEL_CONFIG_ID = "model";
 const THINKING_CONFIG_ID = "thinking";
 const THINKING_OFF = "off";
 const SESSION_PAGE_SIZE = 50;
-const SPEECH_MODELS_LIST_METHOD = "speech.models.list";
 /**
  * Delay between `session/new` (or `session/load` / `session/resume` /
  * `unstable_session/fork`) returning and the agent firing the first
@@ -204,59 +194,6 @@ type MCPSourceMap = {
 };
 
 type CreateAcpSession = (cwd: string) => Promise<AgentSession>;
-
-type AcpSpeechOption = {
-	value: string;
-	label: string;
-	description?: string;
-};
-
-type AcpSpeechVoiceOption = {
-	value: string;
-	label: string;
-};
-
-type AcpSpeechTtsModelOption = AcpSpeechOption & {
-	voices: AcpSpeechVoiceOption[];
-};
-
-function buildAcpSpeechModelsCatalog(): Record<string, unknown> {
-	const voices = TTS_LOCAL_VOICE_OPTIONS.map(({ value, label }) => ({ value, label }));
-	return {
-		settings: {
-			speechToTextModel: "stt.modelName",
-			textToSpeechModel: "tts.localModel",
-			textToSpeechVoice: "tts.localVoice",
-			speechVoice: "speech.voice",
-		},
-		defaults: {
-			speechToTextModel: DEFAULT_STT_MODEL_KEY,
-			textToSpeechModel: DEFAULT_TTS_LOCAL_MODEL_KEY,
-			voice: DEFAULT_TTS_VOICE,
-		},
-		speechToText: {
-			setting: "stt.modelName",
-			defaultValue: DEFAULT_STT_MODEL_KEY,
-			models: STT_MODEL_OPTIONS.map(({ value, label, description }) => ({ value, label, description })),
-		},
-		textToSpeech: {
-			modelSetting: "tts.localModel",
-			voiceSetting: "tts.localVoice",
-			speechVoiceSetting: "speech.voice",
-			defaultModel: DEFAULT_TTS_LOCAL_MODEL_KEY,
-			defaultVoice: DEFAULT_TTS_VOICE,
-			models: TTS_LOCAL_MODELS.map(
-				({ key, label, description, voices: modelVoices }): AcpSpeechTtsModelOption => ({
-					value: key,
-					label,
-					description,
-					voices: modelVoices.map(({ id, label: voiceLabel }) => ({ value: id, label: voiceLabel })),
-				}),
-			),
-			voices,
-		},
-	};
-}
 
 /**
  * Bridge a single ExtensionUIContext call to the ACP `unstable_createElicitation`
@@ -426,7 +363,6 @@ export function createAcpExtensionUiContext(
 		setEditorText: () => {},
 		getEditorText: () => "",
 		editor: async () => undefined,
-		addAutocompleteProvider: () => {},
 		setEditorComponent: () => {},
 		get theme() {
 			return theme;
@@ -448,7 +384,6 @@ export class AcpAgent implements Agent {
 	#cleanupRegistered = false;
 	#clientCapabilities: ClientCapabilities | undefined;
 	#cancelCleanupTimeoutMs = ACP_CANCEL_CLEANUP_TIMEOUT_MS;
-	#blobs = new BlobStore(getBlobsDir());
 
 	constructor(connection: AgentSideConnection, createSession: CreateAcpSession, initialSession?: AgentSession) {
 		this.#connection = connection;
@@ -803,7 +738,7 @@ export class AcpAgent implements Agent {
 		});
 		if (builtinResult !== false) {
 			if ("prompt" in builtinResult) {
-				await record.session.prompt(builtinResult.prompt, { images });
+				await record.session.prompt(builtinResult.prompt, { attachments: images });
 				return;
 			}
 			const promptTurn = record.promptTurn;
@@ -819,7 +754,7 @@ export class AcpAgent implements Agent {
 		}
 
 		const extensionPromptBaseline = new Set(record.extensionUserMessageTasks);
-		const agentInvoked = await record.session.prompt(text, { images });
+		const agentInvoked = await record.session.prompt(text, { attachments: images });
 		// Extension and custom-TS commands are handled locally inside session.prompt().
 		// An ACP extension command can still call pi.sendUserMessage(), which starts
 		// an async nested prompt through the extension runtime. Keep the ACP turn
@@ -833,28 +768,28 @@ export class AcpAgent implements Agent {
 	}
 
 	async #tryRunSkillCommand(record: ManagedSessionRecord, text: string): Promise<boolean> {
+		if (!text.startsWith("/skill:")) {
+			return false;
+		}
 		if (!record.session.skillsSettings?.enableSkillCommands) {
 			return false;
 		}
-		const parsed = parseSkillInvocation(text);
-		if (!parsed) {
-			return false;
-		}
-		const skill = record.session.skills.find(candidate => candidate.name === parsed.name);
+		const spaceIndex = text.indexOf(" ");
+		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1).trim();
+		const skillName = commandName.slice("skill:".length);
+		const skill = record.session.skills.find(candidate => candidate.name === skillName);
 		if (!skill) {
 			return false;
 		}
-		const built = await buildSkillPromptMessage(skill, parsed.args, "user");
-		await record.session.promptCustomMessage(
-			{
-				customType: SKILL_PROMPT_MESSAGE_TYPE,
-				content: built.message,
-				display: true,
-				details: built.details,
-				attribution: "user",
-			},
-			{ streamingBehavior: "steer" },
-		);
+		const built = await buildSkillPromptMessage(skill, args);
+		await record.session.promptCustomMessage({
+			customType: SKILL_PROMPT_MESSAGE_TYPE,
+			content: built.message,
+			display: true,
+			details: built.details,
+			attribution: "user",
+		});
 		return true;
 	}
 
@@ -915,8 +850,6 @@ export class AcpAgent implements Agent {
 
 	async extMethod(method: string, params: { [key: string]: unknown }): Promise<{ [key: string]: unknown }> {
 		switch (method) {
-			case SPEECH_MODELS_LIST_METHOD:
-				return buildAcpSpeechModelsCatalog();
 			case "_omp/sessions/listAll": {
 				const limit = typeof params.limit === "number" ? Math.max(1, Math.min(5000, params.limit as number)) : 1000;
 				const sessions = await SessionManager.listAll();
@@ -1098,7 +1031,9 @@ export class AcpAgent implements Agent {
 
 	async #registerPreparedSession(session: AgentSession, mcpServers: McpServer[]): Promise<ManagedSessionRecord> {
 		const record = this.#createManagedSessionRecord(session);
-		session.setClientBridge(createAcpClientBridge(this.#connection, session.sessionId, this.#clientCapabilities));
+		await session.setClientBridge(
+			createAcpClientBridge(this.#connection, session.sessionId, this.#clientCapabilities),
+		);
 		// `record.lifetimeUnsubscribe` is installed in `#scheduleBootstrapUpdates`
 		// so it shares the bootstrap race guard — see that comment for why.
 		try {
@@ -1191,21 +1126,11 @@ export class AcpAgent implements Agent {
 		}
 
 		this.#prepareLiveAssistantMessage(record, event);
-		const imageDataCache = new Map<string, string>();
-		const resolveImageDataForAcp = (data: string, mimeType: string | undefined): string => {
-			const key = `${mimeType ?? ""}\u0000${data}`;
-			const cached = imageDataCache.get(key);
-			if (cached !== undefined) return cached;
-			const resolved = resolveImageDataSync(this.#blobs, data);
-			imageDataCache.set(key, resolved);
-			return resolved;
-		};
 		for (const notification of mapAgentSessionEventToAcpSessionUpdates(event, record.session.sessionId, {
 			getMessageId: message => this.#getLiveMessageId(record, message),
 			getMessageProgress: message => this.#getLiveMessageProgress(record, message),
 			getToolArgs: toolCallId => record.toolArgsById.get(toolCallId),
 			cwd: record.session.sessionManager.getCwd(),
-			resolveImageData: resolveImageDataForAcp,
 		})) {
 			await this.#connection.sessionUpdate(notification);
 		}
@@ -1215,61 +1140,13 @@ export class AcpAgent implements Agent {
 		this.#clearLiveAssistantMessageAfterEvent(record, event);
 
 		if (event.type === "agent_end") {
-			await this.#flushMissedFinalAssistantText(record, event);
 			await this.#emitEndOfTurnUpdates(record);
 			await this.#waitForAcpPromptIdle(record);
-			record.liveMessageId = undefined;
-			record.liveMessageProgress = undefined;
 			this.#finishPrompt(record, {
 				stopReason: this.#resolveStopReason(event, promptTurn.cancelRequested),
 				usage: this.#buildTurnUsage(promptTurn.usageBaseline, record.session.sessionManager.getUsageStatistics()),
 			});
 		}
-	}
-
-	/**
-	 * Deliver the final visible answer when the assistant `message_end` never
-	 * reached this prompt turn's subscription. Session event handlers are
-	 * fire-and-forget (`Agent#emit` does not await async listeners), and
-	 * `agent_end` is flushed through the session's `#endInFlight` path while the
-	 * assistant `message_end` fan-out can still be parked on extension delivery —
-	 * so `agent_end` can overtake `message_end`. Once the turn finishes,
-	 * `#finishPrompt` unsubscribes and the fallback text emission in
-	 * `mapAssistantMessageEnd` is lost for good: a client that only received
-	 * `agent_thought_chunk`s stays stuck on the thinking block (#4902). The live
-	 * message progress records whether visible text ever reached the client; if
-	 * it has not, emit the last assistant message's text before the prompt
-	 * resolves. A `message_end` that lands during the end-of-turn waits still
-	 * takes the normal mapper path and sees `textEmitted` already set, so the
-	 * answer is delivered exactly once.
-	 */
-	async #flushMissedFinalAssistantText(
-		record: ManagedSessionRecord,
-		event: Extract<AgentSessionEvent, { type: "agent_end" }>,
-	): Promise<void> {
-		const progress = record.liveMessageProgress;
-		if (!progress || progress.textEmitted) {
-			return;
-		}
-		const lastAssistant = [...event.messages]
-			.reverse()
-			.find((message): message is AssistantMessage => message.role === "assistant");
-		if (!lastAssistant) {
-			return;
-		}
-		const text = extractAssistantMessageText(lastAssistant);
-		if (text.length === 0) {
-			return;
-		}
-		progress.textEmitted = true;
-		await this.#connection.sessionUpdate({
-			sessionId: record.session.sessionId,
-			update: {
-				sessionUpdate: "agent_message_chunk",
-				content: { type: "text", text },
-				messageId: record.liveMessageId,
-			},
-		});
 	}
 
 	async #waitForAcpPromptIdle(record: ManagedSessionRecord): Promise<void> {
@@ -1297,16 +1174,8 @@ export class AcpAgent implements Agent {
 		}
 	}
 
-	/**
-	 * Reset live-message tracking once the assistant `message_end` is handled.
-	 * The `agent_end` reset happens inside the `agent_end` branch of
-	 * `#handlePromptEvent` — after `#flushMissedFinalAssistantText` — so a
-	 * `message_end` that arrives during the end-of-turn waits maps against the
-	 * real progress instead of resurrecting a fresh one (which would double-emit
-	 * the final answer).
-	 */
 	#clearLiveAssistantMessageAfterEvent(record: ManagedSessionRecord, event: AgentSessionEvent): void {
-		if (event.type === "message_end" && event.message.role === "assistant") {
+		if ((event.type === "message_end" && event.message.role === "assistant") || event.type === "agent_end") {
 			record.liveMessageId = undefined;
 			record.liveMessageProgress = undefined;
 		}
@@ -1884,10 +1753,6 @@ export class AcpAgent implements Agent {
 			output: usage.output,
 			cacheRead: usage.cacheRead,
 			cacheWrite: usage.cacheWrite,
-			totalTokens: usage.totalTokens,
-			orchestrationInput: usage.orchestrationInput,
-			orchestrationOutput: usage.orchestrationOutput,
-			orchestrationCacheRead: usage.orchestrationCacheRead,
 			premiumRequests: usage.premiumRequests,
 			cost: usage.cost,
 		};
@@ -1898,7 +1763,7 @@ export class AcpAgent implements Agent {
 		const outputTokens = Math.max(0, current.output - previous.output);
 		const cachedReadTokens = Math.max(0, current.cacheRead - previous.cacheRead);
 		const cachedWriteTokens = Math.max(0, current.cacheWrite - previous.cacheWrite);
-		const totalTokens = Math.max(0, current.totalTokens - previous.totalTokens);
+		const totalTokens = inputTokens + outputTokens + cachedReadTokens + cachedWriteTokens;
 
 		if (totalTokens === 0) {
 			return undefined;
@@ -2044,7 +1909,7 @@ export class AcpAgent implements Agent {
 					continue;
 				}
 				if (item.type === "thinking" && "thinking" in item && typeof item.thinking === "string") {
-					const thinking = canonicalizeMessage(item.thinking);
+					const thinking = normalizeThinkingDisplay(item.thinking);
 					if (thinking.length === 0) continue;
 					notifications.push({
 						sessionId,
@@ -2076,7 +1941,7 @@ export class AcpAgent implements Agent {
 				}
 			}
 		}
-		if (notifications.length === 0 && message.errorMessage && !isSilentAbort(message)) {
+		if (notifications.length === 0 && message.errorMessage && !isSilentAbort(message.errorMessage)) {
 			notifications.push({
 				sessionId,
 				update: {
@@ -2126,7 +1991,6 @@ export class AcpAgent implements Agent {
 		const notifications = mapAgentSessionEventToAcpSessionUpdates(endEvent, sessionId, {
 			cwd,
 			getToolArgs: toolCallId => (toolCallId === message.toolCallId ? options.toolArgs : undefined),
-			resolveImageData: (data, _mimeType) => resolveImageDataSync(this.#blobs, data),
 		});
 		if (options.includeStart === false) {
 			return notifications;
@@ -2216,6 +2080,7 @@ export class AcpAgent implements Agent {
 				getActiveTools: () => record.session.getActiveToolNames(),
 				getAllTools: () => record.session.getAllToolNames(),
 				setActiveTools: toolNames => record.session.setActiveToolsByName(toolNames),
+				refreshTools: tools => record.session.refreshDynamicTools(tools, extensionRunner),
 				getCommands: () => getSessionSlashCommands(record.session),
 				setModel: async model => {
 					const apiKey = await record.session.modelRegistry.getApiKey(model);

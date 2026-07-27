@@ -6,7 +6,6 @@ import { replaceTabs } from "@oh-my-pi/pi-tui";
 import type { Theme } from "../modes/theme/theme";
 import { formatMoreItems } from "../tools/render-utils";
 import type { TreeContext } from "./types";
-import { getTreeBranch, getTreeContinuePrefix } from "./utils";
 
 export interface TreeListOptions<T> {
 	items: T[];
@@ -22,6 +21,11 @@ export interface TreeListOptions<T> {
 	 *  line count MUST NOT vary based on `isLast`. */
 	renderItem: (item: T, context: TreeContext) => string | string[];
 }
+
+/** Fixed left indent for list items and the "+N more" summary line. Replaces
+ *  the former tree-branch prefix (├─ / └─, 3 columns) with plain spaces of the
+ *  same width, so rendered lists copy cleanly without leading box glyphs. */
+const ITEM_INDENT = "   ";
 
 export function renderTreeList<T>(options: TreeListOptions<T>, theme: Theme): string[] {
 	const {
@@ -104,29 +108,24 @@ export function renderTreeList<T>(options: TreeListOptions<T>, theme: Theme): st
 
 	const hasSummary = !expanded && remaining > 0 && (linesBudget === Infinity || fittedLineCount < linesBudget);
 
-	// Emit pre-rendered content with correct isLast-based branch prefixes.
+	// Emit pre-rendered content with a fixed indent — no tree-branch glyphs, so
+	// the list copies cleanly while indentation still conveys grouping.
 	const lines: string[] = [];
 
 	if (truncateFrom === "start" && hasSummary) {
-		lines.push(`${theme.fg("dim", theme.tree.branch)} ${theme.fg("muted", formatMoreItems(remaining, itemType))}`);
+		lines.push(`${ITEM_INDENT}${theme.fg("muted", formatMoreItems(remaining, itemType))}`);
 	}
 
 	for (let i = displayedSlice.start; i < displayedSlice.end; i++) {
-		const isLast =
-			truncateFrom === "start" ? i === displayedSlice.end - 1 : !hasSummary && i === displayedSlice.end - 1;
-		const branch = getTreeBranch(isLast, theme);
-		const prefix = `${theme.fg("dim", branch)} `;
-		const continuePrefix = `${theme.fg("dim", getTreeContinuePrefix(isLast, theme))}`;
 		const itemLines = preRendered[i]!;
 		if (itemLines.length === 0) continue;
-		lines.push(`${prefix}${replaceTabs(itemLines[0]!)}`);
-		for (let j = 1; j < itemLines.length; j++) {
-			lines.push(`${continuePrefix}${replaceTabs(itemLines[j]!)}`);
+		for (const itemLine of itemLines) {
+			lines.push(`${ITEM_INDENT}${replaceTabs(itemLine)}`);
 		}
 	}
 
 	if (truncateFrom === "end" && hasSummary) {
-		lines.push(`${theme.fg("dim", theme.tree.last)} ${theme.fg("muted", formatMoreItems(remaining, itemType))}`);
+		lines.push(`${ITEM_INDENT}${theme.fg("muted", formatMoreItems(remaining, itemType))}`);
 	}
 
 	return lines;
