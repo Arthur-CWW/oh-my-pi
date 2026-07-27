@@ -1088,8 +1088,8 @@ function renderAgentResult(
 
 	if (result.patchPath && !aborted && result.exitCode === 0) {
 		lines.push(`${continuePrefix}${theme.fg("dim", `Patch: ${result.patchPath}`)}`);
-	} else if (result.branchName && !aborted && result.exitCode === 0) {
-		lines.push(`${continuePrefix}${theme.fg("dim", `Branch: ${result.branchName}`)}`);
+	} else if (result.taskBranch && !aborted && result.exitCode === 0) {
+		lines.push(`${continuePrefix}${theme.fg("dim", `Branch: ${result.taskBranch.branchName}`)}`);
 	}
 
 	// Error message

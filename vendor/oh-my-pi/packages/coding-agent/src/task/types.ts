@@ -5,8 +5,8 @@ import { z } from "zod/v4";
 import type { DiskAdmissionDecision } from "../resource/disk-pressure";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type { SessionSpawnCordon } from "../session/session-control";
-import type { IsolationHandle, NestedRepoPatch } from "./worktree";
 import type { SpawnRouteReceipt } from "./route-resolution";
+import type { IsolationHandle, NestedRepoPatch, TaskBranchToken } from "./worktree";
 
 /** Source of an agent definition */
 export type AgentSource = "bundled" | "user" | "project";
@@ -415,9 +415,15 @@ export interface SingleResult {
 	patchPath?: string;
 	/** Isolation backend materialized for this isolated task. */
 	isolationBackend?: IsolationHandle["backend"];
-	/** Branch name for isolated branch-mode output */
-	branchName?: string;
-	/** Nested repo patches to apply after parent merge */
+	/** Owned branch token for isolated branch-mode output. */
+	taskBranch?: TaskBranchToken;
+	/** Cancellation arrived only after a repository mutation commit point. */
+	lateAbort?: boolean;
+	/** Final all-repository application outcome, including partial failures. */
+	changesApplied?: boolean;
+	/** Non-fatal cleanup failures after a successful branch capture. */
+	branchCleanupErrors?: string[];
+	/** Nested repo patches to apply before root mutation. */
 	nestedPatches?: NestedRepoPatch[];
 	/** Data extracted by registered subprocess tool handlers (keyed by tool name) */
 	extractedToolData?: Record<string, unknown[]>;

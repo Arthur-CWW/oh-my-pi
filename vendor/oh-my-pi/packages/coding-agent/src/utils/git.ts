@@ -80,6 +80,11 @@ export interface DiffOptions {
 	readonly nameOnly?: boolean;
 	readonly noIndex?: { left: string; right: string };
 	readonly numstat?: boolean;
+	/**
+	 * Write the patch to this file instead of stdout (`git diff --output=<file>`).
+	 * Git writes the file directly, so large patches are not buffered in memory.
+	 */
+	readonly output?: string;
 	readonly signal?: AbortSignal;
 	readonly stat?: boolean;
 }
@@ -162,6 +167,21 @@ export class GitCommandError extends Error {
 	constructor(args: readonly string[], result: GitCommandResult) {
 		super(formatCommandFailure(args, result));
 		this.name = "GitCommandError";
+		this.args = [...args];
+		this.result = result;
+	}
+}
+
+export class GitOutputOverflowError extends Error {
+	readonly args: readonly string[];
+	readonly result: GitCommandResult;
+
+	constructor(args: readonly string[], result: GitCommandResult) {
+		const bytes = result.stdoutBytes === undefined ? "an unknown number of" : result.stdoutBytes.toString();
+		super(
+			`git ${args.join(" ")} stdout exceeded the ${DEFAULT_STREAM_CAP_BYTES}-byte capture limit (${bytes} bytes received)`,
+		);
+		this.name = "GitOutputOverflowError";
 		this.args = [...args];
 		this.result = result;
 	}
@@ -415,6 +435,7 @@ function buildDiffArgs(options: DiffOptions): string[] {
 	if (options.nameOnly) args.push("--name-only");
 	if (options.stat) args.push("--stat");
 	if (options.numstat) args.push("--numstat");
+	if (options.output) args.push(`--output=${options.output}`);
 	if (options.noIndex) {
 		args.push("--no-index", options.noIndex.left, options.noIndex.right);
 		return args;
@@ -1395,6 +1416,87 @@ export const remote = {
 // API: ref
 // ════════════════════════════════════════════════════════════════════════════
 
+/**
+ * What the ref database reports about one ref, with nothing collapsed into a
+ * null. `missing` is a positive answer — git listed the store and this ref is
+ * not in it — so anything git could not read stays `unreadable` instead of
+ * masquerading as absence.
+ */
+export type RefReadOutcome =
+	/** The ref exists and points directly at `oid`. */
+	| { readonly kind: "direct"; readonly oid: string }
+	/** The ref exists as a symbolic ref naming `target`, which is never followed. */
+	| { readonly kind: "symbolic"; readonly target: string }
+	/** Git listed the ref database and this ref is not in it. */
+	| { readonly kind: "missing" }
+	/** The ref database could not be read; existence is unknown. */
+	| { readonly kind: "unreadable"; readonly detail: string };
+
+/**
+ * Result of an atomic compare-and-delete against a ref.
+ *
+ * `mismatch`, `missing` and `symbolic` are ordinary outcomes, not failures:
+ * the ref was left exactly as found and the caller decides what to report.
+ */
+export type RefDeleteOutcome =
+	/** The ref matched `expectedOldSha` and was removed. */
+	| { readonly kind: "deleted" }
+	/** The ref did not exist; nothing was removed. */
+	| { readonly kind: "missing" }
+	/** The ref exists at `actual`, not at the expected sha; nothing was removed. */
+	| { readonly kind: "mismatch"; readonly actual: string }
+	/** The ref is symbolic, so this name no longer denotes the owned object; nothing was removed. */
+	| { readonly kind: "symbolic"; readonly target: string }
+	/** The delete could not be completed or confirmed; the ref is presumed retained. */
+	| { readonly kind: "failed"; readonly detail: string };
+
+/** `refname\0objectname\0symref`. Refnames cannot contain NUL, so the fields are unambiguous. */
+const REF_READ_FORMAT = "--format=%(refname)%00%(objectname)%00%(symref)";
+
+/**
+ * Confirm that "the ref database did not list it" really means absence.
+ *
+ * Both ref backends answer a store they cannot open with an empty listing and
+ * a zero exit: the loose iterator skips an unopenable directory silently, and
+ * the reftable iterator reports no refs at all. Absence is therefore only
+ * credible while this process can still see the backing store. `ENOENT` is
+ * that proof; any other error proves only that we cannot look, which is a read
+ * failure.
+ *
+ * A directory at the loose path is a ref namespace (`refs/heads/a` alongside
+ * `refs/heads/a/b`), never a ref, so it is absence too.
+ */
+async function classifyRefAbsence(cwd: string, refName: string): Promise<RefReadOutcome> {
+	if (!refName.startsWith("refs/")) return { kind: "missing" };
+	const repository = await resolveRepository(cwd);
+	if (!repository) return { kind: "missing" };
+	if (await isReftableRepo(repository)) {
+		for (const dir of getRefLookupDirs(repository)) {
+			const store = path.join(dir, "reftable");
+			try {
+				await fs.promises.access(store, fs.constants.R_OK | fs.constants.X_OK);
+			} catch (error) {
+				if (isEnoent(error)) continue;
+				const detail = error instanceof Error ? error.message : String(error);
+				return { kind: "unreadable", detail: `cannot read the reftable store at ${store}: ${detail}` };
+			}
+		}
+		return { kind: "missing" };
+	}
+	for (const dir of getRefLookupDirs(repository)) {
+		try {
+			const entry = await fs.promises.lstat(path.join(dir, refName));
+			if (entry.isDirectory()) continue;
+			return { kind: "unreadable", detail: `${refName} is present on disk but the ref database did not list it` };
+		} catch (error) {
+			if (isEnoent(error) || hasFsCode(error, "ENOTDIR")) continue;
+			const detail = error instanceof Error ? error.message : String(error);
+			return { kind: "unreadable", detail: `cannot stat ${refName}: ${detail}` };
+		}
+	}
+	return { kind: "missing" };
+}
+
 export const ref = {
 	/** Check if a ref exists. */
 	async exists(cwd: string, refName: string, signal?: AbortSignal): Promise<boolean> {
@@ -1413,6 +1515,98 @@ export const ref = {
 		const result = await git(cwd, ["rev-parse", refName], { readOnly: true, signal });
 		if (result.exitCode !== 0) return null;
 		return result.stdout.trim() || null;
+	},
+
+	/**
+	 * Classify one ref without dereferencing it.
+	 *
+	 * `for-each-ref` is the only plumbing that reports the symbolic target and
+	 * the object in one answer; `rev-parse`, `show-ref` and `symbolic-ref` all
+	 * collapse "cannot read" into "not a valid ref". Three failure shapes are
+	 * kept apart deliberately: a non-zero exit (an unreadable packed-refs or
+	 * reftable store), an empty listing with a warning on stderr (git's
+	 * `ignoring broken ref`, an unreadable loose ref), and a truly empty
+	 * listing.
+	 */
+	async read(cwd: string, refName: string, signal?: AbortSignal): Promise<RefReadOutcome> {
+		ensureAvailable();
+		const args = ["for-each-ref", REF_READ_FORMAT, refName];
+		const result = await git(cwd, args, { readOnly: true, signal });
+		if (result.exitCode !== 0) return { kind: "unreadable", detail: formatCommandFailure(args, result) };
+		for (const line of result.stdout.split("\n")) {
+			// The pattern is a path prefix: `refs/heads/a` also lists `refs/heads/a/b`.
+			const [name, oid, symref] = line.split("\0");
+			if (name !== refName) continue;
+			if (symref) return { kind: "symbolic", target: symref };
+			if (oid) return { kind: "direct", oid };
+			return { kind: "unreadable", detail: `${refName} was listed without an object name` };
+		}
+		const warning = result.stderr.trim();
+		if (warning) return { kind: "unreadable", detail: warning };
+		return classifyRefAbsence(cwd, refName);
+	},
+
+	/**
+	 * Atomically delete `refName` only while it is a direct ref at `expectedOldSha`.
+	 *
+	 * `git update-ref --no-deref -d <ref> <old>` takes the ref lock, compares,
+	 * and unlinks under that one lock, so no writer can move the ref between
+	 * the comparison and the delete. There is deliberately no unconditional
+	 * fallback: a caller that cannot name the sha it owns must not delete the
+	 * ref at all.
+	 *
+	 * Two guards keep the delete on the ref it was aimed at. The preflight read
+	 * refuses a symbolic ref outright, because `-d` with the *dereferenced* sha
+	 * otherwise succeeds against a symref an external writer planted over the
+	 * owned name. `--no-deref` then bounds the damage of a symref planted after
+	 * that read to the owned name alone: plain `-d` deletes the symref *and*
+	 * the branch it points at.
+	 *
+	 * Neither read ever authorises a delete — they only classify — so neither
+	 * opens a window.
+	 *
+	 * Unlike `git branch -D` this does not refuse a ref checked out by a linked
+	 * worktree; the expected-sha comparison is the ownership guard, and callers
+	 * that would strand a worktree must consult the worktree list themselves.
+	 */
+	async deleteExact(
+		cwd: string,
+		refName: string,
+		expectedOldSha: string,
+		signal?: AbortSignal,
+	): Promise<RefDeleteOutcome> {
+		ensureAvailable();
+		const before = await ref.read(cwd, refName, signal);
+		switch (before.kind) {
+			case "missing":
+				return { kind: "missing" };
+			case "symbolic":
+				return { kind: "symbolic", target: before.target };
+			case "unreadable":
+				return { kind: "failed", detail: before.detail };
+			case "direct":
+				if (before.oid !== expectedOldSha) return { kind: "mismatch", actual: before.oid };
+				break;
+		}
+
+		const args = ["update-ref", "--no-deref", "-d", refName, expectedOldSha];
+		const result = await git(cwd, args, { signal });
+		if (result.exitCode === 0) return { kind: "deleted" };
+
+		const detail = formatCommandFailure(args, result);
+		const after = await ref.read(cwd, refName, signal);
+		switch (after.kind) {
+			case "symbolic":
+				return { kind: "symbolic", target: after.target };
+			case "direct":
+				return after.oid === expectedOldSha ? { kind: "failed", detail } : { kind: "mismatch", actual: after.oid };
+			case "unreadable":
+				return { kind: "failed", detail: `${detail}; ${after.detail}` };
+			case "missing":
+				// It was a direct ref at `expectedOldSha` moments ago, so an empty
+				// read after a failed delete is not proof that it was retired.
+				return { kind: "failed", detail };
+		}
 	},
 
 	/** Tags pointing at a ref. */
@@ -1497,7 +1691,10 @@ export const worktree = {
 	},
 
 	async list(cwd: string, signal?: AbortSignal): Promise<GitWorktreeEntry[]> {
-		return parseWorktreeList(await runText(cwd, ["worktree", "list", "--porcelain"], { readOnly: true, signal }));
+		const args = ["worktree", "list", "--porcelain"];
+		const result = await runChecked(cwd, args, { readOnly: true, signal });
+		if (result.stdoutTruncated) throw new GitOutputOverflowError(args, result);
+		return parseWorktreeList(result.stdout);
 	},
 
 	async prune(cwd: string, signal?: AbortSignal): Promise<void> {

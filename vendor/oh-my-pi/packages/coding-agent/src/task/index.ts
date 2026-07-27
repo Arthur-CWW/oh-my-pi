@@ -75,6 +75,7 @@ import * as git from "../utils/git";
 import * as jj from "../utils/jj";
 import {
 	createTaskCapabilitySnapshot,
+	type DiscoveryResult,
 	type TaskCapabilitySnapshot,
 	discoverAgents,
 	getAgent,
@@ -107,16 +108,19 @@ import {
 } from "./subagent-failure";
 import {
 	applyNestedPatches,
+	applyTaskPatches,
 	captureBaseline,
-	captureDeltaPatch,
+	captureIsolatedPatchResult,
 	cleanupIsolation,
 	cleanupTaskBranches,
 	commitToBranch,
 	ensureIsolation,
 	getRepoRoot,
 	type IsolationHandle,
+	isolatedRepositoryFailureMessage,
 	mergeTaskBranches,
 	parseIsolationMode,
+	releaseBaseline,
 	type WorktreeBaseline,
 } from "./worktree";
 
@@ -1778,21 +1782,6 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		// structured output go through eval agent(prompt, schema).
 		const effectiveOutputSchema = effectiveAgent.output ?? this.session.outputSchema;
 
-		let repoRoot: string | null = null;
-		let baseline: WorktreeBaseline | null = null;
-		if (isIsolated) {
-			try {
-				repoRoot = await getRepoRoot(this.session.cwd);
-				baseline = await captureBaseline(repoRoot);
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return {
-					content: [{ type: "text", text: `Isolated task execution requires a git repository. ${message}` }],
-					details: { projectAgentsDir, results: [], totalDurationMs: Date.now() - startTime },
-				};
-			}
-		}
-
 		const preferredIsolationBackend = parseIsolationMode(isolationMode);
 
 		// Derive artifacts directory
@@ -1821,6 +1810,21 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 					localProtocolOptions,
 				);
 
+		// Captured last, immediately before the guarded region: the baseline owns
+		// temp files that only the `finally` below frees.
+		let repoRoot: string | null = null;
+		let baseline: WorktreeBaseline | null = null;
+		if (isIsolated) {
+			try {
+				repoRoot = await getRepoRoot(this.session.cwd);
+				baseline = await captureBaseline(repoRoot, undefined, signal);
+			} catch (err) {
+				return {
+					content: [{ type: "text", text: isolatedRepositoryFailureMessage(err) }],
+					details: { projectAgentsDir, results: [], totalDurationMs: Date.now() - startTime },
+				};
+			}
+		}
 
 		try {
 			await fs.mkdir(effectiveArtifactsDir, { recursive: true });
@@ -2015,6 +2019,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 						})),
 						isolationBackend: isolationHandle.backend,
 					};
+					signal?.throwIfAborted();
 					if (mergeMode === "branch" && result.exitCode === 0) {
 						try {
 							const commitResult = await commitToBranch(
@@ -2023,37 +2028,43 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 								agentId,
 								params.description,
 								buildCommitMessageFn(),
+								signal,
 							);
 							return {
 								...result,
-								branchName: commitResult?.branchName,
+								taskBranch: commitResult?.branch,
 								nestedPatches: commitResult?.nestedPatches,
+								lateAbort: commitResult?.lateAbort || undefined,
+								branchCleanupErrors:
+									commitResult && commitResult.cleanupErrors.length > 0
+										? commitResult.cleanupErrors
+										: undefined,
 							};
 						} catch (mergeErr) {
-							// Agent succeeded but branch commit failed — clean up stale branch
-							const branchName = `omp/task/${agentId}`;
-							await git.branch.tryDelete(repoRoot, branchName);
 							const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-							return { ...result, error: `Merge failed: ${msg}` };
+							return { ...result, aborted: signal?.aborted || result.aborted, error: `Merge failed: ${msg}` };
 						}
 					}
 					if (result.exitCode === 0) {
-						try {
-							const delta = await captureDeltaPatch(isolationDir, taskBaseline);
-							const patchPath = path.join(effectiveArtifactsDir, `${agentId}.patch`);
-							await Bun.write(patchPath, delta.rootPatch);
-							return {
-								...result,
-								patchPath,
-								nestedPatches: delta.nestedPatches,
-							};
-						} catch (patchErr) {
-							const msg = patchErr instanceof Error ? patchErr.message : String(patchErr);
-							return { ...result, error: `Patch capture failed: ${msg}` };
+						const capture = await captureIsolatedPatchResult({
+							isolationDir,
+							baseline: taskBaseline,
+							artifactsDir: effectiveArtifactsDir,
+							agentId,
+							signal,
+						});
+						if (!capture.ok) {
+							return { ...result, aborted: capture.aborted || result.aborted, error: capture.error };
 						}
+						return {
+							...result,
+							patchPath: capture.patchPath,
+							nestedPatches: capture.nestedPatches,
+						};
 					}
 					return result;
 				} catch (err) {
+					const aborted = signal?.aborted || undefined;
 					const message = err instanceof Error ? err.message : String(err);
 					return {
 						index: spawnIndex,
@@ -2072,6 +2083,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 						requests: 0,
 						modelOverride,
 						error: message,
+						aborted,
 					};
 				} finally {
 					if (isolationHandle) {
@@ -2082,105 +2094,153 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 			const result = await runTask();
 
+			// A degraded baseline capture is reported alongside the merge outcome: the
+			// user needs to know which of their files the task could not carry back.
+			const baselineNotice = baseline?.warnings.length
+				? `\n\n<system-notification>Baseline capture degraded:\n- ${baseline.warnings.join("\n- ")}</system-notification>`
+				: "";
 			let mergeSummary = "";
 			let changesApplied: boolean | null = null;
 			let hadAnyChanges = false;
-			let mergedBranchForNestedPatches = false;
+			let lateAbort = result.lateAbort ?? false;
 			if (isIsolated && repoRoot) {
 				try {
+					const initialSignal = lateAbort ? undefined : signal;
+					initialSignal?.throwIfAborted();
 					if (mergeMode === "branch") {
-						if (!result.branchName || result.exitCode !== 0 || result.aborted) {
+						if (result.exitCode === 0 && result.error && !result.aborted) {
+							changesApplied = false;
+							mergeSummary = `\n\n<system-notification>${result.error}\nTask changes were not captured or applied.</system-notification>`;
+						} else if (result.exitCode !== 0 || result.aborted) {
 							changesApplied = true;
 							mergeSummary = "\n\nNo changes to apply.";
 						} else {
-							const mergeResult = await mergeTaskBranches(repoRoot, [
-								{ branchName: result.branchName, taskId: result.id, description: result.description },
-							]);
-							mergedBranchForNestedPatches = mergeResult.merged.includes(result.branchName);
-							changesApplied = mergeResult.failed.length === 0;
-							hadAnyChanges = changesApplied && mergeResult.merged.length > 0;
-
-							if (changesApplied) {
+							const nestedResult = await applyNestedPatches(
+								repoRoot,
+								result.nestedPatches ?? [],
+								buildCommitMessageFn(),
+								initialSignal,
+							);
+							lateAbort ||= nestedResult.lateAbort;
+							hadAnyChanges ||= nestedResult.repos.some(status => status.applied);
+							if (!nestedResult.completed) {
+								const committed = nestedResult.repos
+									.filter(status => status.committed)
+									.map(status => status.relativePath);
+								const failed = nestedResult.repos.find(status => status.error);
+								const committedPart =
+									committed.length > 0 ? ` Nested commits already applied: ${committed.join(", ")}.` : "";
+								const failurePart = failed ? ` ${failed.relativePath}: ${failed.error}` : "";
+								changesApplied = false;
+								mergeSummary = `\n\n<system-notification>Nested repository transaction stopped; root branch was not merged.${committedPart}${failurePart}</system-notification>`;
+							} else if (!result.taskBranch) {
+								changesApplied = true;
 								mergeSummary = hadAnyChanges
-									? `\n\nMerged branch: ${result.branchName}`
+									? "\n\nApplied nested repository patches: yes"
 									: "\n\nNo changes to apply.";
 							} else {
-								const conflictPart = mergeResult.conflict ? `\nConflict: ${mergeResult.conflict}` : "";
-								mergeSummary = `\n\n<system-notification>Branch merge failed: ${result.branchName}.${conflictPart}\nThe unmerged branch remains for manual resolution.</system-notification>`;
-							}
-							if (mergeResult.stashConflict) {
-								mergeSummary += `\n\n<system-notification>${mergeResult.stashConflict}</system-notification>`;
-							}
-
-							// Clean up the merged branch (keep failed ones for manual resolution)
-							if (changesApplied) {
-								await cleanupTaskBranches(repoRoot, [result.branchName]);
+								const mergeSignal = nestedResult.commitPointCrossed || lateAbort ? undefined : signal;
+								const mergeResult = await mergeTaskBranches(repoRoot, [result.taskBranch], mergeSignal);
+								lateAbort ||= mergeResult.lateAbort;
+								changesApplied = mergeResult.failed.length === 0;
+								hadAnyChanges ||= mergeResult.merged.length > 0;
+								if (changesApplied) {
+									mergeSummary = hadAnyChanges
+										? `\n\nMerged branch: ${result.taskBranch.branchName}`
+										: "\n\nNo changes to apply.";
+								} else {
+									const conflictPart = mergeResult.conflict ? `\nConflict: ${mergeResult.conflict}` : "";
+									const nestedPart = nestedResult.repos.some(status => status.committed)
+										? "\nNested repository commits were applied before the root failure."
+										: "";
+									mergeSummary = `\n\n<system-notification>Branch merge failed: ${result.taskBranch.branchName}.${conflictPart}${nestedPart}\nThe unmerged branch remains for manual resolution.</system-notification>`;
+								}
+								if (mergeResult.stashConflict) {
+									mergeSummary += `\n\n<system-notification>${mergeResult.stashConflict}</system-notification>`;
+								}
+								if (mergeResult.cleanupErrors.length > 0) {
+									mergeSummary += `\n\n<system-notification>Repository changes were applied, but branch cleanup failed:\n- ${mergeResult.cleanupErrors.join("\n- ")}</system-notification>`;
+								}
 							}
 						}
 					} else {
-						// Patch mode: apply the patch from a successful run. A failed or
-						// aborted run has nothing to apply and must not block the result.
+						// Patch mode applies nested repositories before root so partial
+						// non-cancellation failures can be reported exactly.
 						const succeeded = result.exitCode === 0 && !result.error && !result.aborted;
 						if (!succeeded) {
-							changesApplied = true;
-							hadAnyChanges = false;
+							changesApplied = !(result.exitCode === 0 && result.error && !result.aborted);
 						} else if (!result.patchPath) {
 							changesApplied = false;
-							hadAnyChanges = false;
 						} else {
 							const patchText = await Bun.file(result.patchPath).text();
-							if (!patchText.trim()) {
-								changesApplied = true;
-								hadAnyChanges = false;
-							} else {
-								const normalized = patchText.endsWith("\n") ? patchText : `${patchText}\n`;
-								changesApplied = await git.patch.canApplyText(repoRoot, normalized);
-								if (changesApplied) {
-									try {
-										await git.patch.applyText(repoRoot, normalized);
-										hadAnyChanges = true;
-									} catch {
-										changesApplied = false;
-										hadAnyChanges = false;
-									}
-								}
+							initialSignal?.throwIfAborted();
+							const applyResult = await applyTaskPatches(
+								repoRoot,
+								patchText,
+								result.nestedPatches ?? [],
+								buildCommitMessageFn(),
+								initialSignal,
+							);
+							changesApplied = applyResult.changesApplied;
+							hadAnyChanges = applyResult.hadChanges;
+							lateAbort ||= applyResult.lateAbort;
+							if (!changesApplied) {
+								const committed = applyResult.nested.repos
+									.filter(status => status.committed)
+									.map(status => status.relativePath);
+								const nestedFailure = applyResult.nested.repos.find(status => status.error);
+								const rootFailure = applyResult.root?.error;
+								const partial =
+									committed.length > 0 ? ` Nested commits already applied: ${committed.join(", ")}.` : "";
+								const failure = nestedFailure
+									? ` ${nestedFailure.relativePath}: ${nestedFailure.error}`
+									: rootFailure
+										? ` Root: ${rootFailure}`
+										: "";
+								mergeSummary = `\n\n<system-notification>Patches were not fully applied.${partial}${failure}\nPatch artifacts are preserved for manual resolution.</system-notification>`;
 							}
 						}
 
 						if (changesApplied) {
 							mergeSummary = hadAnyChanges ? "\n\nApplied patches: yes" : "\n\nNo changes to apply.";
-						} else {
-							const notification =
-								"<system-notification>Patches were not applied and must be handled manually.</system-notification>";
+						} else if (!mergeSummary) {
+							const detail = result.error
+								? `${result.error}\nTask changes were not captured or applied.`
+								: "Patches were not applied and must be handled manually.";
 							const patchList = result.patchPath ? `\n\nPatch artifact:\n- ${result.patchPath}` : "";
-							mergeSummary = `\n\n${notification}${patchList}`;
+							mergeSummary = `\n\n<system-notification>${detail}</system-notification>${patchList}`;
 						}
 					}
 				} catch (mergeErr) {
 					const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+					// `lateAbort` means a repository commit point was already crossed, so
+					// cancellation cannot be the cause of this failure and cannot be
+					// reported as having preceded mutation. `hadAnyChanges` keeps whatever
+					// the completed phases actually landed.
+					const cancelledBeforeMutation = (signal?.aborted ?? false) && !lateAbort;
 					changesApplied = false;
-					hadAnyChanges = false;
-					mergeSummary = `\n\n<system-notification>Merge phase failed: ${msg}\nTask outputs are preserved but changes were not applied.</system-notification>`;
+					let cleanupNotice = "";
+					if (cancelledBeforeMutation && result.taskBranch) {
+						const cleanupErrors = await cleanupTaskBranches(repoRoot, [result.taskBranch]);
+						if (cleanupErrors.length > 0) cleanupNotice = `\nBranch cleanup failed: ${cleanupErrors.join(" ")}`;
+					}
+					const detail = cancelledBeforeMutation ? "Task was cancelled before repository mutation began." : msg;
+					const appliedPart = hadAnyChanges
+						? "\nRepository changes applied before the failure were kept and are not rolled back."
+						: "\nTask outputs are preserved but changes were not applied.";
+					mergeSummary = `\n\n<system-notification>Merge phase failed: ${detail}${appliedPart}${cleanupNotice}</system-notification>`;
 				}
 			}
 
-			// Apply nested repo patches (separate from parent git)
-			if (isIsolated && repoRoot && (mergeMode === "branch" || changesApplied !== false)) {
-				const nestedPatches = result.nestedPatches ?? [];
-				const eligible =
-					nestedPatches.length > 0 &&
-					result.exitCode === 0 &&
-					!result.aborted &&
-					(mergeMode !== "branch" || mergedBranchForNestedPatches);
-				if (eligible) {
-					try {
-						await applyNestedPatches(repoRoot, nestedPatches, buildCommitMessageFn());
-					} catch {
-						// Nested patch failures are non-fatal to the parent merge
-						mergeSummary +=
-							"\n\n<system-notification>Some nested repository patches failed to apply.</system-notification>";
-					}
-				}
+			if (changesApplied !== null) result.changesApplied = changesApplied;
+			if (result.branchCleanupErrors?.length) {
+				mergeSummary += `\n\n<system-notification>Temporary branch worktree cleanup failed:\n- ${result.branchCleanupErrors.join("\n- ")}</system-notification>`;
+			}
+			if (lateAbort) {
+				result.lateAbort = true;
+				mergeSummary += changesApplied
+					? "\n\n<system-notification>Cancellation arrived after the repository commit point; mutation and cleanup completed and changes were applied.</system-notification>"
+					: "\n\n<system-notification>Cancellation arrived after the repository commit point and was non-actionable; the reported merge failure is unrelated to cancellation.</system-notification>";
 			}
 
 			// Cleanup temp directory if used
@@ -2190,12 +2250,21 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				await fs.rm(tempArtifactsDir, { recursive: true, force: true });
 			}
 
-			return this.#buildResultPayload(result, projectAgentsDir, Date.now() - startTime, mergeSummary);
+			return this.#buildResultPayload(
+				result,
+				projectAgentsDir,
+				Date.now() - startTime,
+				`${baselineNotice}${mergeSummary}`,
+			);
 		} catch (err) {
 			return {
 				content: [{ type: "text", text: `Task execution failed: ${err}` }],
 				details: { projectAgentsDir, results: [], totalDurationMs: Date.now() - startTime },
 			};
+		} finally {
+			// The baseline owns temp patch files sized by the dirty tree; every exit
+			// path frees them, including the early returns above.
+			if (baseline) await releaseBaseline(baseline);
 		}
 	}
 
@@ -2206,13 +2275,16 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		totalDurationMs: number,
 		mergeSummary: string,
 	): AgentToolResult<TaskToolDetails> {
-		const status = result.aborted
-			? "cancelled"
-			: result.exitCode === 0 && result.error
-				? "merge failed"
-				: result.exitCode === 0
-					? "completed"
-					: `failed (exit ${result.exitCode})`;
+		const status =
+			result.lateAbort && result.changesApplied
+				? "completed (cancellation arrived after apply began)"
+				: result.aborted
+					? "cancelled"
+					: result.exitCode === 0 && (result.error || result.changesApplied === false)
+						? "merge failed"
+						: result.exitCode === 0
+							? "completed"
+							: `failed (exit ${result.exitCode})`;
 		const output = formatResultOutputFallback(result);
 		const outputCharCount = result.outputMeta?.charCount ?? output.length;
 		const fullOutputThreshold = 5000;
