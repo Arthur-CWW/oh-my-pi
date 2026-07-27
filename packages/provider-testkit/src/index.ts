@@ -1,6 +1,7 @@
 export * from "./canonical"
 export * from "./cassette"
 export * from "./errors"
+export * from "./differential"
 export * from "./live"
 export * from "./protocol"
 export * from "./provider"

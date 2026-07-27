@@ -1,0 +1,11 @@
+{"type":"message","timestamp":"2026-07-27T00:00:00.000Z","message":{"role":"user","content":"Run diagnostics."}}
+{"type":"checkpoint","id":"user"}
+{"type":"custom","customType":"child_lifecycle","data":{"version":1,"agentId":"ReplayChild","state":"running","updatedAt":"2026-07-27T00:00:01.000Z","modelId":"fixture-model","thinkingLevel":"medium"}}
+{"type":"provider_replay","request":{"route":{"providerApi":"anthropic.messages.v1","model":"fixture-model"},"contract":{"promptVersion":"replay/v1","toolContractVersion":"tools/v1"},"system":["Sanitized replay fixture."],"messages":[{"role":"user","parts":[{"kind":"text","text":"Run diagnostics."}]}],"tools":[],"generation":{"maxOutputTokens":128}},"response":{"text":"Diagnostics ready.","stopReason":"stop","usage":{"inputTokens":3,"outputTokens":2}}}
+{"type":"checkpoint","id":"provider"}
+{"type":"message","timestamp":"2026-07-27T00:00:02.000Z","message":{"role":"toolResult","toolCallId":"call-status","toolName":"status","content":{"healthy":true},"isError":false}}
+{"type":"checkpoint","id":"tool"}
+{"type":"custom","customType":"child_restart","data":{"version":1,"agentId":"ReplayChild","predecessorOwnerEpoch":"epoch-1","state":"running","queueCheckpoint":"queue-1","attemptId":"attempt-2","updatedAt":"2026-07-27T00:00:03.000Z"}}
+{"type":"checkpoint","id":"restart","reopen":true}
+{"type":"custom","customType":"child_lifecycle","data":{"version":1,"agentId":"ReplayChild","state":"completed","updatedAt":"2026-07-27T00:00:04.000Z"}}
+{"type":"checkpoint","id":"terminal","invariants":["terminal-consistency"]}
