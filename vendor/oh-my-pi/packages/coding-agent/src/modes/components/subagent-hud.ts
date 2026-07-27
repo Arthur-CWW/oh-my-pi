@@ -1,4 +1,4 @@
-import { padding, visibleWidth } from "@oh-my-pi/pi-tui";
+import { padding, Text, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { AgentRef } from "../../registry/agent-registry";
 import { formatTaskId } from "../../task/render";
 import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
@@ -101,6 +101,7 @@ function modelSelector(session: ObservableSession, ref?: AgentRef): string | und
 
 const STALL_THRESHOLD_MS = 30_000;
 const TOKEN_RATE_CELL_WIDTH = 8;
+const SUBAGENT_HUD_PADDING_X = 1;
 
 function hudStatus(session: ObservableSession, now: number, lastTokenProgressAt: number): HudStatus {
 	const progressStatus = session.progress?.status;
@@ -134,6 +135,21 @@ export class SubagentHudRenderer {
 	#generation = 0;
 	#theme: Theme | undefined;
 	#rowRebuilds = 0;
+
+	renderBlock(
+		sessions: readonly ObservableSession[],
+		terminalColumns: number,
+		showTokenRateBadge = true,
+		agentLookup?: SubagentHudAgentLookup,
+	): Text | undefined {
+		const lines = this.render(
+			sessions,
+			terminalColumns - SUBAGENT_HUD_PADDING_X * 2,
+			showTokenRateBadge,
+			agentLookup,
+		);
+		return lines.length === 0 ? undefined : new Text(lines.join("\n"), SUBAGENT_HUD_PADDING_X, 0);
+	}
 
 	getPerformanceCounters(): Readonly<SubagentHudPerformanceCounters> {
 		return { rowRebuilds: this.#rowRebuilds };

@@ -1629,14 +1629,13 @@ export class InteractiveMode implements InteractiveModeContext, SubmittedInputRe
 	 */
 	#renderSubagentList(sessions = this.#observerRegistry.getSessions()): void {
 		this.subagentContainer.clear();
-		const lines = this.#subagentHudRenderer.render(
+		const block = this.#subagentHudRenderer.renderBlock(
 			sessions,
 			this.ui.terminal.columns,
 			this.settings.get("task.showTokenRateBadge"),
 			agentId => AgentRegistry.global().get(agentId),
 		);
-		if (lines.length === 0) return;
-		this.subagentContainer.addChild(new Text(lines.join("\n"), 1, 0));
+		if (block) this.subagentContainer.addChild(block);
 	}
 
 	async #loadTodoList(): Promise<void> {

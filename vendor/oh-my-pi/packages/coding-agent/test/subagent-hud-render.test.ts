@@ -6,8 +6,8 @@
  * and eval `agent()` spawns are excluded because they already render inline.
  */
 import { beforeAll, describe, expect, it, setSystemTime, vi } from "bun:test";
-import { renderSubagentHudLines } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { SubagentHudRenderer } from "@oh-my-pi/pi-coding-agent/modes/components/subagent-hud";
+import { renderSubagentHudLines } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import {
 	type ObservableSession,
 	SessionObserverRegistry,
@@ -22,6 +22,7 @@ import {
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
 } from "@oh-my-pi/pi-coding-agent/task";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { visibleWidth } from "@oh-my-pi/pi-tui";
 
 function makeSession(overrides: Partial<ObservableSession> & { id: string }): ObservableSession {
 	return {
@@ -525,6 +526,157 @@ describe("subagent HUD lines", () => {
 		} finally {
 			registry.dispose();
 			vi.useRealTimers();
+		}
+	});
+
+	// The HUD block is mounted inside a padded `Text`, so a row that merely fits
+	// the terminal still overflows if it does not fit the container: the
+	// container soft-wraps it at the rate's inner space and the `t/s` unit
+	// lands on its own display line. These sweep both budgets at once.
+	const badgeStates = [
+		{ name: "healthy", tokenRateStuck: false, livenessState: undefined },
+		{ name: "stuck", tokenRateStuck: true, livenessState: undefined },
+		{ name: "stalled", tokenRateStuck: false, livenessState: "stalled" as const },
+		{ name: "dead", tokenRateStuck: false, livenessState: "dead" as const },
+	];
+	const rateMagnitudes = [
+		{ name: "zero", rate: 0 },
+		{ name: "single digit", rate: 7.4 },
+		{ name: "three digit", rate: 123.4 },
+		{ name: "five digit", rate: 54_321 },
+		{ name: "compact k", rate: 9_400 },
+		{ name: "compact m", rate: 8_600_000 },
+		{ name: "absurd", rate: Number.MAX_SAFE_INTEGER },
+		{ name: "non-finite", rate: Number.POSITIVE_INFINITY },
+	];
+	const descriptions = [
+		{ name: "short", text: "short role" },
+		{ name: "long ascii", text: `HUD layout implementer ${"with a deliberately long role ".repeat(12)}` },
+		{ name: "wide graphemes", text: `终端宽度对齐专员 ${"渲染子代理徽章车道 ".repeat(12)}` },
+		{ name: "emoji", text: `🚀 launch lane ${"🧪🔬 badge lane probe ".repeat(8)}` },
+	];
+
+	function hudSession(rate: number, state: (typeof badgeStates)[number], description: string): ObservableSession {
+		return makeSession({
+			id: "SubagentHudOverflow",
+			description,
+			tokenRate: rate,
+			tokenRateStuck: state.tokenRateStuck,
+			progress: makeProgress({
+				id: "SubagentHudOverflow",
+				resolvedModel: "openai-codex/gpt-5.6-sol:xhigh",
+				livenessState: state.livenessState,
+			}),
+		});
+	}
+
+	/** One rendered frame of the HUD block, mounted exactly as interactive mode mounts it. */
+	function composeHud(sessions: ObservableSession[], columns: number, showTokenRateBadge = true): string[] {
+		const block = new SubagentHudRenderer().renderBlock(sessions, columns, showTokenRateBadge);
+		return block ? [...block.render(columns)] : [];
+	}
+
+	it("keeps every row inside the row budget across widths, rates, and badge states", () => {
+		const offenders: string[] = [];
+		for (const columns of [20, 30, 40, 60, 80, 100, 120, 200]) {
+			for (const magnitude of rateMagnitudes) {
+				for (const state of badgeStates) {
+					for (const description of descriptions) {
+						const rows = new SubagentHudRenderer().render(
+							[hudSession(magnitude.rate, state, description.text)],
+							columns,
+						);
+						const row = rows.at(-1)!;
+						const plain = Bun.stripANSI(row);
+						const width = visibleWidth(row);
+						const label = `cols=${columns} rate=${magnitude.name} badge=${state.name} text=${description.name}`;
+						if (width > columns - 1) offenders.push(`${label} width=${width} :: ${JSON.stringify(plain)}`);
+						if (plain.includes("\n")) offenders.push(`${label} contains a newline :: ${JSON.stringify(plain)}`);
+					}
+				}
+			}
+		}
+		expect(offenders).toEqual([]);
+	});
+
+	it("never soft-wraps a row inside its container, so the rate keeps its t/s unit", () => {
+		const offenders: string[] = [];
+		for (const columns of [20, 30, 40, 60, 80, 100, 120, 200]) {
+			for (const magnitude of rateMagnitudes) {
+				for (const state of badgeStates) {
+					for (const description of descriptions) {
+						const composed = composeHud([hudSession(magnitude.rate, state, description.text)], columns);
+						const label = `cols=${columns} rate=${magnitude.name} badge=${state.name} text=${description.name}`;
+						// Blank spacer, "Subagents" header, one agent row — a fourth
+						// line means the container wrapped one of them.
+						if (composed.length !== 3) {
+							offenders.push(
+								`${label} lines=${composed.length} :: ${JSON.stringify(composed.map(Bun.stripANSI))}`,
+							);
+						}
+						for (const line of composed) {
+							if (visibleWidth(line) > columns) {
+								offenders.push(
+									`${label} width=${visibleWidth(line)} :: ${JSON.stringify(Bun.stripANSI(line))}`,
+								);
+							}
+						}
+					}
+				}
+			}
+		}
+		expect(offenders).toEqual([]);
+	});
+
+	it("keeps the reported overflow — a 3-digit rate split from its t/s — on one line", () => {
+		for (const columns of [80, 100, 120]) {
+			const composed = composeHud(
+				[
+					hudSession(
+						123.4,
+						badgeStates[0]!,
+						"Terminal layout and grapheme-width specialist chasing the badge lane",
+					),
+					hudSession(7.2, badgeStates[1]!, "TUI transcript navigation engineer"),
+				].map((session, index) => ({ ...session, id: `Worker${index}`, label: `Worker${index}` })),
+				columns,
+			);
+			const plain = composed.map(Bun.stripANSI);
+			expect(plain).toHaveLength(4);
+			expect(plain[2]).toMatch(/123 t\/s\s*$/);
+			expect(plain[3]).toMatch(/7 t\/s\s*$/);
+			expect(plain.some(line => line.trim() === "t/s")).toBe(false);
+		}
+	});
+
+	it("bounds runaway rates instead of growing the badge lane", () => {
+		const badge = (rate: number) =>
+			Bun.stripANSI(
+				new SubagentHudRenderer().render([hudSession(rate, badgeStates[0]!, "role")], 120).at(-1)!,
+			).trimEnd();
+		expect(badge(940)).toMatch(/\s940 t\/s$/);
+		expect(badge(9_400)).toMatch(/\s9400 t\/s$/);
+		expect(badge(8_600_000)).toMatch(/\s9m t\/s$/);
+		expect(badge(Number.POSITIVE_INFINITY)).toMatch(/\s0 t\/s$/);
+	});
+
+	it("truncates the badge rather than the row when the lane cannot fit", () => {
+		for (const columns of [3, 5, 8, 12]) {
+			const row = new SubagentHudRenderer()
+				.render([hudSession(8_600_000, badgeStates[3]!, "role")], columns)
+				.at(-1)!;
+			expect(visibleWidth(row)).toBeLessThanOrEqual(Math.max(1, columns - 1));
+			expect(Bun.stripANSI(row).split("\n")).toHaveLength(1);
+		}
+	});
+
+	it("keeps rows inside the budget with the rate badge disabled", () => {
+		for (const columns of [20, 60, 120]) {
+			for (const state of badgeStates) {
+				const composed = composeHud([hudSession(54_321, state, descriptions[1]!.text)], columns, false);
+				expect(composed).toHaveLength(3);
+				for (const line of composed) expect(visibleWidth(line)).toBeLessThanOrEqual(columns);
+			}
 		}
 	});
 });
