@@ -117,7 +117,7 @@ vendors:
     policy: track
     remote: origin
     branch: main
-    lastSync: 2026-06-13
+    lastSync: 2026-07-27
     reason: clean nested git repository tracking origin/main
   - path: vendor/trycua/cua
     upstream: https://github.com/trycua/cua
