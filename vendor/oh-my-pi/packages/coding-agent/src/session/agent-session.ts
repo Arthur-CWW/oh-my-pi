@@ -1377,6 +1377,13 @@ export class AgentSession {
 	#goalContinuationRequestedFor: string | undefined;
 	#advisorRuntime?: AdvisorRuntime;
 	#advisorEnabled = false;
+	/**
+	 * Hooks awaited at the durable turn boundary: after the provider stream and
+	 * every tool call/finalizer for the turn have completed, and before the agent
+	 * loop builds the next turn's request. Mutating the session route here is
+	 * safe; mutating it mid-turn is not.
+	 */
+	#turnBoundaryHooks = new Set<(signal?: AbortSignal) => Promise<void> | void>();
 	/** The advisor's own agent, retained so `/dump advisor` can serialize its transcript. Undefined when no advisor is active. */
 	#advisorAgent?: Agent;
 	#advisorReadOnlyTools?: AgentTool[];
@@ -1896,6 +1903,14 @@ export class AgentSession {
 				if (syncBacklog !== "off") {
 					const threshold = parseInt(syncBacklog, 10);
 					await this.#advisorRuntime.waitForCatchup(30000, threshold, signal);
+				}
+			}
+			for (const hook of [...this.#turnBoundaryHooks]) {
+				if (signal?.aborted) return;
+				try {
+					await hook(signal);
+				} catch (error) {
+					logger.warn("Turn boundary hook failed", { error: String(error) });
 				}
 			}
 		});
@@ -4669,6 +4684,21 @@ export class AgentSession {
 	/** Whether agent is currently streaming a response */
 	get isStreaming(): boolean {
 		return this.agent.state.isStreaming || this.#promptInFlightCount > 0;
+	}
+
+	/**
+	 * Register work to run at the turn boundary: after the provider stream and
+	 * all tool calls/finalizers for the turn have settled, before the agent loop
+	 * constructs the next turn's request. Returns an unregister function.
+	 *
+	 * This is the only point at which the session's model or effort may be
+	 * swapped without splitting a turn across two routes.
+	 */
+	addTurnBoundaryHook(hook: (signal?: AbortSignal) => Promise<void> | void): () => void {
+		this.#turnBoundaryHooks.add(hook);
+		return () => {
+			this.#turnBoundaryHooks.delete(hook);
+		};
 	}
 
 	get isAborting(): boolean {

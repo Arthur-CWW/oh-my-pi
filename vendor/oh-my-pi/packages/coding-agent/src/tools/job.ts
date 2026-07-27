@@ -4,14 +4,19 @@ import { Text } from "@oh-my-pi/pi-tui";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { z } from "zod/v4";
 import type { AsyncJob, AsyncJobManager } from "../async";
-import { IrcExternalBus } from "../irc/bus-external";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
+import { IrcExternalBus } from "../irc/bus-external";
 import { shimmerEnabled, shimmerText } from "../modes/theme/shimmer";
 import type { Theme } from "../modes/theme/theme";
 import jobDescription from "../prompts/tools/job.md" with { type: "text" };
 import { isAgentJobOwned } from "../registry/agent-ref";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { appendChildLifecycleRecord } from "../task/child-lifecycle";
+import {
+	type ChildRouteUpdateReport,
+	formatChildRouteUpdateReport,
+	readChildRouteUpdateReport,
+} from "../task/child-route-update";
 import { createReAdoptedSessionReviver } from "../task/executor";
 import { type HotswapResult, hotswapAgentModel } from "../task/hotswap";
 import {
@@ -89,6 +94,7 @@ interface JobSnapshot {
 	interrupted?: boolean;
 	outcome?: DurableChildJobRecord["outcome"];
 	resumable?: boolean;
+	routeUpdate?: ChildRouteUpdateReport;
 }
 
 type CancelStatus = "cancelled" | "not_found" | "already_completed";
@@ -180,8 +186,16 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		}
 
 		if (params.setModel) {
-			if (params.resume?.length || params.list || params.cancel?.length || params.interrupt?.length || params.poll?.length) {
-				throw new ToolError("`setModel` cannot be combined with `resume`, `list`, `poll`, `cancel`, or `interrupt`.");
+			if (
+				params.resume?.length ||
+				params.list ||
+				params.cancel?.length ||
+				params.interrupt?.length ||
+				params.poll?.length
+			) {
+				throw new ToolError(
+					"`setModel` cannot be combined with `resume`, `list`, `poll`, `cancel`, or `interrupt`.",
+				);
 			}
 			const job = params.setModel.id === MAIN_AGENT_ID ? undefined : manager?.getJob(params.setModel.id);
 			if (job && !this.#ownsJob(job, ownerId)) {
@@ -381,11 +395,12 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 
 		const changedJobs = this.#visibleJobs(manager, [...cancelIds, ...interruptIds], ownerId);
 		const allTrackedJobs = [...changedJobs, ...jobsToWatch];
+		const progressRouteUpdates = await this.#loadRouteUpdates(allTrackedJobs);
 
 		const PROGRESS_INTERVAL_MS = 500;
 		const emitProgress = () => {
 			if (!onUpdate) return;
-			const snapshot = this.#snapshotJobs(allTrackedJobs);
+			const snapshot = this.#snapshotJobs(allTrackedJobs, progressRouteUpdates);
 			onUpdate({
 				content: [{ type: "text", text: "" }],
 				details: {
@@ -455,7 +470,9 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		const modelRegistry = this.session.modelRegistry;
 		if (!parentSessionFile || !parentSessionId || !parentJournal || !modelRegistry) {
 			return {
-				content: [{ type: "text", text: "Resume refused: durable parent journal or model registry is unavailable." }],
+				content: [
+					{ type: "text", text: "Resume refused: durable parent journal or model registry is unavailable." },
+				],
 				details: { jobs: [] },
 			};
 		}
@@ -552,7 +569,7 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		});
 		return {
 			content: [{ type: "text", text: lines.join("\n") }],
-			details: { jobs: this.#snapshotJobs(jobs), resumed: outcomes },
+			details: { jobs: this.#snapshotJobs(jobs, await this.#loadRouteUpdates(jobs)), resumed: outcomes },
 		};
 	}
 
@@ -583,12 +600,15 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			interrupted?: boolean;
 			outcome?: DurableChildJobRecord["outcome"];
 			resumable?: boolean;
+			sessionFile?: string;
 		}[],
+		routeUpdates: ReadonlyMap<string, ChildRouteUpdateReport> = new Map(),
 	): JobSnapshot[] {
 		const now = Date.now();
 		return jobs.map(j => {
 			const current = this.session.asyncJobManager?.getJob(j.id);
 			const latest = current ?? j;
+			const routeUpdate = current?.routeUpdate ?? routeUpdates.get(j.id);
 			return {
 				id: latest.id,
 				type: latest.type,
@@ -600,8 +620,36 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				...(latest.interrupted || latest.interruptRequested ? { interrupted: true } : {}),
 				...("outcome" in latest && latest.outcome ? { outcome: latest.outcome } : {}),
 				...("resumable" in latest && latest.resumable ? { resumable: true } : {}),
+				...(routeUpdate ? { routeUpdate } : {}),
 			};
 		});
+	}
+
+	async #loadRouteUpdates(
+		jobs: readonly {
+			id: string;
+			type: "bash" | "task";
+			sessionFile?: string;
+		}[],
+	): Promise<ReadonlyMap<string, ChildRouteUpdateReport>> {
+		const updates = new Map<string, ChildRouteUpdateReport>();
+		const uniqueJobs = new Map<string, (typeof jobs)[number]>();
+		for (const job of jobs) uniqueJobs.set(job.id, job);
+		await Promise.all(
+			[...uniqueJobs.values()].map(async job => {
+				const current = this.session.asyncJobManager?.getJob(job.id);
+				if (current?.routeUpdate) {
+					updates.set(job.id, current.routeUpdate);
+					return;
+				}
+				if (job.type !== "task") return;
+				const sessionFile = job.sessionFile ?? AgentRegistry.global().get(job.id)?.sessionFile;
+				if (!sessionFile) return;
+				const report = await readChildRouteUpdateReport(sessionFile);
+				if (report) updates.set(job.id, report);
+			}),
+		);
+		return updates;
 	}
 
 	#buildHotswapResult(result: HotswapResult): AgentToolResult<JobToolDetails> {
@@ -610,9 +658,17 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 				? `Hot-swap applied: ${result.agentId} now ${result.to} (was ${result.from})`
 				: result.status === "queued"
 					? `Hot-swap queued: ${result.agentId} will switch ${result.from} → ${result.to} at its next turn boundary`
-					: result.status === "recorded"
-						? `Hot-swap recorded: ${result.agentId} will use ${result.to} when revived (was ${result.from})`
-						: `Hot-swap failed: ${result.error}`;
+					: result.status === "pending"
+						? `Hot-swap pending: ${result.agentId} ${result.from} -> ${result.to}${result.effort === null ? "" : `:${result.effort}`} (request ${result.requestId}; applies at the next safe boundary)`
+						: result.status === "recorded"
+							? `Hot-swap recorded: ${result.agentId} will use ${result.to} when revived (was ${result.from})`
+							: `Hot-swap failed: ${result.error}${
+									result.reason === "stale_owner_epoch" ||
+									result.reason === "conflicting_pending" ||
+									result.reason === "corrupt_journal"
+										? ` [${result.reason}]`
+										: ""
+								}`;
 		return { content: [{ type: "text", text }], details: { jobs: [] } };
 	}
 
@@ -641,7 +697,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			seen.add(j.id);
 			return true;
 		});
-		const jobResults = this.#snapshotJobs(uniqueJobs);
+		const routeUpdates = await this.#loadRouteUpdates(uniqueJobs);
+		const jobResults = this.#snapshotJobs(uniqueJobs, routeUpdates);
 
 		await manager.acknowledgeDeliveries(jobResults.filter(j => j.status !== "running").map(j => j.id));
 
@@ -667,6 +724,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 			for (const j of completed) {
 				lines.push(`### ${j.id} [${j.type}] — ${j.status}`);
 				lines.push(`Label: ${j.label}`);
+				const routeLine = formatChildRouteUpdateReport(j.routeUpdate);
+				if (routeLine) lines.push(routeLine);
 				if (j.resultText) {
 					lines.push("```", j.resultText, "```");
 				}
@@ -680,7 +739,8 @@ export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 		if (running.length > 0) {
 			lines.push(`## Still Running (${running.length})\n`);
 			for (const j of running) {
-				lines.push(`- \`${j.id}\` [${j.type}] — ${j.label}`);
+				const routeLine = formatChildRouteUpdateReport(j.routeUpdate);
+				lines.push(`- \`${j.id}\` [${j.type}] — ${j.label}${routeLine ? ` — ${routeLine}` : ""}`);
 			}
 		}
 
@@ -944,6 +1004,17 @@ export const jobToolRenderer = {
 								lines.push(`  ${uiTheme.fg("toolOutput", visibleLabelLines[i]!)}`);
 							}
 
+							if (expanded) {
+								const routeLine = formatChildRouteUpdateReport(job.routeUpdate);
+								if (routeLine) {
+									lines.push(
+										`  ${uiTheme.fg(
+											"dim",
+											truncateToWidth(replaceTabs(routeLine), PREVIEW_LINE_WIDTH, Ellipsis.Unicode),
+										)}`,
+									);
+								}
+							}
 							const preview = flattenStructuredPreview(
 								stripTaskResultEnvelope(job.errorText?.trim() || job.resultText?.trim() || ""),
 							);

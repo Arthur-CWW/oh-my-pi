@@ -1,4 +1,9 @@
 import { logger } from "@oh-my-pi/pi-utils";
+import {
+	type ChildRouteUpdateReport,
+	childRouteUpdateStatus,
+	onChildRouteUpdate,
+} from "../task/child-route-update";
 import { MEMORY_SAMPLE_INTERVAL_MS } from "../utils/process-memory";
 import { ProgressCoalescer } from "./progress-coalescer";
 
@@ -114,6 +119,8 @@ export interface AsyncJob {
 	 * until the caller invokes `markRunning()` from the run context.
 	 */
 	queued?: boolean;
+	/** Latest known route-update answer, including an explicit unavailable or corrupt answer. */
+	routeUpdate?: ChildRouteUpdateReport;
 }
 
 export interface AsyncJobManagerOptions {
@@ -235,6 +242,7 @@ export class AsyncJobManager {
 	readonly #memoryPressureBytes: number;
 	readonly #readRss: () => number;
 	readonly #pressureSweep: NodeJS.Timeout | undefined;
+	readonly #routeUpdateUnsubscribe: () => void;
 	#pressureEvictions = 0;
 	#deliveryLoop: Promise<void> | undefined;
 	#disposed = false;
@@ -266,6 +274,12 @@ export class AsyncJobManager {
 			// A memory sweep must never be the reason the process stays alive.
 			this.#pressureSweep.unref();
 		}
+		this.#routeUpdateUnsubscribe = onChildRouteUpdate(notification => {
+			const status = childRouteUpdateStatus(notification.record);
+			if (status) {
+				this.setRouteUpdate(notification.agentId, { availability: "known", status });
+			}
+		});
 	}
 
 	/**
@@ -471,6 +485,18 @@ export class AsyncJobManager {
 
 	getJob(id: string): AsyncJob | undefined {
 		return this.#jobs.get(id);
+	}
+
+	/**
+	 * Project a durable child route update into a process-local job without
+	 * allowing one owner to mutate another owner's job view.
+	 */
+	setRouteUpdate(id: string, update: ChildRouteUpdateReport, filter?: AsyncJobFilter): boolean {
+		const job = this.#jobs.get(id);
+		if (!job) return false;
+		if (filter?.ownerId && job.ownerId !== filter.ownerId) return false;
+		job.routeUpdate = { ...update };
+		return true;
 	}
 	markWaitingProvider(
 		id: string,
@@ -806,6 +832,7 @@ export class AsyncJobManager {
 
 	async dispose(options?: { timeoutMs?: number }): Promise<boolean> {
 		this.#disposed = true;
+		this.#routeUpdateUnsubscribe();
 		if (this.#pressureSweep !== undefined) clearInterval(this.#pressureSweep);
 		this.#clearEvictionTimers();
 		this.cancelAll();

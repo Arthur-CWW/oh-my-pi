@@ -28,6 +28,11 @@ import {
 	type ChildResumeClassification,
 } from "./child-lifecycle";
 import {
+	type ChildRouteUpdateStatus,
+	childRouteUpdateStatus,
+	projectChildRouteUpdates,
+} from "./child-route-update";
+import {
 	type DurableSubagentFailureReceipt,
 	listDurableSubagentFailureReceipts,
 } from "./subagent-failure";
@@ -560,6 +565,8 @@ export interface DurableChildJobRecord {
 	outcome: ChildResumeClassification["outcome"];
 	disposition: ChildResumeClassification["disposition"];
 	errorText?: string;
+	/** Latest durable route-update state read from the child's own journal. */
+	routeUpdate?: ChildRouteUpdateStatus;
 }
 
 export type ResumeInterruptedChildResult =
@@ -753,6 +760,8 @@ export async function listDurableChildJobs(options: DurableChildJobOptions): Pro
 				: candidate.lifecycle?.state === "completed"
 					? "completed"
 					: "failed";
+		const projection = projectChildRouteUpdates(candidate.entries);
+		const routeUpdate = childRouteUpdateStatus(projection.open ?? projection.latest);
 		records.set(agentId, {
 			id: agentId,
 			label: candidate.metadata.displayName,
@@ -761,6 +770,7 @@ export async function listDurableChildJobs(options: DurableChildJobOptions): Pro
 			outcome: classification.outcome,
 			disposition: classification.disposition,
 			...(status === "failed" ? { errorText: resumableErrorText(classification) } : {}),
+			...(routeUpdate ? { routeUpdate } : {}),
 		});
 	}
 	for (const receipt of receipts) {
@@ -782,6 +792,7 @@ export async function listDurableChildJobs(options: DurableChildJobOptions): Pro
 				receipt.disposition === "resumable"
 					? `${receipt.message} Resume requires the missing child journal; do not respawn until it is recovered.`
 					: receipt.message,
+			// A missing child journal carries no route-update state to project.
 		});
 	}
 	return [...records.values()].sort((left, right) => right.startTime - left.startTime);

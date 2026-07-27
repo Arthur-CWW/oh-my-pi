@@ -41,6 +41,13 @@ import {
 	MAIN_AGENT_ID,
 	type RegistryEvent,
 } from "../../registry/agent-registry";
+import {
+	childRouteUpdateStatus,
+	type ChildRouteUpdateRecord,
+	type ChildRouteUpdateStatus,
+	formatChildRouteUpdate,
+	onChildRouteUpdate,
+} from "../../task/child-route-update";
 import type { AgentSession } from "../../session/agent-session";
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
@@ -436,8 +443,20 @@ export interface AgentHubSelectedAgentViewModel {
 	readonly agentId: string;
 	readonly lifecycle: string;
 	readonly modelSelector?: string;
+	readonly routeUpdate?: ChildRouteUpdateStatus;
 	readonly route: AgentRouteExplanation;
 }
+
+// Canonical ISO-8601 timestamps sort lexicographically in chronological order.
+function newestChildRouteUpdateRecord(
+	live: ChildRouteUpdateRecord | undefined,
+	durable: ChildRouteUpdateRecord | undefined,
+): ChildRouteUpdateRecord | undefined {
+	if (!live) return durable;
+	if (!durable) return live;
+	return live.updatedAt >= durable.updatedAt ? live : durable;
+}
+
 const ROUTE_INSPECTOR_PANE_LINES = 8;
 
 function boundedRouteInspectionLines(input: RouteInspectionInput, resolvedModel?: string): string[] {
@@ -567,6 +586,7 @@ export class AgentHubOverlayComponent extends Container {
 	#journalTails: AgentHubJournalTailCache;
 	#transcriptLoadGeneration = 0;
 	#transcriptLoadInFlight: TranscriptLoadRequest | undefined;
+	#liveRouteUpdates = new Map<string, ChildRouteUpdateRecord>();
 
 	#foldedAgentIds = new Set<string>();
 	#treeDepthById = new Map<string, number>();
@@ -692,6 +712,14 @@ export class AgentHubOverlayComponent extends Container {
 			this.#observers.onChange(() => {
 				this.#observerProjectionDirty = true;
 				this.#scheduleProjection();
+			}),
+		);
+		this.#unsubscribers.push(
+			onChildRouteUpdate(notification => {
+				this.#liveRouteUpdates.set(notification.agentId, notification.record);
+				if (notification.sessionFile)
+					void this.#journalModels.load(notification.sessionFile).then(() => this.#requestRender());
+				this.#requestRender();
 			}),
 		);
 		this.#ageTimer = setInterval(() => {
@@ -824,6 +852,9 @@ export class AgentHubOverlayComponent extends Container {
 		const modelSelector = active
 			? this.#resolvedModelSelector(active, observed)
 			: withModelSelectorEffort(archived?.modelId, { session: archived?.thinkingLevel });
+		const routeUpdate = childRouteUpdateStatus(
+			newestChildRouteUpdateRecord(this.#liveRouteUpdates.get(agentId), durable?.childRouteUpdate),
+		);
 		const route = buildAgentRouteExplanation({
 			agentId,
 			...(receipt ? { receipt } : {}),
@@ -835,6 +866,7 @@ export class AgentHubOverlayComponent extends Container {
 			agentId,
 			lifecycle: active?.status ?? archived?.state ?? "unknown",
 			...(modelSelector ? { modelSelector } : {}),
+			...(routeUpdate ? { routeUpdate } : {}),
 			route,
 		};
 	}
@@ -846,6 +878,7 @@ export class AgentHubOverlayComponent extends Container {
 		this.#disposed = true;
 		void Effect.runPromise(Scope.close(this.#tableScope, Exit.void));
 		for (const unsubscribe of this.#unsubscribers.splice(0)) unsubscribe();
+		this.#liveRouteUpdates.clear();
 		if (this.#ageTimer) {
 			clearInterval(this.#ageTimer);
 			this.#ageTimer = undefined;
@@ -1798,7 +1831,9 @@ export class AgentHubOverlayComponent extends Container {
 		const receipt = progress?.routeReceipt ?? durableSpawn?.route;
 		const transactionId = receipt?.consulted.find(candidate => candidate.policy?.transactionId)?.policy
 			?.transactionId;
-		const routeView = this.getSelectedAgentViewModel()?.route;
+		const selectedView = this.getSelectedAgentViewModel();
+		const routeView = selectedView?.route;
+		const routeUpdateLine = formatChildRouteUpdate(selectedView?.routeUpdate);
 		const explanationLines = routeView
 			? [
 					"ROUTE EXPLANATION",
@@ -1810,7 +1845,7 @@ export class AgentHubOverlayComponent extends Container {
 					),
 				]
 			: ["ROUTE EXPLANATION", "No route provenance available."];
-		if (!receipt) return explanationLines;
+		if (!receipt) return [...explanationLines, ...(routeUpdateLine ? [routeUpdateLine] : [])];
 		const agentId = this.#chatAgentId ?? "selected agent";
 		const ref = this.#chatAgentId ? this.#registry.get(this.#chatAgentId) : undefined;
 		const explicitOverride =
@@ -1834,7 +1869,7 @@ export class AgentHubOverlayComponent extends Container {
 					route: receipt.route.thinking,
 				})!,
 		);
-		return [...explanationLines, ...provenance.slice(1)];
+		return [...explanationLines, ...(routeUpdateLine ? [routeUpdateLine] : []), ...provenance.slice(1)];
 	}
 
 	#wrapInspectorText(text: string, width: number, empty: string): string[] {

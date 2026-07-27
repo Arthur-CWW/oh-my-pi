@@ -2098,7 +2098,7 @@ export class SessionManager {
 	async appendHistoricalHotswap(
 		model: string,
 		thinkingLevel: string | undefined,
-		audit: HistoricalHotswapAudit,
+		audits: readonly HistoricalHotswapAudit[],
 	): Promise<void> {
 		const originalEntries = this.#entries.length;
 		const appended: SessionEntry[] = [];
@@ -2112,7 +2112,9 @@ export class SessionManager {
 		if (thinkingLevel !== undefined) {
 			append({ type: "thinking_level_change", ...this.#freshEntryFields(), thinkingLevel });
 		}
-		append({ type: "custom", customType: audit.customType, data: audit.data, ...this.#freshEntryFields() });
+		for (const audit of audits) {
+			append({ type: "custom", customType: audit.customType, data: audit.data, ...this.#freshEntryFields() });
+		}
 
 		try {
 			await this.#rewriteAtomically();

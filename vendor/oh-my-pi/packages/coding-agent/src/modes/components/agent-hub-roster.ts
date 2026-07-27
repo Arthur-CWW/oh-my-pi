@@ -3,6 +3,11 @@ import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { getSessionsDir } from "@oh-my-pi/pi-utils";
 import type { AgentRef } from "../../registry/agent-registry";
+import {
+	CHILD_ROUTE_UPDATE_CUSTOM_TYPE,
+	type ChildRouteUpdateRecord,
+	isChildRouteUpdateRecord,
+} from "../../task/child-route-update";
 import { isRouteResolutionSource, ROUTE_RESOLUTION_ENTRY, type RouteResolutionSource } from "../../task/route-events";
 import { isSpawnRecord, type SpawnRecord } from "../../task/spawn-record";
 
@@ -13,6 +18,7 @@ export interface DurableJournalModel {
 	systemPrompt?: string;
 	firstUserMessage?: string;
 	routeEvents?: readonly RouteResolutionSource[];
+	childRouteUpdate?: ChildRouteUpdateRecord;
 }
 
 export function durableModelSelector(model: DurableJournalModel | undefined): string | undefined {
@@ -35,6 +41,7 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 	let spawnRecord: SpawnRecord | undefined;
 	let systemPrompt: string | undefined;
 	let firstUserMessage: string | undefined;
+	let childRouteUpdate: ChildRouteUpdateRecord | undefined;
 	const routeEvents: RouteResolutionSource[] = [];
 	for (const line of text.split("\n")) {
 		if (!line.trim()) continue;
@@ -70,16 +77,23 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 			routeEvents.push(entry.data);
 			modelId = `${entry.data.route.provider}/${entry.data.route.model}`;
 			thinkingLevel = entry.data.route.effort;
-		}
+		} else if (
+			entry.type === "custom" &&
+			entry.customType === CHILD_ROUTE_UPDATE_CUSTOM_TYPE &&
+			isChildRouteUpdateRecord(entry.data)
+		) {
+			childRouteUpdate = entry.data;
+	}
 	}
 	return modelId === undefined &&
 		thinkingLevel === undefined &&
 		spawnRecord === undefined &&
 		systemPrompt === undefined &&
 		firstUserMessage === undefined &&
-		routeEvents.length === 0
+		routeEvents.length === 0 &&
+		childRouteUpdate === undefined
 		? undefined
-		: { modelId, thinkingLevel, spawnRecord, systemPrompt, firstUserMessage, routeEvents };
+		: { modelId, thinkingLevel, spawnRecord, systemPrompt, firstUserMessage, routeEvents, childRouteUpdate };
 }
 
 /** Durable model metadata, cached by journal path and mtime so renders remain filesystem-free. */

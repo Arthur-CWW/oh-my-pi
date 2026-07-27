@@ -62,7 +62,15 @@ import {
 	type ChildLifecycleState,
 	type ChildResumeDisposition,
 } from "./child-lifecycle";
-import { type RestorableSessionModel, resolveRestorableSessionModel } from "./hotswap";
+import {
+	applyPendingChildRouteUpdate,
+	type ChildRouteLease,
+	parentRouteLease,
+	type RestorableSessionModel,
+	registerChildRouteUpdateBoundary,
+	resolveRestorableSessionModel,
+	retirePendingChildRouteUpdate,
+} from "./hotswap";
 import { getNumberField, getProgressUsageOutputTokens, getProgressUsageTokens } from "./progress-usage";
 import type { SpawnRouteReceipt } from "./route-resolution";
 import { createSpawnRecord } from "./spawn-record";
@@ -2206,6 +2214,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	});
 	const progress = monitor.progress;
 	let unsubscribe: (() => void) | null = null;
+	let releaseRouteBoundary: (() => void) | null = null;
 	let sessionStatusSubscription: (() => void) | undefined;
 	let reviveSession: ((registerSubscription: (unsubscribe: () => void) => void) => Promise<AgentSession>) | null =
 		null;
@@ -2667,6 +2676,17 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 
 			unsubscribe = monitor.attach(session);
+			// The child's safe boundary: the turn loop awaits this after the provider
+			// stream and every tool call/finalizer for the turn settle, and before it
+			// constructs the next turn's request. Registering it before the first
+			// prompt is what lets a restart resume a route update left pending by a
+			// previous owner of this journal.
+			// The fence is the spawning parent's lease, not this child manager's:
+			// an executor-opened child journal holds no lease of its own, so it can
+			// never report the takeover that must stop the apply.
+			const routeLease = (): ChildRouteLease => parentRouteLease(spawnerId);
+			releaseRouteBoundary = registerChildRouteUpdateBoundary(id, session, routeLease);
+			await applyPendingChildRouteUpdate(id, session, routeLease);
 
 			checkAbort();
 			// Autoload skills via sendCustomMessage (same mechanic as /skill:<name>)
@@ -2718,6 +2738,14 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				}
 				unsubscribe = null;
 			}
+			if (releaseRouteBoundary) {
+				try {
+					releaseRouteBoundary();
+				} catch {
+					// Ignore unregister errors
+				}
+				releaseRouteBoundary = null;
+			}
 			const session = monitor.takeActiveSession();
 			if (session) {
 				monitor.captureSalvage(session);
@@ -2735,6 +2763,19 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					timeoutKeptAlive ? "wall_timeout" : lifecycleState === "failed" ? "fatal" : undefined,
 					timeoutKeptAlive ? "resumable" : lifecycleState === "failed" ? "unrecoverable" : undefined,
 				);
+				if (lifecycleState !== "idle") {
+					// Terminal before any boundary: the request is retired with a durable
+					// not-applied receipt rather than left pending forever. A teardown
+					// disk failure must not mask the run's own outcome.
+					try {
+						await retirePendingChildRouteUpdate(session.sessionManager);
+					} catch (error) {
+						logger.warn("Child route update retirement failed", {
+							agentId: id,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
 				if (softInterruptKeptAlive) {
 					const requestedBy = monitor.interruptRequestedBy() ?? "the orchestrator";
 					const reason = monitor.interruptReason();
