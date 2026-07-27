@@ -1,4 +1,10 @@
 import { Schema } from "effect";
+import {
+	DEFAULT_STREAM_CAP_BYTES,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	readCapped,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
 
 const CmuxSurfaceSchema = Schema.Struct({
 	id: Schema.optional(Schema.String),
@@ -61,11 +67,17 @@ async function runCommand(
 		stdout: "pipe",
 		stderr: "pipe",
 	});
-	const stdoutPromise = new Response(child.stdout).text();
-	const stderrPromise = new Response(child.stderr).text();
-	const exitCode = await child.exited;
-	const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
-	return { argv, exitCode, stdout, stderr };
+	const [stdoutRead, stderrRead, exitCode] = await Promise.all([
+		readCapped(child.stdout, DEFAULT_STREAM_CAP_BYTES),
+		readCapped(child.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
+		child.exited,
+	]);
+	return {
+		argv,
+		exitCode,
+		stdout: withCappedStreamNotice(stdoutRead, "stdout"),
+		stderr: withCappedStreamNotice(stderrRead, "stderr"),
+	};
 }
 
 export function buildCmuxAskBridgePlan(

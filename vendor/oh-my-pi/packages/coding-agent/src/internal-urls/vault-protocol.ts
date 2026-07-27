@@ -1,6 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { $which, isEnoent } from "@oh-my-pi/pi-utils";
+import {
+	$which,
+	DEFAULT_STREAM_CAP_BYTES,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	isEnoent,
+	readCapped,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
 import { isSettingsInitialized, settings } from "../config/settings";
 import { getDefault } from "../config/settings-schema";
 import { parseInternalUrl } from "./parse";
@@ -255,8 +262,8 @@ export async function spawnObsidian(
 		stdout: "pipe",
 		stderr: "pipe",
 	});
-	const stdout = new Response(proc.stdout as ReadableStream<Uint8Array>).text();
-	const stderr = new Response(proc.stderr as ReadableStream<Uint8Array>).text();
+	const stdout = readCapped(proc.stdout as ReadableStream<Uint8Array>, DEFAULT_STREAM_CAP_BYTES);
+	const stderr = readCapped(proc.stderr as ReadableStream<Uint8Array>, DIAGNOSTIC_STREAM_CAP_BYTES);
 	const aborted = Promise.withResolvers<never>();
 	const timedOut = Promise.withResolvers<never>();
 
@@ -271,11 +278,14 @@ export async function spawnObsidian(
 		timedOut.reject(new Error(`obsidian command timed out after ${timeoutMs}ms`));
 	}, timeoutMs);
 
-	const completed = proc.exited.then(async exitCode => ({
-		stdout: await stdout,
-		stderr: await stderr,
-		exitCode,
-	}));
+	const completed = proc.exited.then(async exitCode => {
+		const [stdoutRead, stderrRead] = await Promise.all([stdout, stderr]);
+		return {
+			stdout: withCappedStreamNotice(stdoutRead, "stdout"),
+			stderr: withCappedStreamNotice(stderrRead, "stderr"),
+			exitCode,
+		};
+	});
 
 	try {
 		return await Promise.race([completed, aborted.promise, timedOut.promise]);

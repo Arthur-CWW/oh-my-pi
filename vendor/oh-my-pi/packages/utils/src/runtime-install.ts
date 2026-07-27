@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as Module from "node:module";
 import * as path from "node:path";
+import { DIAGNOSTIC_STREAM_CAP_BYTES, readCapped, withCappedStreamNotice } from "./stream";
 
 /**
  * On-demand runtime dependency support for native-heavy optional packages
@@ -315,9 +316,9 @@ export async function writeRuntimeManifest(runtimeDir: string, install: RuntimeI
 	await Bun.write(path.join(runtimeDir, "package.json"), `${JSON.stringify(manifest, null, "\t")}\n`);
 }
 
-async function readPipe(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+async function readPipe(stream: ReadableStream<Uint8Array> | null, label: string): Promise<string> {
 	if (!stream) return "";
-	return new Response(stream).text();
+	return withCappedStreamNotice(await readCapped(stream, DIAGNOSTIC_STREAM_CAP_BYTES), label);
 }
 
 async function runRuntimeInstall(runtimeDir: string): Promise<void> {
@@ -329,8 +330,8 @@ async function runRuntimeInstall(runtimeDir: string): Promise<void> {
 		stderr: "pipe",
 	});
 	const [stdout, stderr, exitCode] = await Promise.all([
-		readPipe(proc.stdout as ReadableStream<Uint8Array> | null),
-		readPipe(proc.stderr as ReadableStream<Uint8Array> | null),
+		readPipe(proc.stdout as ReadableStream<Uint8Array> | null, "stdout"),
+		readPipe(proc.stderr as ReadableStream<Uint8Array> | null, "stderr"),
 		proc.exited,
 	]);
 	if (exitCode === 0) return;

@@ -1,3 +1,5 @@
+import { DEFAULT_STREAM_CAP_BYTES, readCapped, withCappedStreamNotice } from "@oh-my-pi/pi-utils";
+
 export interface FleetResourceSample {
 	readonly rssMb: number;
 	readonly cpuPercent: number;
@@ -42,7 +44,11 @@ export async function sampleFleetResources(pids: readonly number[]): Promise<Fle
 			stdout: "pipe",
 			stderr: "ignore",
 		});
-		const [output, exitCode] = await Promise.all([new Response(process.stdout).text(), process.exited]);
+		const [stdout, exitCode] = await Promise.all([
+			readCapped(process.stdout, DEFAULT_STREAM_CAP_BYTES),
+			process.exited,
+		]);
+		const output = withCappedStreamNotice(stdout, "ps output");
 		if (exitCode !== 0) return new Map();
 		return decodeFleetResourceSamples(output);
 	} catch {

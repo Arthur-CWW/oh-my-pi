@@ -1,7 +1,14 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $which, logger, Snowflake } from "@oh-my-pi/pi-utils";
+import {
+	$which,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	logger,
+	readCapped,
+	Snowflake,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
 import { $, type Subprocess } from "bun";
 import { ensureTool, getToolPath } from "../utils/tools-manager";
 import { decodePcmS16LE } from "./wav";
@@ -231,7 +238,10 @@ async function startPowerShellRecording(outputPath: string): Promise<RecordingHa
 		await proc.exited;
 		let stderrText = "";
 		if (proc.stderr && typeof proc.stderr !== "number") {
-			stderrText = await new Response(proc.stderr as ReadableStream).text();
+			stderrText = withCappedStreamNotice(
+				await readCapped(proc.stderr as ReadableStream<Uint8Array>, DIAGNOSTIC_STREAM_CAP_BYTES),
+				"stderr",
+			);
 		}
 		// Clean up temp script
 		fs.unlink(scriptPath).catch(() => {});
@@ -270,7 +280,10 @@ async function verifyProcessAlive(proc: RecorderProcess, tool: string): Promise<
 	if (exited !== "running") {
 		let stderr = "";
 		if (proc.stderr && typeof proc.stderr !== "number") {
-			stderr = await new Response(proc.stderr as ReadableStream).text();
+			stderr = withCappedStreamNotice(
+				await readCapped(proc.stderr as ReadableStream<Uint8Array>, DIAGNOSTIC_STREAM_CAP_BYTES),
+				"stderr",
+			);
 		}
 		throw new Error(`${tool} exited immediately (code ${exited}): ${stderr.trim() || "(no output)"}`);
 	}

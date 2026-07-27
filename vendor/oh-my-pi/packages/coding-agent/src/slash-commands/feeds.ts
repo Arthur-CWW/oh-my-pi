@@ -1,5 +1,11 @@
 import * as path from "node:path";
 import {
+	DEFAULT_STREAM_CAP_BYTES,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	readCapped,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
+import {
 	appendFeedEntry,
 	buildFeedsListViewModel,
 	type FeedCadence,
@@ -108,11 +114,13 @@ async function runAvailabilitySync(packageRoot: string): Promise<string> {
 		stdout: "pipe",
 		stderr: "pipe",
 	});
-	const [stdout, stderr, exitCode] = await Promise.all([
-		new Response(process.stdout).text(),
-		new Response(process.stderr).text(),
+	const [stdoutRead, stderrRead, exitCode] = await Promise.all([
+		readCapped(process.stdout, DEFAULT_STREAM_CAP_BYTES),
+		readCapped(process.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
 		process.exited,
 	]);
+	const stdout = withCappedStreamNotice(stdoutRead, "stdout");
+	const stderr = withCappedStreamNotice(stderrRead, "stderr");
 	const output = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
 	if (exitCode !== 0) throw new Error(output || `availability:sync exited with status ${exitCode}`);
 	return output || "availability:sync completed (no output)";

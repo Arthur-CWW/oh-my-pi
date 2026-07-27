@@ -1,6 +1,13 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
+import {
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	getAgentDir,
+	getProjectDir,
+	isEnoent,
+	readCapped,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
 import { extractPackageName } from "./parser";
 import type { InstalledPlugin } from "./types";
 
@@ -48,15 +55,15 @@ export async function installPlugin(packageName: string): Promise<InstalledPlugi
 	const proc = Bun.spawn(["bun", "install", packageName], {
 		cwd: PLUGINS_DIR,
 		stdin: "ignore",
-		stdout: "pipe",
+		stdout: "ignore",
 		stderr: "pipe",
 		windowsHide: true,
 	});
 
-	const exitCode = await proc.exited;
+	const stderrPromise = readCapped(proc.stderr, DIAGNOSTIC_STREAM_CAP_BYTES);
+	const [exitCode, stderrRead] = await Promise.all([proc.exited, stderrPromise]);
 	if (exitCode !== 0) {
-		const stderr = await new Response(proc.stderr).text();
-		throw new Error(`Failed to install ${packageName}: ${stderr}`);
+		throw new Error(`Failed to install ${packageName}: ${withCappedStreamNotice(stderrRead, "stderr")}`);
 	}
 
 	// Extract the actual package name (without version specifier) for path lookup

@@ -2,6 +2,12 @@
  * SwiftLint CLI-based linter client.
  * Parses SwiftLint's JSON reporter output into LSP Diagnostic format.
  */
+import {
+	DEFAULT_STREAM_CAP_BYTES,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	readCapped,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
 import type { Diagnostic, DiagnosticSeverity, LinterClient, ServerConfig } from "../../lsp/types";
 
 /** Shape of a single violation from `swiftlint lint --reporter json`. */
@@ -15,6 +21,18 @@ interface SwiftLintViolation {
 	type: string;
 }
 
+interface CapturedOutputOverflow {
+	readonly keptBytes: number;
+	readonly totalBytes: number;
+}
+
+interface SwiftLintRunResult {
+	readonly stdout: string;
+	readonly stderr: string;
+	readonly success: boolean;
+	readonly stdoutOverflow?: CapturedOutputOverflow;
+}
+
 function parseSeverity(severity: string): DiagnosticSeverity {
 	switch (severity) {
 		case "Error":
@@ -26,11 +44,22 @@ function parseSeverity(severity: string): DiagnosticSeverity {
 	}
 }
 
-async function runSwiftLint(
-	args: string[],
-	cwd: string,
-	resolvedCommand?: string,
-): Promise<{ stdout: string; stderr: string; success: boolean }> {
+function overflowDiagnostic(overflow: CapturedOutputOverflow): Diagnostic {
+	return {
+		range: {
+			start: { line: 0, character: 0 },
+			end: { line: 0, character: 0 },
+		},
+		severity: 1,
+		code: "output-overflow",
+		source: "swiftlint",
+		message:
+			`SwiftLint emitted ${overflow.totalBytes} bytes, exceeding the ${overflow.keptBytes}-byte capture limit; ` +
+			"diagnostics are incomplete and were not parsed.",
+	};
+}
+
+async function runSwiftLint(args: string[], cwd: string, resolvedCommand?: string): Promise<SwiftLintRunResult> {
 	const command = resolvedCommand ?? "swiftlint";
 
 	try {
@@ -41,11 +70,23 @@ async function runSwiftLint(
 			windowsHide: true,
 		});
 
-		const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-		await proc.exited;
+		const [stdoutRead, stderrRead] = await Promise.all([
+			readCapped(proc.stdout, DEFAULT_STREAM_CAP_BYTES),
+			readCapped(proc.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
+			proc.exited,
+		]);
+		const stdout = withCappedStreamNotice(stdoutRead, "stdout");
+		const stderr = withCappedStreamNotice(stderrRead, "stderr");
 
-		// swiftlint exits non-zero when violations found — that's not a failure
-		return { stdout, stderr, success: stdout.length > 0 };
+		// swiftlint exits non-zero when violations are found — that's not a failure
+		return {
+			stdout,
+			stderr,
+			success: stdoutRead.text.length > 0,
+			stdoutOverflow: stdoutRead.truncated
+				? { keptBytes: stdoutRead.keptBytes, totalBytes: stdoutRead.totalBytes }
+				: undefined,
+		};
 	} catch (err) {
 		return { stdout: "", stderr: String(err), success: false };
 	}
@@ -77,6 +118,10 @@ export class SwiftLintClient implements LinterClient {
 			this.cwd,
 			this.config.resolvedCommand,
 		);
+
+		if (result.stdoutOverflow) {
+			return [overflowDiagnostic(result.stdoutOverflow)];
+		}
 
 		if (!result.success) {
 			return [];

@@ -9,6 +9,9 @@ import {
 	getProjectDir,
 	getProjectPluginOverridesPath,
 	isEnoent,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	readCapped,
+	withCappedStreamNotice,
 	logger,
 } from "@oh-my-pi/pi-utils";
 import { type GitSource, parseGitUrl } from "./git-url";
@@ -344,15 +347,15 @@ export class PluginManager {
 			const proc = Bun.spawn(["bun", "install", packageInstallSpec], {
 				cwd: getPluginsDir(),
 				stdin: "ignore",
-				stdout: "pipe",
+				stdout: "ignore",
 				stderr: "pipe",
 				windowsHide: true,
 			});
 
-			const exitCode = await proc.exited;
+			const stderrPromise = readCapped(proc.stderr, DIAGNOSTIC_STREAM_CAP_BYTES);
+			const [exitCode, stderrRead] = await Promise.all([proc.exited, stderrPromise]);
 			if (exitCode !== 0) {
-				const stderr = await new Response(proc.stderr).text();
-				throw new Error(`npm install failed: ${stderr}`);
+				throw new Error(`npm install failed: ${withCappedStreamNotice(stderrRead, "stderr")}`);
 			}
 			// Resolve actual package name. npm specs encode the name (strip version);
 			// git specs do not, so diff plugins/package.json deps to find the new entry.

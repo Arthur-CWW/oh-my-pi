@@ -1,6 +1,16 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isCompiledBinary, isEnoent, popLoopPhase, pushLoopPhase, workerHostEntry } from "@oh-my-pi/pi-utils";
+import {
+	type CappedStreamResult,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	isCompiledBinary,
+	isEnoent,
+	popLoopPhase,
+	pushLoopPhase,
+	readCapped,
+	withCappedStreamNotice,
+	workerHostEntry,
+} from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
 import { AgentRegistry } from "../registry/agent-registry";
 import { matchesProcessIdentity, type ProcessIdentity } from "../resource/process-identity";
@@ -28,7 +38,7 @@ import type { AgentProgress, SingleResult } from "./types";
 
 const DEFAULT_MAX_RSS_BYTES = 1536 * 1024 * 1024;
 const RSS_SAMPLE_INTERVAL_MS = 250;
-const STDERR_CAP_BYTES = 64 * 1024;
+const RSS_SAMPLE_BYTES_PER_PID = 64;
 const SETUP_TIMEOUT_GRACE_MS = 60_000;
 const WORKER_REAP_TIMEOUT_MS = 1_500;
 const DEFAULT_STALL_THRESHOLD_MS = 5 * 60_000;
@@ -262,39 +272,77 @@ function createProcessGroupTeardown(proc: Bun.Subprocess): (signalOwnedGroup: bo
 	};
 }
 
-interface RssWatch {
+export interface WorkerRssWatch {
 	maxBytes: number;
 	onExceeded(rssBytes: number): void;
+	onSampleInvalid(reason: string): void;
 }
 
-const rssWatches = new Map<number, RssWatch>();
+const rssWatches = new Map<number, WorkerRssWatch>();
 let rssTimer: Timer | undefined;
 let rssSampling = false;
+
+function invalidateWorkerRssSample(watches: ReadonlyMap<number, WorkerRssWatch>, reason: string): void {
+	for (const watch of watches.values()) watch.onSampleInvalid(reason);
+}
+
+/** Apply a complete RSS sample, or conservatively invalidate every watched worker on overflow. */
+export function enforceWorkerRssSample(
+	sample: Pick<CappedStreamResult, "keptBytes" | "text" | "totalBytes" | "truncated">,
+	watches: ReadonlyMap<number, WorkerRssWatch>,
+): void {
+	if (sample.truncated) {
+		invalidateWorkerRssSample(
+			watches,
+			`ps output overflowed: kept ${sample.keptBytes} of ${sample.totalBytes} bytes`,
+		);
+		return;
+	}
+	for (const line of sample.text.split("\n")) {
+		const [pidText, rssText] = line.trim().split(/\s+/, 2);
+		const pid = Number.parseInt(pidText, 10);
+		const rssBytes = Number.parseInt(rssText, 10) * 1024;
+		const watch = watches.get(pid);
+		if (watch && Number.isFinite(rssBytes) && rssBytes > watch.maxBytes) watch.onExceeded(rssBytes);
+	}
+}
 
 async function sampleWorkerRss(): Promise<void> {
 	if (rssSampling || rssWatches.size === 0) return;
 	rssSampling = true;
+	const watches = new Map(rssWatches);
+	const retainActiveWatches = (): void => {
+		for (const [pid, watch] of watches) {
+			if (rssWatches.get(pid) !== watch) watches.delete(pid);
+		}
+	};
 	try {
-		const pids = [...rssWatches.keys()];
+		const pids = [...watches.keys()];
 		const sample = Bun.spawn({
 			cmd: ["/bin/ps", "-o", "pid=,rss=", "-p", pids.join(",")],
 			stdout: "pipe",
 			stderr: "ignore",
 		});
-		const [text] = await Promise.all([new Response(sample.stdout).text(), sample.exited]);
-		for (const line of text.split("\n")) {
-			const [pidText, rssText] = line.trim().split(/\s+/, 2);
-			const pid = Number.parseInt(pidText, 10);
-			const rssBytes = Number.parseInt(rssText, 10) * 1024;
-			const watch = rssWatches.get(pid);
-			if (watch && Number.isFinite(rssBytes) && rssBytes > watch.maxBytes) watch.onExceeded(rssBytes);
+		const maxOutputBytes = Math.max(DIAGNOSTIC_STREAM_CAP_BYTES, pids.length * RSS_SAMPLE_BYTES_PER_PID);
+		const [stdoutRead, exitCode] = await Promise.all([readCapped(sample.stdout, maxOutputBytes), sample.exited]);
+		retainActiveWatches();
+		if (exitCode !== 0) {
+			invalidateWorkerRssSample(watches, `ps exited with code ${exitCode}`);
+			return;
 		}
+		enforceWorkerRssSample(stdoutRead, watches);
+	} catch (error) {
+		retainActiveWatches();
+		invalidateWorkerRssSample(
+			watches,
+			`ps sampling failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	} finally {
 		rssSampling = false;
 	}
 }
 
-function watchWorkerRss(pid: number, watch: RssWatch): () => void {
+function watchWorkerRss(pid: number, watch: WorkerRssWatch): () => void {
 	rssWatches.set(pid, watch);
 	if (rssTimer === undefined) {
 		rssTimer = setInterval(() => void sampleWorkerRss(), RSS_SAMPLE_INTERVAL_MS);
@@ -307,27 +355,6 @@ function watchWorkerRss(pid: number, watch: RssWatch): () => void {
 			rssTimer = undefined;
 		}
 	};
-}
-
-async function readCappedStderr(stream: ReadableStream<Uint8Array>): Promise<string> {
-	const reader = stream.getReader();
-	const decoder = new TextDecoder();
-	let bytes = 0;
-	let text = "";
-	try {
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			const remaining = STDERR_CAP_BYTES - bytes;
-			if (remaining <= 0) continue;
-			const slice = value.byteLength > remaining ? value.subarray(0, remaining) : value;
-			bytes += slice.byteLength;
-			text += decoder.decode(slice, { stream: true });
-		}
-		return text + decoder.decode();
-	} finally {
-		reader.releaseLock();
-	}
 }
 
 type RecoveredYield = {
@@ -747,9 +774,19 @@ async function runRequest(
 				new SpawnWorkerError("rss-limit", `Subagent subprocess RSS ${rssBytes} exceeded ${maxRssBytes}`),
 			);
 		},
+		onSampleInvalid: reason => {
+			void recoverOrFail(
+				new SpawnWorkerError(
+					"rss-limit",
+					`Subagent subprocess RSS sample was invalid (${reason}); conservatively enforcing ${maxRssBytes}-byte limit`,
+				),
+			);
+		},
 	});
 
-	const stderrPromise = readCappedStderr(proc.stderr);
+	const stderrPromise = readCapped(proc.stderr, DIAGNOSTIC_STREAM_CAP_BYTES).then(result =>
+		withCappedStreamNotice(result, "stderr"),
+	);
 	const stdoutPromise = (async (): Promise<void> => {
 		const reader = proc.stdout.getReader();
 		const decoder = new TextDecoder();

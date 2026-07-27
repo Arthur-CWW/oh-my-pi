@@ -9,41 +9,27 @@
 
 import { Process } from "@oh-my-pi/pi-natives";
 import type { Spawn, Subprocess } from "bun";
+import { DEFAULT_STREAM_CAP_BYTES, drainToFile, readCapped, type StreamSpill, withCappedStreamNotice } from "./stream";
 
 type InMask = "pipe" | "ignore" | Buffer | Uint8Array | null;
 
 /** A Bun subprocess with stdout/stderr always piped (stdin may vary). */
 type PipedSubprocess<In extends InMask = InMask> = Subprocess<In, "pipe", "pipe">;
 
-const OUTPUT_TRUNCATION_MARKER = (omittedBytes: number): string =>
-	`\n[output truncated: ${omittedBytes} bytes omitted]`;
+function boundedOutputLimit(maxBytes: number): number {
+	if (!Number.isFinite(maxBytes)) return DEFAULT_STREAM_CAP_BYTES;
+	return Math.max(0, Math.min(Math.trunc(maxBytes), DEFAULT_STREAM_CAP_BYTES));
+}
 
 async function captureTextBounded(
 	stream: ReadableStream<Uint8Array>,
 	maxBytes: number,
 ): Promise<{ text: string; truncated: boolean; totalBytes: number }> {
-	if (!Number.isFinite(maxBytes)) {
-		const text = await new Response(stream).text();
-		return { text, truncated: false, totalBytes: Buffer.byteLength(text) };
-	}
-
-	const limit = Math.max(0, Math.floor(maxBytes));
-	const retained = new Uint8Array(limit);
-	let retainedBytes = 0;
-	let totalBytes = 0;
-	for await (const chunk of stream) {
-		totalBytes += chunk.byteLength;
-		if (retainedBytes >= limit) continue;
-		const take = Math.min(chunk.byteLength, limit - retainedBytes);
-		retained.set(chunk.subarray(0, take), retainedBytes);
-		retainedBytes += take;
-	}
-	const truncated = totalBytes > retainedBytes;
-	const text = new TextDecoder().decode(retained.subarray(0, retainedBytes));
+	const result = await readCapped(stream, boundedOutputLimit(maxBytes));
 	return {
-		text: truncated ? `${text}${OUTPUT_TRUNCATION_MARKER(totalBytes - retainedBytes)}` : text,
-		truncated,
-		totalBytes,
+		text: withCappedStreamNotice(result),
+		truncated: result.truncated,
+		totalBytes: result.totalBytes,
 	};
 }
 
@@ -98,6 +84,55 @@ export class TimeoutError extends AbortError {
 	}
 }
 
+/** Error thrown when a binary body exceeds the finite in-memory capture limit. */
+export class ChildProcessOutputOverflowError extends Error {
+	readonly maxBytes: number;
+	readonly totalBytes: number;
+
+	constructor(maxBytes: number, totalBytes: number) {
+		super(
+			`Child process stdout exceeded the ${maxBytes}-byte in-memory limit (${totalBytes} bytes emitted); ` +
+				"use spillToFile() for intentional large output",
+		);
+		this.name = "ChildProcessOutputOverflowError";
+		this.maxBytes = maxBytes;
+		this.totalBytes = totalBytes;
+	}
+}
+
+async function captureBytesBounded(
+	stream: ReadableStream<Uint8Array>,
+	maxBytes: number,
+): Promise<Uint8Array<ArrayBuffer>> {
+	const cap = boundedOutputLimit(maxBytes);
+	const reader = stream.getReader();
+	const chunks: Uint8Array[] = [];
+	let keptBytes = 0;
+	let totalBytes = 0;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			totalBytes += value.byteLength;
+			const remaining = cap - keptBytes;
+			if (remaining <= 0) continue;
+			const take = Math.min(value.byteLength, remaining);
+			chunks.push(take === value.byteLength ? value : value.slice(0, take));
+			keptBytes += take;
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	if (totalBytes > keptBytes) throw new ChildProcessOutputOverflowError(cap, totalBytes);
+	const bytes = new Uint8Array(new ArrayBuffer(keptBytes));
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return bytes;
+}
+
 // ── Wait / Exec types ────────────────────────────────────────────────────────
 
 /** Options for waiting for process exit and capturing output. */
@@ -139,7 +174,7 @@ export class ChildProcess<In extends InMask = InMask> {
 	#stderrDone: Promise<void>;
 	#exited: Promise<number>;
 	#stderrStream?: ReadableStream<Uint8Array>;
-	#maxOutputBytes = Number.POSITIVE_INFINITY;
+	#maxOutputBytes = DEFAULT_STREAM_CAP_BYTES;
 	#stderrCapturedBytes = 0;
 	#stderrTotalBytes = 0;
 	#stderrTruncated = false;
@@ -147,9 +182,9 @@ export class ChildProcess<In extends InMask = InMask> {
 	constructor(
 		readonly proc: PipedSubprocess<In>,
 		readonly exposeStderr: boolean,
-		maxOutputBytes = Number.POSITIVE_INFINITY,
+		maxOutputBytes = DEFAULT_STREAM_CAP_BYTES,
 	) {
-		this.#maxOutputBytes = maxOutputBytes;
+		this.#maxOutputBytes = boundedOutputLimit(maxOutputBytes);
 		// Eagerly drain stderr into a truncated tail string + raw chunks.
 		const dec = new TextDecoder();
 		const trim = () => {
@@ -274,29 +309,41 @@ export class ChildProcess<In extends InMask = InMask> {
 	// ── Output helpers ───────────────────────────────────────────────────
 
 	async text(): Promise<string> {
-		const p = new Response(this.stdout).text();
+		const p = captureTextBounded(this.stdout, this.#maxOutputBytes).then(result => result.text);
 		if (this.#nothrow) return p;
 		const [text] = await Promise.all([p, this.exitedCleanly]);
 		return text;
 	}
 
-	async blob(): Promise<Blob> {
-		const p = new Response(this.stdout).blob();
+	async #readBytes(): Promise<Uint8Array<ArrayBuffer>> {
+		const p = captureBytesBounded(this.stdout, this.#maxOutputBytes);
 		if (this.#nothrow) return p;
-		const [blob] = await Promise.all([p, this.exitedCleanly]);
-		return blob;
+		const [bytes] = await Promise.all([p, this.exitedCleanly]);
+		return bytes;
+	}
+
+	async blob(): Promise<Blob> {
+		return new Blob([await this.#readBytes()]);
 	}
 
 	async json(): Promise<unknown> {
-		return new Response(this.stdout).json();
+		return JSON.parse(await this.text());
 	}
 
 	async arrayBuffer(): Promise<ArrayBuffer> {
-		return new Response(this.stdout).arrayBuffer();
+		return (await this.#readBytes()).buffer;
 	}
 
 	async bytes(): Promise<Uint8Array> {
-		return new Response(this.stdout).bytes();
+		return this.#readBytes();
+	}
+
+	/** Stream stdout to a file without retaining the body in memory. */
+	async spillToFile(filePath: string): Promise<StreamSpill> {
+		const p = drainToFile(this.stdout, filePath);
+		if (this.#nothrow) return p;
+		const [spill] = await Promise.all([p, this.exitedCleanly]);
+		return spill;
 	}
 
 	// ── Wait ─────────────────────────────────────────────────────────────
@@ -315,7 +362,15 @@ export class ChildProcess<In extends InMask = InMask> {
 				? this.#stderrDone.then(() => {
 						const retained = new TextDecoder().decode(Buffer.concat(this.#stderrChunks));
 						return this.#stderrTruncated
-							? `${retained}${OUTPUT_TRUNCATION_MARKER(this.#stderrTotalBytes - this.#stderrCapturedBytes)}`
+							? withCappedStreamNotice(
+									{
+										text: retained,
+										truncated: true,
+										keptBytes: this.#stderrCapturedBytes,
+										totalBytes: this.#stderrTotalBytes,
+									},
+									"stderr",
+								)
 							: retained;
 					})
 				: this.#stderrDone.then(() => this.#stderrTail);

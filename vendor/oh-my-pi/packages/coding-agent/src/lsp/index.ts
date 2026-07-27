@@ -7,7 +7,7 @@ import type {
 	AgentToolUpdateCallback,
 	ToolApprovalDecision,
 } from "@oh-my-pi/pi-agent-core";
-import { logger, once, prompt, untilAborted } from "@oh-my-pi/pi-utils";
+import { cappedStreamNotice, logger, once, prompt, readCapped, untilAborted } from "@oh-my-pi/pi-utils";
 import type { BunFile } from "bun";
 import { type Theme, theme } from "../modes/theme/theme";
 import lspDescription from "../prompts/tools/lsp.md" with { type: "text" };
@@ -332,6 +332,12 @@ const INLINE_DIAGNOSTICS_WAIT_TIMEOUT_MS = 500;
 const DEFERRED_DIAGNOSTICS_WAIT_TIMEOUT_MS = 12_000;
 const MAX_GLOB_DIAGNOSTIC_TARGETS = 20;
 const WORKSPACE_SYMBOL_LIMIT = 200;
+/**
+ * Byte cap for `cargo check`/`tsc`-style workspace diagnostics. Only the first
+ * 50 lines ever reach the caller, so a broken workspace emitting tens of MiB
+ * must not be materialised in full.
+ */
+const DIAGNOSTICS_OUTPUT_CAP_BYTES = 1024 * 1024;
 const PROJECT_INDEXED_ACTIONS: ReadonlySet<string> = new Set([
 	"definition",
 	"type_definition",
@@ -597,19 +603,26 @@ async function runWorkspaceDiagnostics(
 	}
 
 	try {
-		const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+		const [stdoutRead, stderrRead] = await Promise.all([
+			readCapped(proc.stdout, DIAGNOSTICS_OUTPUT_CAP_BYTES),
+			readCapped(proc.stderr, DIAGNOSTICS_OUTPUT_CAP_BYTES),
+		]);
 		await proc.exited;
 		throwIfAborted(signal);
-		const combined = (stdout + stderr).trim();
+		const combined = (stdoutRead.text + stderrRead.text).trim();
+		const dropped = cappedStreamNotice(stdoutRead, "stdout") + cappedStreamNotice(stderrRead, "stderr");
 		if (!combined) {
-			return { output: "No issues found", projectType };
+			return { output: dropped ? `No issues found${dropped}` : "No issues found", projectType };
 		}
 		// Limit output length
 		const lines = combined.split("\n");
 		if (lines.length > 50) {
-			return { output: `${lines.slice(0, 50).join("\n")}\n... and ${lines.length - 50} more lines`, projectType };
+			return {
+				output: `${lines.slice(0, 50).join("\n")}\n... and ${lines.length - 50} more lines${dropped}`,
+				projectType,
+			};
 		}
-		return { output: combined, projectType };
+		return { output: combined + dropped, projectType };
 	} catch (e) {
 		if (signal?.aborted) {
 			throw new ToolAbortError();

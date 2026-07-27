@@ -10,7 +10,13 @@ import {
 	type UsageReport,
 } from "@oh-my-pi/pi-ai";
 import { Loader, Markdown, type OverlayHandle, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
-import { formatDuration, Snowflake } from "@oh-my-pi/pi-utils";
+import {
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	formatDuration,
+	readCapped,
+	Snowflake,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type LoadedCustomShare, loadCustomShare } from "../../export/custom-share";
 import { shareSession } from "../../export/share";
@@ -1380,10 +1386,12 @@ export class CommandController {
 				stderr: "pipe",
 			});
 
-			const [stdout, stderr] = await Promise.all([
-				new Response(proc.stdout).text(),
-				new Response(proc.stderr).text(),
+			const [stdoutRead, stderrRead] = await Promise.all([
+				readCapped(proc.stdout, DIAGNOSTIC_STREAM_CAP_BYTES),
+				readCapped(proc.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
 			]);
+			const stdout = withCappedStreamNotice(stdoutRead, "stdout");
+			const stderr = withCappedStreamNotice(stderrRead, "stderr");
 			const exitCode = await proc.exited;
 
 			if (exitCode !== 0) {

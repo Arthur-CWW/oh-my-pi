@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import type { ClipboardImage } from "@oh-my-pi/pi-natives";
 import * as native from "@oh-my-pi/pi-natives";
-import { logger } from "@oh-my-pi/pi-utils";
+import { DEFAULT_STREAM_CAP_BYTES, logger, readCapped, withCappedStreamNotice } from "@oh-my-pi/pi-utils";
 
 function hasDisplay(): boolean {
 	return process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
@@ -109,7 +109,7 @@ async function readImageViaPowerShell(): Promise<ClipboardImage | null> {
 		const timer = setTimeout(() => proc.kill(), POWERSHELL_TIMEOUT_MS);
 		let stdout = "";
 		try {
-			stdout = await new Response(proc.stdout).text();
+			stdout = withCappedStreamNotice(await readCapped(proc.stdout, DEFAULT_STREAM_CAP_BYTES), "stdout");
 			await proc.exited;
 		} catch (err) {
 			// powershell.exe can be a Windows process reached either natively or
@@ -166,7 +166,7 @@ async function readTextViaPowerShell(): Promise<string | null> {
 		const timer = setTimeout(() => proc.kill(), POWERSHELL_TIMEOUT_MS);
 		let stdout = "";
 		try {
-			stdout = await new Response(proc.stdout).text();
+			stdout = withCappedStreamNotice(await readCapped(proc.stdout, DEFAULT_STREAM_CAP_BYTES), "stdout");
 			await proc.exited;
 		} catch (err) {
 			logger.warn("clipboard: powershell text read failed", { error: String(err) });

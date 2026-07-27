@@ -1,6 +1,12 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { $which } from "@oh-my-pi/pi-utils";
+import {
+	$which,
+	DEFAULT_STREAM_CAP_BYTES,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	readCapped,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
 import { LRUCache } from "lru-cache/raw";
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -15,6 +21,12 @@ export interface JjCommandResult {
 	stdout: string;
 	/** Captured standard error as UTF-8 text. */
 	stderr: string;
+	/** True when stdout exceeded the in-memory capture limit. */
+	stdoutTruncated: boolean;
+	/** Bytes retained before any visible truncation marker was appended. */
+	stdoutKeptBytes: number;
+	/** Total bytes emitted on stdout. */
+	stdoutBytes: number;
 }
 
 /** Resolved Jujutsu workspace metadata. */
@@ -27,6 +39,8 @@ export interface JjRepository {
 
 /** Options for `jj diff` invocations. */
 export interface DiffOptions {
+	/** Explicit `jj` executable path, primarily for isolated integrations. */
+	readonly command?: string;
 	/** Optional file paths to restrict the diff with `-- <files>`. */
 	readonly files?: readonly string[];
 	/** Return only changed file names instead of Git-format diff text. */
@@ -37,6 +51,7 @@ export interface DiffOptions {
 
 interface CommandOptions {
 	readonly signal?: AbortSignal;
+	readonly command?: string;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -59,13 +74,31 @@ export class JjCommandError extends Error {
 	}
 }
 
+/** Error thrown when a structured `jj` consumer receives incomplete stdout. */
+export class JjOutputOverflowError extends Error {
+	/** Arguments passed after the common `jj --no-pager --color=never` prefix. */
+	readonly args: readonly string[];
+	/** Captured command result with exact overflow accounting. */
+	readonly result: JjCommandResult;
+
+	constructor(args: readonly string[], result: JjCommandResult) {
+		super(
+			`jj ${args.join(" ")} emitted ${result.stdoutBytes} stdout bytes, exceeding the ` +
+				`${result.stdoutKeptBytes}-byte capture limit`,
+		);
+		this.name = "JjOutputOverflowError";
+		this.args = [...args];
+		this.result = result;
+	}
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Internal: Core execution
 // ════════════════════════════════════════════════════════════════════════════
 
-function ensureAvailable(): void {
-	if (!$which("jj")) {
-		throw new Error("jj is not installed.");
+function ensureAvailable(command = "jj"): void {
+	if (!$which(command)) {
+		throw new Error(`${command} is not installed.`);
 	}
 }
 
@@ -81,7 +114,7 @@ function formatCommandFailure(
 }
 
 async function jj(cwd: string, args: readonly string[], options: CommandOptions = {}): Promise<JjCommandResult> {
-	const child = Bun.spawn(["jj", "--no-pager", "--color=never", ...args], {
+	const child = Bun.spawn([options.command ?? "jj", "--no-pager", "--color=never", ...args], {
 		cwd,
 		signal: options.signal,
 		stdin: "ignore",
@@ -94,13 +127,20 @@ async function jj(cwd: string, args: readonly string[], options: CommandOptions 
 		throw new Error("Failed to capture jj command output.");
 	}
 
-	const [stdout, stderr, exitCode] = await Promise.all([
-		new Response(child.stdout).text(),
-		new Response(child.stderr).text(),
+	const [stdoutRead, stderrRead, exitCode] = await Promise.all([
+		readCapped(child.stdout, DEFAULT_STREAM_CAP_BYTES),
+		readCapped(child.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
 		child.exited,
 	]);
 
-	return { exitCode: exitCode ?? 0, stdout, stderr };
+	return {
+		exitCode: exitCode ?? 0,
+		stdout: withCappedStreamNotice(stdoutRead, "stdout"),
+		stderr: withCappedStreamNotice(stderrRead, "stderr"),
+		stdoutTruncated: stdoutRead.truncated,
+		stdoutKeptBytes: stdoutRead.keptBytes,
+		stdoutBytes: stdoutRead.totalBytes,
+	};
 }
 
 async function runChecked(
@@ -108,7 +148,7 @@ async function runChecked(
 	args: readonly string[],
 	options: CommandOptions = {},
 ): Promise<JjCommandResult> {
-	ensureAvailable();
+	ensureAvailable(options.command);
 	const result = await jj(cwd, args, options);
 	if (result.exitCode !== 0) {
 		throw new JjCommandError(args, result);
@@ -210,12 +250,18 @@ async function repositoryFromRoot(root: string): Promise<JjRepository> {
 /** Run `jj diff --git` for the current workspace commit and return the raw Git-format diff text. */
 export const diff = Object.assign(
 	async function diff(cwd: string, options: DiffOptions = {}): Promise<string> {
-		return runText(cwd, buildDiffArgs(options), { signal: options.signal });
+		return runText(cwd, buildDiffArgs(options), { signal: options.signal, command: options.command });
 	},
 	{
 		/** List changed file paths. */
-		async changedFiles(cwd: string, options: Pick<DiffOptions, "files" | "signal"> = {}): Promise<string[]> {
-			return splitLines(await diff(cwd, { ...options, nameOnly: true }));
+		async changedFiles(
+			cwd: string,
+			options: Pick<DiffOptions, "command" | "files" | "signal"> = {},
+		): Promise<string[]> {
+			const args = buildDiffArgs({ ...options, nameOnly: true });
+			const result = await runChecked(cwd, args, { signal: options.signal, command: options.command });
+			if (result.stdoutTruncated) throw new JjOutputOverflowError(args, result);
+			return splitLines(result.stdout);
 		},
 	},
 );

@@ -3,7 +3,13 @@
  * Uses Biome's CLI with JSON output instead of LSP (which has stale diagnostics issues).
  */
 import path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import {
+	DEFAULT_STREAM_CAP_BYTES,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	logger,
+	readCapped,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
 import type { Diagnostic, DiagnosticSeverity, LinterClient, ServerConfig } from "../../lsp/types";
 
 // =============================================================================
@@ -23,6 +29,18 @@ interface BiomeDiagnostic {
 		span?: [number, number]; // [startOffset, endOffset] in bytes
 		sourceCode?: string;
 	};
+}
+
+interface CapturedOutputOverflow {
+	readonly keptBytes: number;
+	readonly totalBytes: number;
+}
+
+interface BiomeRunResult {
+	readonly stdout: string;
+	readonly stderr: string;
+	readonly success: boolean;
+	readonly stdoutOverflow?: CapturedOutputOverflow;
 }
 
 // =============================================================================
@@ -84,14 +102,25 @@ function parseSeverity(severity: string): DiagnosticSeverity {
 	}
 }
 
+function overflowDiagnostic(overflow: CapturedOutputOverflow): Diagnostic {
+	return {
+		range: {
+			start: { line: 0, character: 0 },
+			end: { line: 0, character: 0 },
+		},
+		severity: 1,
+		code: "output-overflow",
+		source: "biome",
+		message:
+			`Biome emitted ${overflow.totalBytes} bytes, exceeding the ${overflow.keptBytes}-byte capture limit; ` +
+			"diagnostics are incomplete and were not parsed.",
+	};
+}
+
 /**
  * Run a Biome CLI command.
  */
-async function runBiome(
-	args: string[],
-	cwd: string,
-	resolvedCommand?: string,
-): Promise<{ stdout: string; stderr: string; success: boolean }> {
+async function runBiome(args: string[], cwd: string, resolvedCommand?: string): Promise<BiomeRunResult> {
 	const command = resolvedCommand ?? "biome";
 
 	try {
@@ -102,10 +131,20 @@ async function runBiome(
 			windowsHide: true,
 		});
 
-		const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-		const exitCode = await proc.exited;
+		const [stdoutRead, stderrRead, exitCode] = await Promise.all([
+			readCapped(proc.stdout, DEFAULT_STREAM_CAP_BYTES),
+			readCapped(proc.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
+			proc.exited,
+		]);
 
-		return { stdout, stderr, success: exitCode === 0 };
+		return {
+			stdout: withCappedStreamNotice(stdoutRead, "stdout"),
+			stderr: withCappedStreamNotice(stderrRead, "stderr"),
+			success: exitCode === 0,
+			stdoutOverflow: stdoutRead.truncated
+				? { keptBytes: stdoutRead.keptBytes, totalBytes: stdoutRead.totalBytes }
+				: undefined,
+		};
 	} catch (err) {
 		return { stdout: "", stderr: String(err), success: false };
 	}
@@ -159,6 +198,10 @@ export class BiomeClient implements LinterClient {
 	async lint(filePath: string): Promise<Diagnostic[]> {
 		// Run biome lint with JSON reporter
 		const result = await runBiome(["lint", "--reporter=json", filePath], this.cwd, this.config.resolvedCommand);
+
+		if (result.stdoutOverflow) {
+			return [overflowDiagnostic(result.stdoutOverflow)];
+		}
 
 		// Biome exits non-zero when diagnostics are found, so only an empty
 		// stdout signals an actual run failure (missing binary, CLI error).

@@ -1,7 +1,17 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $which, hasFsCode, isEnoent, Snowflake } from "@oh-my-pi/pi-utils";
+import {
+	$which,
+	DEFAULT_STREAM_CAP_BYTES,
+	DIAGNOSTIC_STREAM_CAP_BYTES,
+	drainToFile,
+	hasFsCode,
+	isEnoent,
+	readCapped,
+	Snowflake,
+	withCappedStreamNotice,
+} from "@oh-my-pi/pi-utils";
 import {
 	parseDiffHunks as parseCommitDiffHunks,
 	parseFileDiffs,
@@ -19,6 +29,14 @@ export interface GitCommandResult {
 	exitCode: number;
 	stdout: string;
 	stderr: string;
+	/** True when stdout exceeded the byte cap; `stdout` carries a truncation marker. */
+	stdoutTruncated?: boolean;
+	/** Bytes the child wrote to stdout, including any dropped past the cap. */
+	stdoutBytes?: number;
+	/** Bytes retained in memory before the optional truncation marker. */
+	stdoutKeptBytes?: number;
+	/** Path stdout was spilled to when `stdoutFile` was requested. */
+	stdoutPath?: string;
 }
 
 export interface GitRepository {
@@ -163,14 +181,22 @@ const SHORT_LIVED_GIT_CONFIG: readonly (readonly [key: string, value: string])[]
 ];
 const REMOTE_ALREADY_EXISTS = /remote .* already exists/i;
 
-interface CommandOptions {
+export interface GitCommandOptions {
 	readonly env?: Record<string, string | undefined>;
+	/** Byte cap for retained stdout. Defaults to {@link DEFAULT_STREAM_CAP_BYTES}. */
+	readonly maxStdoutBytes?: number;
 	readonly readOnly?: boolean;
 	readonly signal?: AbortSignal;
 	readonly stdin?: string | Uint8Array | ArrayBuffer | SharedArrayBuffer;
+	/**
+	 * Opt out of the in-memory cap: stream stdout to this path and report it as
+	 * `stdoutPath`. The parent directory must exist. `stdout` carries a marker
+	 * naming the file, never the contents.
+	 */
+	readonly stdoutFile?: string;
 }
 
-function normalizeStdin(input: CommandOptions["stdin"]): "ignore" | Uint8Array {
+function normalizeStdin(input: GitCommandOptions["stdin"]): "ignore" | Uint8Array {
 	if (input === undefined) return "ignore";
 	if (typeof input === "string") return new TextEncoder().encode(input);
 	if (input instanceof Uint8Array) return input;
@@ -194,7 +220,7 @@ function formatCommandFailure(
 	return `git ${args.join(" ")} failed with exit code ${result.exitCode}`;
 }
 
-async function git(cwd: string, args: readonly string[], options: CommandOptions = {}): Promise<GitCommandResult> {
+async function git(cwd: string, args: readonly string[], options: GitCommandOptions = {}): Promise<GitCommandResult> {
 	const commandArgs = withShortLivedGitConfig(options.readOnly ? withNoOptionalLocks(args) : [...args]);
 	const child = Bun.spawn(["git", ...commandArgs], {
 		cwd,
@@ -210,13 +236,35 @@ async function git(cwd: string, args: readonly string[], options: CommandOptions
 		throw new Error("Failed to capture git command output.");
 	}
 
-	const [stdout, stderr, exitCode] = await Promise.all([
-		new Response(child.stdout).text(),
-		new Response(child.stderr).text(),
+	if (options.stdoutFile) {
+		const [spill, stderrRead, exitCode] = await Promise.all([
+			drainToFile(child.stdout, options.stdoutFile),
+			readCapped(child.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
+			child.exited,
+		]);
+		return {
+			exitCode: exitCode ?? 0,
+			stdout: `[stdout spilled to ${spill.path} (${spill.bytes} bytes)]`,
+			stderr: withCappedStreamNotice(stderrRead, "stderr"),
+			stdoutBytes: spill.bytes,
+			stdoutPath: spill.path,
+		};
+	}
+
+	const [stdoutRead, stderrRead, exitCode] = await Promise.all([
+		readCapped(child.stdout, options.maxStdoutBytes ?? DEFAULT_STREAM_CAP_BYTES),
+		readCapped(child.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
 		child.exited,
 	]);
 
-	return { exitCode: exitCode ?? 0, stdout, stderr };
+	return {
+		exitCode: exitCode ?? 0,
+		stdout: withCappedStreamNotice(stdoutRead, "stdout"),
+		stderr: withCappedStreamNotice(stderrRead, "stderr"),
+		stdoutTruncated: stdoutRead.truncated,
+		stdoutBytes: stdoutRead.totalBytes,
+		stdoutKeptBytes: stdoutRead.keptBytes,
+	};
 }
 
 function withNoOptionalLocks(args: readonly string[]): string[] {
@@ -246,7 +294,7 @@ function hasGitConfig(args: readonly string[], key: string, value: string): bool
 async function runChecked(
 	cwd: string,
 	args: readonly string[],
-	options: CommandOptions = {},
+	options: GitCommandOptions = {},
 ): Promise<GitCommandResult> {
 	ensureAvailable();
 	const result = await git(cwd, args, options);
@@ -256,23 +304,41 @@ async function runChecked(
 	return result;
 }
 
-async function runEffect(cwd: string, args: readonly string[], options: CommandOptions = {}): Promise<void> {
+async function runEffect(cwd: string, args: readonly string[], options: GitCommandOptions = {}): Promise<void> {
 	await runChecked(cwd, args, options);
 }
 
-async function runText(cwd: string, args: readonly string[], options: CommandOptions = {}): Promise<string> {
+async function runText(cwd: string, args: readonly string[], options: GitCommandOptions = {}): Promise<string> {
 	return (await runChecked(cwd, args, options)).stdout;
 }
 
 async function tryText(
 	cwd: string,
 	args: readonly string[],
-	options: CommandOptions = {},
+	options: GitCommandOptions = {},
 ): Promise<string | undefined> {
 	ensureAvailable();
 	const result = await git(cwd, args, options);
 	if (result.exitCode !== 0) return undefined;
 	return result.stdout;
+}
+
+/**
+ * Run an arbitrary `git` command. Does not throw on non-zero exit.
+ *
+ * The topic helpers below all take the default stdout budget. This is the
+ * escape hatch for callers that must set {@link GitCommandOptions.maxStdoutBytes}
+ * explicitly, or that genuinely need every byte and therefore opt out via
+ * {@link GitCommandOptions.stdoutFile} — which streams stdout to disk and
+ * reports `stdoutPath` instead of materialising it.
+ */
+export async function run(
+	cwd: string,
+	args: readonly string[],
+	options: GitCommandOptions = {},
+): Promise<GitCommandResult> {
+	ensureAvailable();
+	return git(cwd, args, options);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1166,13 +1232,13 @@ export async function fetch(
 export async function readTree(
 	cwd: string,
 	treeish: string,
-	options: Pick<CommandOptions, "env" | "signal"> = {},
+	options: Pick<GitCommandOptions, "env" | "signal"> = {},
 ): Promise<void> {
 	await runEffect(cwd, ["read-tree", treeish], options);
 }
 
 /** Write the current index as a tree and return its object id. */
-export async function writeTree(cwd: string, options: Pick<CommandOptions, "env" | "signal"> = {}): Promise<string> {
+export async function writeTree(cwd: string, options: Pick<GitCommandOptions, "env" | "signal"> = {}): Promise<string> {
 	return (await runText(cwd, ["write-tree"], options)).trim();
 }
 
@@ -1751,11 +1817,24 @@ export interface GhCommandResult {
 	exitCode: number;
 	stdout: string;
 	stderr: string;
+	/** True when stdout exceeded the byte cap; `stdout` carries a truncation marker. */
+	stdoutTruncated?: boolean;
+	/** Bytes `gh` wrote to stdout, including any dropped past the cap. */
+	stdoutBytes?: number;
+	/** Path stdout was spilled to when `stdoutFile` was requested. */
+	stdoutPath?: string;
 }
 
 export interface GhCommandOptions {
 	repoProvided?: boolean;
 	trimOutput?: boolean;
+	/** Byte cap for retained stdout. Defaults to {@link DEFAULT_STREAM_CAP_BYTES}. */
+	maxStdoutBytes?: number;
+	/**
+	 * Opt out of the in-memory cap: stream stdout to this path and report it as
+	 * `stdoutPath`. The parent directory must exist.
+	 */
+	stdoutFile?: string;
 }
 
 function formatGhFailure(args: readonly string[], stdout: string, stderr: string, options?: GhCommandOptions): string {
@@ -1799,17 +1878,37 @@ export const github = {
 			if (!child.stdout || !child.stderr) {
 				throw new ToolError("Failed to capture GitHub CLI output.");
 			}
-			const [stdout, stderr, exitCode] = await Promise.all([
-				new Response(child.stdout).text(),
-				new Response(child.stderr).text(),
+			if (options?.stdoutFile) {
+				const [spill, stderrRead, exitCode] = await Promise.all([
+					drainToFile(child.stdout, options.stdoutFile),
+					readCapped(child.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
+					child.exited,
+				]);
+				throwIfAborted(signal);
+				const stderrText = withCappedStreamNotice(stderrRead, "stderr");
+				return {
+					exitCode: exitCode ?? 0,
+					stdout: `[stdout spilled to ${spill.path} (${spill.bytes} bytes)]`,
+					stderr: options?.trimOutput !== false ? stderrText.trim() : stderrText,
+					stdoutBytes: spill.bytes,
+					stdoutPath: spill.path,
+				};
+			}
+			const [stdoutRead, stderrRead, exitCode] = await Promise.all([
+				readCapped(child.stdout, options?.maxStdoutBytes ?? DEFAULT_STREAM_CAP_BYTES),
+				readCapped(child.stderr, DIAGNOSTIC_STREAM_CAP_BYTES),
 				child.exited,
 			]);
 			throwIfAborted(signal);
 			const trim = options?.trimOutput !== false;
+			const stdout = withCappedStreamNotice(stdoutRead, "stdout");
+			const stderr = withCappedStreamNotice(stderrRead, "stderr");
 			return {
 				exitCode: exitCode ?? 0,
 				stdout: trim ? stdout.trim() : stdout,
 				stderr: trim ? stderr.trim() : stderr,
+				stdoutTruncated: stdoutRead.truncated,
+				stdoutBytes: stdoutRead.totalBytes,
 			};
 		} catch (error) {
 			if (signal?.aborted) throw new ToolAbortError();

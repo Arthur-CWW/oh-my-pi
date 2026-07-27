@@ -7,7 +7,7 @@
  * that walks the resulting fallback chain.
  */
 import * as fs from "node:fs/promises";
-import { $which } from "@oh-my-pi/pi-utils";
+import { $which, DIAGNOSTIC_STREAM_CAP_BYTES, readCapped, withCappedStreamNotice } from "@oh-my-pi/pi-utils";
 import { getToolPath } from "../utils/tools-manager";
 
 export interface PlayerCommand {
@@ -102,6 +102,7 @@ export async function playAudioFile(filePath: string, options: PlayAudioOptions 
 		if (signal?.aborted) throw playbackAbortError(signal);
 		try {
 			const proc = Bun.spawn([command.cmd, ...command.args], { stdout: "ignore", stderr: "pipe" });
+			const stderrPromise = readCapped(proc.stderr, DIAGNOSTIC_STREAM_CAP_BYTES);
 			let killTimer: NodeJS.Timeout | undefined;
 			const abort = (): void => {
 				proc.kill("SIGTERM");
@@ -110,13 +111,10 @@ export async function playAudioFile(filePath: string, options: PlayAudioOptions 
 			};
 			signal?.addEventListener("abort", abort, { once: true });
 			try {
-				const code = await proc.exited;
+				const [code, stderrRead] = await Promise.all([proc.exited, stderrPromise]);
 				if (signal?.aborted) throw playbackAbortError(signal);
 				if (code === 0) return;
-				let stderr = "";
-				if (proc.stderr && typeof proc.stderr !== "number") {
-					stderr = await new Response(proc.stderr as ReadableStream).text();
-				}
+				const stderr = withCappedStreamNotice(stderrRead, "stderr");
 				failures.push(`${command.cmd} exited ${code}${stderr.trim() ? `: ${stderr.trim()}` : ""}`);
 			} finally {
 				signal?.removeEventListener("abort", abort);

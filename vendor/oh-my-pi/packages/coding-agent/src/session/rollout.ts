@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
+import { DEFAULT_STREAM_CAP_BYTES, readCapped, withCappedStreamNotice } from "@oh-my-pi/pi-utils";
 import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
 import { RolloutJournal, type RolloutPeerPhase } from "./rollout-journal";
@@ -151,7 +152,8 @@ async function ancestorPids(): Promise<Set<number>> {
 	const result = new Set<number>([process.pid, process.ppid]);
 	try {
 		const child = Bun.spawn(["ps", "-axo", "pid=,ppid="], { stdout: "pipe", stderr: "ignore" });
-		const rows = (await new Response(child.stdout).text()).trim().split("\n");
+		const stdout = await readCapped(child.stdout, DEFAULT_STREAM_CAP_BYTES);
+		const rows = withCappedStreamNotice(stdout, "ps output").trim().split("\n");
 		if ((await child.exited) !== 0) return result;
 		const parents = new Map<number, number>();
 		for (const row of rows) {

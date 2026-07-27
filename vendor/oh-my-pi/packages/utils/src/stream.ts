@@ -73,6 +73,103 @@ export async function* readJsonl<T>(stream: ReadableStream<Uint8Array>, signal?:
 }
 
 // =============================================================================
+// Byte-capped draining
+// =============================================================================
+
+/** Byte cap for subprocess streams read purely for diagnostics (stderr, small receipts). */
+export const DIAGNOSTIC_STREAM_CAP_BYTES = 64 * 1024;
+
+/** Default byte cap for subprocess stdout consumed as data. */
+export const DEFAULT_STREAM_CAP_BYTES = 8 * 1024 * 1024;
+
+/** Outcome of {@link readCapped}. */
+export interface CappedStreamResult {
+	/** Decoded prefix of the stream; never retains more than the requested cap. */
+	readonly text: string;
+	/** True when the producer emitted more bytes than the cap allowed. */
+	readonly truncated: boolean;
+	/** Bytes retained in {@link CappedStreamResult.text}. */
+	readonly keptBytes: number;
+	/** Bytes the producer emitted in total, including those dropped past the cap. */
+	readonly totalBytes: number;
+}
+
+/** Outcome of {@link drainToFile}. */
+export interface StreamSpill {
+	readonly path: string;
+	readonly bytes: number;
+}
+
+/**
+ * Read a stream into a string while retaining at most `maxBytes` bytes.
+ *
+ * Bytes past the cap are read and discarded rather than left in the pipe, so a
+ * producer that outruns the cap still reaches exit instead of blocking on a full
+ * pipe buffer. Peak retained memory is bounded by `maxBytes` no matter how much
+ * the producer emits.
+ */
+export async function readCapped(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<CappedStreamResult> {
+	const cap = maxBytes > 0 ? maxBytes : 0;
+	const reader = stream.getReader();
+	const decoder = new TextDecoder();
+	let keptBytes = 0;
+	let totalBytes = 0;
+	let text = "";
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			totalBytes += value.byteLength;
+			const remaining = cap - keptBytes;
+			if (remaining <= 0) continue;
+			const slice = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+			keptBytes += slice.byteLength;
+			text += decoder.decode(slice, { stream: true });
+		}
+		return { text: text + decoder.decode(), truncated: totalBytes > keptBytes, keptBytes, totalBytes };
+	} finally {
+		reader.releaseLock();
+	}
+}
+
+/**
+ * Marker describing bytes dropped by {@link readCapped}. Empty when nothing was
+ * dropped, so callers never pay for a concatenation on the clean path.
+ */
+export function cappedStreamNotice(result: CappedStreamResult, label = "output"): string {
+	if (!result.truncated) return "";
+	return `\n[${label} truncated: kept ${result.keptBytes} of ${result.totalBytes} bytes]`;
+}
+
+/** {@link readCapped} text with {@link cappedStreamNotice} appended when bytes were dropped. */
+export function withCappedStreamNotice(result: CappedStreamResult, label = "output"): string {
+	return result.truncated ? result.text + cappedStreamNotice(result, label) : result.text;
+}
+
+/**
+ * Stream a producer's output straight to `filePath` without ever holding it in
+ * memory. The parent directory must already exist.
+ */
+export async function drainToFile(stream: ReadableStream<Uint8Array>, filePath: string): Promise<StreamSpill> {
+	const reader = stream.getReader();
+	const writer = Bun.file(filePath).writer();
+	let bytes = 0;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			bytes += value.byteLength;
+			writer.write(value);
+			await writer.flush();
+		}
+	} finally {
+		reader.releaseLock();
+		await writer.end();
+	}
+	return { path: filePath, bytes };
+}
+
+// =============================================================================
 // SSE (Server-Sent Events)
 // =============================================================================
 
