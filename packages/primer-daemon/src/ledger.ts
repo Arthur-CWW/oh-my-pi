@@ -228,12 +228,12 @@ export function listNotes(db: Database, limit = DEFAULT_LIMIT): NoteRow[] {
   })
 }
 
-export function addCard(db: Database, input: CardInput): { id: number } {
+export function addCard(db: Database, input: CardInput, now: Date = new Date()): { id: number } {
   const result = db
-    .query<NoRows, [string, string, string | null, string | null]>(
-      "INSERT INTO card_candidates (front, back, source_ref, url) VALUES (?, ?, ?, ?)",
+    .query<NoRows, [string, string, string | null, string | null, string]>(
+      "INSERT INTO card_candidates (front, back, source_ref, url, created_at) VALUES (?, ?, ?, ?, ?)",
     )
-    .run(input.front, input.back, input.sourceRef ?? null, input.url ?? null)
+    .run(input.front, input.back, input.sourceRef ?? null, input.url ?? null, now.toISOString())
   return { id: Number(result.lastInsertRowid) }
 }
 

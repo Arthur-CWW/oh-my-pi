@@ -35,6 +35,7 @@ export interface ReviewSessionItem {
 export interface ReviewSessionOptions {
   explain?: boolean
   mode?: ReviewSessionMode
+  now?: Date
 }
 
 export interface ReviewSimulationStep {
@@ -248,14 +249,17 @@ const reviewScheduler = fsrs({ enable_fuzz: false })
 
 
 export function enrollCardCandidate(db: Database, cardId: number): ReviewState
+export function enrollCardCandidate(db: Database, cardId: number, now: Date): ReviewState
 export function enrollCardCandidate(db: Database, ledgerDb: Database | undefined, cardId: number): ReviewState
+export function enrollCardCandidate(db: Database, ledgerDb: Database | undefined, cardId: number, now: Date): ReviewState
 export function enrollCardCandidate(
   db: Database,
   ledgerDbOrCardId: Database | number | undefined,
-  cardIdMaybe?: number,
+  cardIdOrNow?: number | Date,
+  nowMaybe?: Date,
 ): ReviewState {
   const ledgerDb = typeof ledgerDbOrCardId === "number" || ledgerDbOrCardId === undefined ? db : ledgerDbOrCardId
-  const requestedCardId = typeof ledgerDbOrCardId === "number" ? ledgerDbOrCardId : cardIdMaybe
+  const requestedCardId = typeof ledgerDbOrCardId === "number" ? ledgerDbOrCardId : typeof cardIdOrNow === "number" ? cardIdOrNow : undefined
   if (requestedCardId === undefined) throw new TypeError("card id is required")
   const cardId = Schema.decodeUnknownSync(PositiveInteger)(requestedCardId)
   const candidateRow = ledgerDb
@@ -268,7 +272,7 @@ export function enrollCardCandidate(
   if (candidate.status !== "approved") throw new CardCandidateNotApprovedError(cardId)
 
   ensureReadingTables(db)
-  const now = new Date(nowIso())
+  const now = cardIdOrNow instanceof Date ? cardIdOrNow : nowMaybe ?? new Date(nowIso())
   const initialCard = createEmptyCard(now)
   return db.transaction((itemId: number) => {
     db.query<NoRows, [
@@ -325,7 +329,7 @@ export function buildReviewSession(
   ensureReadingTables(db)
   const normalizedLimit = normalizeReviewLimit(limit)
   const mode = options.mode ?? "full"
-  const now = new Date(nowIso())
+  const now = options.now ?? new Date(nowIso())
   const queueDueItems = db
     .query<RawReviewQueueRow, [string]>(
       `${reviewQueueSelectSql()}
@@ -400,6 +404,7 @@ export function gradeReviewItem(
   rating: Rating | ReviewGrade,
   itemKind?: ReviewItemKind,
   failReason?: ReviewFailReason,
+  now?: Date,
 ): GradeReviewResult | null
 export function gradeReviewItem(
   db: Database,
@@ -419,6 +424,7 @@ export function gradeReviewItem(
   rating: Rating | ReviewGrade,
   itemKindOrFailReason?: ReviewItemKind | ReviewFailReason,
   failReasonArg?: ReviewFailReason,
+  nowArg?: Date,
 ): GradeReviewResult | null {
   ensureReadingTables(db)
   const item: ReviewItemReference =
@@ -463,7 +469,7 @@ export function gradeReviewItem(
       .get(reference.itemKind, reference.itemId)
     const priorState = priorRow === null ? null : decodeReviewStateRow(priorRow)
     if (reference.itemKind === CARD_ITEM_KIND && priorState === null) return null
-    const now = new Date(nowIso())
+    const now = nowArg ?? new Date(nowIso())
     const card = priorState === null ? createEmptyCard(now) : cardFromReviewState(priorState, now)
     const nextCard = reviewScheduler.next(card, now, selectedGrade).card
     const priorStateVersion = priorState?.state_version ?? 0

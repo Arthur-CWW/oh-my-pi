@@ -282,11 +282,15 @@ export function splitReadingParagraphs(text: string): string[] {
     .filter((paragraph) => paragraph.length > 0)
 }
 
-export function createReadingDoc(db: Database, input: CreateReadingDocInput): { id: number; paragraphCount: number } {
+export function createReadingDoc(
+  db: Database,
+  input: CreateReadingDocInput,
+  now: Date = new Date(),
+): { id: number; paragraphCount: number } {
   ensureReadingTables(db)
   const paragraphs = splitReadingParagraphs(input.text)
   return db.transaction((doc: CreateReadingDocInput, docParagraphs: string[]) => {
-    const createdAt = nowIso()
+    const createdAt = now.toISOString()
     const result = db
       .query<NoRows, [string, string, string | null, string]>(
         "INSERT INTO reading_docs (title, lang, source, created_at) VALUES (?, ?, ?, ?)",
@@ -351,11 +355,15 @@ export function getReadingDoc(db: Database, id: number): ReadingDocDetail | null
   }
 }
 
-export function createReadingMark(db: Database, input: CreateReadingMarkInput): CreatedReadingMark {
+export function createReadingMark(
+  db: Database,
+  input: CreateReadingMarkInput,
+  now: Date = new Date(),
+): CreatedReadingMark {
   ensureReadingTables(db)
   return db.transaction((mark: CreateReadingMarkInput) => {
     assertParagraphSpan(db, mark)
-    const createdAt = nowIso()
+    const createdAt = now.toISOString()
     const result = db
       .query<NoRows, [number, number, number, number, string, string, ReadingMarkKind, string]>(
         `INSERT INTO reading_marks (doc_id, paragraph_idx, start, end, surface, sentence, kind, created_at)
@@ -363,7 +371,7 @@ export function createReadingMark(db: Database, input: CreateReadingMarkInput): 
       )
       .run(mark.docId, mark.paragraphIdx, mark.start, mark.end, mark.surface, mark.sentence, mark.kind ?? "lookup", createdAt)
     const markId = Number(result.lastInsertRowid)
-    const updatedAt = nowIso()
+    const updatedAt = createdAt
     const insertResult = db
       .query<NoRows, [number, string, string | null, string | null, string, string]>(
         `INSERT OR IGNORE INTO queue_items (mark_id, word, pinyin, gloss, created_at, updated_at)

@@ -18,6 +18,7 @@
     "web:dev": "vite --config web/vite.config.ts --host 127.0.0.1",
     "web:build": "bun run web:typecheck && vite build --config web/vite.config.ts",
     "test": "bun test",
+    "validate": "bun scripts/validate-cell.ts",
     "check": "bun run typecheck && bun run web:build && bun run test",
     "cli": "bun src/cli.ts",
     "tabs": "bun src/tabs-cli.ts",

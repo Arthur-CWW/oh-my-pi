@@ -30,6 +30,10 @@ import {
   type ReadingMarkKind,
 } from "./reading-store"
 
+export type PrimerClock = () => Date
+
+const SYSTEM_CLOCK: PrimerClock = () => new Date()
+
 const PositiveInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
 const NonNegativeInteger = Schema.Number.check(Schema.isFinite(), Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 const PositiveIntegerFromString = Schema.NumberFromString.pipe(
@@ -112,16 +116,20 @@ type DictWordParam = Schema.Schema.Type<typeof DictWordParamSchema>
 type DictBestQuery = Schema.Schema.Type<typeof DictBestQuerySchema>
 type QueueQuery = Schema.Schema.Type<typeof QueueQuerySchema>
 
-export async function handleReaderApi(request: Request, paths: DaemonPaths): Promise<Response | null> {
+export async function handleReaderApi(
+  request: Request,
+  paths: DaemonPaths,
+  clock: PrimerClock = SYSTEM_CLOCK,
+): Promise<Response | null> {
   const url = new URL(request.url)
   const pathname = url.pathname
 
   try {
     if (request.method === "GET" && pathname === "/api/anki-profile") return jsonResponse(readAnkiProfile(paths.ankiProfile))
-    if (request.method === "POST" && pathname === "/api/reader/docs") return handleCreateDoc(request, paths)
+    if (request.method === "POST" && pathname === "/api/reader/docs") return handleCreateDoc(request, paths, clock)
     if (request.method === "GET" && pathname === "/api/reader/docs") return handleListDocs(paths)
     if (request.method === "GET" && pathname.startsWith("/api/reader/docs/")) return handleGetDoc(pathname, paths)
-    if (request.method === "POST" && pathname === "/api/reader/marks") return handleCreateMark(request, paths)
+    if (request.method === "POST" && pathname === "/api/reader/marks") return handleCreateMark(request, paths, clock)
     if (request.method === "DELETE" && pathname.startsWith("/api/reader/marks/")) return handleDeleteMark(pathname, paths)
     if (request.method === "GET" && pathname === "/api/reader/known-words") return jsonResponse(listPrimerKnownWords(paths))
     if (request.method === "GET" && pathname === "/api/dict/best") return handleDictBest(url, paths)
@@ -130,8 +138,8 @@ export async function handleReaderApi(request: Request, paths: DaemonPaths): Pro
     if (request.method === "POST" && pathname.startsWith("/api/queue/") && pathname.endsWith("/status")) {
       return handleQueueStatus(request, pathname, paths)
     }
-    if (request.method === "GET" && pathname === "/api/review/session") return handleReviewSession(url, paths)
-    if (request.method === "POST" && pathname === "/api/review/grade") return await handleReviewGrade(request, paths)
+    if (request.method === "GET" && pathname === "/api/review/session") return handleReviewSession(url, paths, clock)
+    if (request.method === "POST" && pathname === "/api/review/grade") return await handleReviewGrade(request, paths, clock)
     if (request.method === "POST" && pathname === "/api/review/simulate") return await handleReviewSimulate(request)
     if (request.method === "GET" && pathname === "/api/review/events") return handleReviewEvents(url, paths)
     if (request.method === "POST" && pathname.startsWith("/api/review/events/") && pathname.endsWith("/reason")) {
@@ -151,9 +159,9 @@ export async function handleReaderApi(request: Request, paths: DaemonPaths): Pro
   return null
 }
 
-async function handleCreateDoc(request: Request, paths: DaemonPaths): Promise<Response> {
+async function handleCreateDoc(request: Request, paths: DaemonPaths, clock: PrimerClock): Promise<Response> {
   const body = await decodeJson(request, CreateDocBodySchema)
-  return withLedger(paths, (db) => jsonResponse(createReadingDoc(db, normalizeDocBody(body))))
+  return withLedger(paths, (db) => jsonResponse(createReadingDoc(db, normalizeDocBody(body), clock())))
 }
 
 function handleListDocs(paths: DaemonPaths): Response {
@@ -169,7 +177,7 @@ function handleGetDoc(pathname: string, paths: DaemonPaths): Response {
   })
 }
 
-async function handleCreateMark(request: Request, paths: DaemonPaths): Promise<Response> {
+async function handleCreateMark(request: Request, paths: DaemonPaths, clock: PrimerClock): Promise<Response> {
   const body = await decodeJson(request, CreateMarkBodySchema)
   const enrichment = enrichWord(paths.cedictDb, body.surface)
   return withLedger(paths, (db) =>
@@ -184,7 +192,7 @@ async function handleCreateMark(request: Request, paths: DaemonPaths): Promise<R
         kind: body.kind as ReadingMarkKind | undefined,
         pinyin: enrichment.pinyin,
         gloss: enrichment.gloss,
-      }),
+      }, clock()),
     ),
   )
 }
@@ -224,12 +232,12 @@ async function handleQueueStatus(request: Request, pathname: string, paths: Daem
   })
 }
 
-function handleReviewSession(url: URL, paths: DaemonPaths): Response {
+function handleReviewSession(url: URL, paths: DaemonPaths, clock: PrimerClock): Response {
   const query = decodeUnknown(ReviewSessionQuerySchema, Object.fromEntries(url.searchParams), "malformed review session query")
   const mode: ReviewSessionMode = query.mode ?? "full"
   return withLedger(paths, (db) =>
     jsonResponse({
-      items: buildReviewSession(db, query.limit ?? 20, { explain: query.explain === "1", mode }),
+      items: buildReviewSession(db, query.limit ?? 20, { explain: query.explain === "1", mode, now: clock() }),
       mode,
       threshold: QUICK_RETRIEVABILITY_THRESHOLD,
     }),
@@ -250,7 +258,7 @@ function handleReviewEvents(url: URL, paths: DaemonPaths): Response {
   return withLedger(paths, (db) => jsonResponse(listReviewEvents(db, query.limit ?? 20)))
 }
 
-async function handleReviewGrade(request: Request, paths: DaemonPaths): Promise<Response> {
+async function handleReviewGrade(request: Request, paths: DaemonPaths, clock: PrimerClock): Promise<Response> {
   const body = await decodeJson(request, ReviewGradeBodySchema)
   return withLedger(paths, (db) => {
     const itemKind = body.itemKind ?? "queue_item"
@@ -260,6 +268,7 @@ async function handleReviewGrade(request: Request, paths: DaemonPaths): Promise<
       body.grade as ReviewGrade,
       itemKind as ReviewItemKind,
       body.failReason as ReviewFailReason | undefined,
+      clock(),
     )
     if (result === null) throw new NotFoundError(itemKind === "card_candidate" ? "unknown card candidate" : "unknown queue item")
     return jsonResponse(result)

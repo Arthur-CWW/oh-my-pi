@@ -11,14 +11,9 @@ import { askEvidence } from "./evidence"
 import { appendAppError, appendBackendError, decodeBrowserErrorPayload } from "./error-log"
 import {
   addProgress,
-  listCards,
-  listCardsWithEnrollment,
   listNotes,
   listProgress,
   openLedger,
-  setCardStatus,
-  type CardListStatus,
-  type CardStatus,
 } from "./ledger"
 import {
   addExposureEvents,
@@ -41,7 +36,7 @@ import { handleReaderMediaApi } from "./reader-media"
 import { handleReaderApi } from "./reader-api"
 import { handleZhDictApi } from "./zhdict-api"
 import { handleShadowingApi } from "./shadowing-api"
-import { CardCandidateNotApprovedError, CardCandidateNotFoundError, enrollCardCandidate } from "./review-store"
+import { handleCardApi } from "./card-api"
 import {
   appendReviewFeedAnswer,
   readReviewFeed,
@@ -90,7 +85,6 @@ interface SubstrateStatus {
 
 const DEFAULT_ASK_LIMIT = 30
 const DEFAULT_NOTE_LIMIT = 50
-const DEFAULT_CARD_LIMIT = 100
 const DEFAULT_PROGRESS_LIMIT = 100
 const DEFAULT_FEEDBACK_LIMIT = 50
 const DEFAULT_UI_EVENT_LIMIT = 100
@@ -108,19 +102,6 @@ const AskRequestSchema = Schema.Struct({
   limit: Schema.optionalKey(PositiveInteger),
 })
 
-const CardStatusSchema = Schema.Union([
-  Schema.Literal("candidate"),
-  Schema.Literal("approved"),
-  Schema.Literal("rejected"),
-])
-
-const CardStatusRequestSchema = Schema.Struct({
-  id: PositiveInteger,
-  status: CardStatusSchema,
-})
-
-const ReviewEnrollRequestSchema = Schema.Struct({ cardId: PositiveInteger })
-
 const ProgressRequestSchema = Schema.Struct({
   kind: Schema.String,
   title: Schema.String,
@@ -129,7 +110,6 @@ const ProgressRequestSchema = Schema.Struct({
 })
 
 type AskRequest = Schema.Schema.Type<typeof AskRequestSchema>
-type CardStatusRequest = Schema.Schema.Type<typeof CardStatusRequestSchema>
 type ProgressRequest = Schema.Schema.Type<typeof ProgressRequestSchema>
 
 export function startDashboard(options: DashboardOptions): DashboardServer {
@@ -215,9 +195,8 @@ async function handleRequest(
   if (request.method === "POST" && pathname === "/api/ask/stream") return handleAskStream(request, paths, env)
   if (request.method === "POST" && pathname === "/api/ask") return handleAsk(request, paths, env)
   if (request.method === "GET" && pathname === "/api/notes") return handleNotes(url, paths)
-  if (request.method === "GET" && pathname === "/api/cards") return handleCards(url, paths)
-  if (request.method === "POST" && pathname === "/api/cards/status") return handleCardStatus(request, paths)
-  if (request.method === "POST" && pathname === "/api/review/enroll") return handleCardEnroll(request, paths)
+  const cardApiResponse = await handleCardApi(request, url, paths)
+  if (cardApiResponse !== null) return cardApiResponse
   if (request.method === "GET" && pathname === "/api/progress") return handleProgressList(url, paths)
   if (request.method === "POST" && pathname === "/api/progress") return handleProgressCreate(request, paths)
   if (request.method === "GET" && pathname === "/api/proofs") {
@@ -530,42 +509,6 @@ function handleNotes(url: URL, paths: DaemonPaths): Response {
   const limit = parseLimit(url, DEFAULT_NOTE_LIMIT)
   if (limit === null) return jsonError("invalid limit", 400)
   return withLedger(paths, (db) => jsonResponse(listNotes(db, limit)))
-}
-
-function handleCards(url: URL, paths: DaemonPaths): Response {
-  const limit = parseLimit(url, DEFAULT_CARD_LIMIT)
-  if (limit === null) return jsonError("invalid limit", 400)
-  const status = url.searchParams.get("status")
-  if (status === null) return withLedger(paths, (db) => jsonResponse(listCards(db, limit)))
-  if (status !== "candidate" && status !== "approved" && status !== "rejected" && status !== "enrolled" && status !== "all") {
-    return jsonError("invalid status", 400)
-  }
-  return withLedger(paths, (db) => jsonResponse(listCardsWithEnrollment(db, limit, status as CardListStatus)))
-}
-
-async function handleCardStatus(request: Request, paths: DaemonPaths): Promise<Response> {
-  const body = await decodeJson(request, CardStatusRequestSchema)
-  if (body instanceof Response) return body
-
-  return withLedger(paths, (db) => {
-    const updated = setCardStatus(db, body.id, body.status as CardStatus)
-    if (updated === null) return jsonError("unknown card id", 404)
-    return jsonResponse(updated)
-  })
-}
-
-async function handleCardEnroll(request: Request, paths: DaemonPaths): Promise<Response> {
-  const body = await decodeJson(request, ReviewEnrollRequestSchema)
-  if (body instanceof Response) return body
-  return withLedger(paths, (db) => {
-    try {
-      return jsonResponse(enrollCardCandidate(db, body.cardId))
-    } catch (error) {
-      if (error instanceof CardCandidateNotFoundError) return jsonError(error.message, 404)
-      if (error instanceof CardCandidateNotApprovedError) return jsonError(error.message, 409)
-      throw error
-    }
-  })
 }
 
 function handleProgressList(url: URL, paths: DaemonPaths): Response {
