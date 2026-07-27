@@ -5,7 +5,8 @@ import { exampleRequest } from "./support/fixtures"
 describe("canonical request digest", () => {
   it("ignores volatile host-local observations", () => {
     const withTrace = exampleRequest()
-    const withoutTrace = exampleRequest({ volatile: undefined })
+    const { volatile: omittedVolatile, ...withoutTrace } = withTrace
+    void omittedVolatile
     const differentTrace = exampleRequest({
       volatile: { traceId: "trace-zzz", requestId: "req-999", wallClockIso: "2030-01-01T00:00:00.000Z" },
     })

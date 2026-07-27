@@ -73,7 +73,7 @@ type FetchLike = typeof globalThis.fetch
  */
 export const guardNetwork = (label: string, audit = makeProviderAudit()): NetworkGuardHandle => {
   const previous: FetchLike = globalThis.fetch
-  const rejecting: FetchLike = input => {
+  const rejecting = (input: Parameters<FetchLike>[0]): ReturnType<FetchLike> => {
     const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
     let origin: string
     try {
@@ -86,6 +86,7 @@ export const guardNetwork = (label: string, audit = makeProviderAudit()): Networ
     audit.append(record)
     return Promise.reject(record)
   }
+  rejecting.preconnect = () => {}
   globalThis.fetch = rejecting
   return {
     audit,
