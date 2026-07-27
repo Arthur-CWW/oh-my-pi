@@ -107,6 +107,7 @@
       },
       "devDependencies": {
         "@types/bun": "catalog:",
+        "fast-check": "4.8.0",
       },
       "optionalDependencies": {
         "@huggingface/transformers": "catalog:",
