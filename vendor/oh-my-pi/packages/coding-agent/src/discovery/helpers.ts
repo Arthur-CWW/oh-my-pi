@@ -6,7 +6,9 @@ import { FileType, glob } from "@oh-my-pi/pi-natives";
 import {
 	CONFIG_DIR_NAME,
 	getAgentDir,
+	getAuthoritativeConfigRoot,
 	getConfigDirName,
+	getConfigHomeDir,
 	getPluginsDir,
 	getProjectDir,
 	parseFrontmatter,
@@ -94,7 +96,7 @@ export function getUserPath(ctx: LoadContext, source: SourceId, subpath: string)
 	if (source === "native") return path.join(getAgentDir(), subpath);
 	const paths = SOURCE_PATHS[source];
 	if (!paths.userAgent) return null;
-	return path.join(ctx.home, paths.userAgent, subpath);
+	return path.join(getConfigHomeDir(ctx.home), paths.userAgent, subpath);
 }
 
 /**
@@ -826,6 +828,38 @@ export async function resolveOrDefaultProjectRegistryPath(cwd: string): Promise<
 	return path.join(cwd, getConfigDirName(), "plugins", "installed_plugins.json");
 }
 
+function isWithinRoot(root: string, candidate: string): boolean {
+	const relative = path.relative(root, candidate);
+	return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function isRegistryInstallPathContained(authoritativeRoot: string | undefined, installPath: string): boolean {
+	if (authoritativeRoot === undefined) return true;
+
+	const resolvedRoot = path.resolve(authoritativeRoot);
+	const resolvedInstallPath = path.resolve(installPath);
+	if (!isWithinRoot(resolvedRoot, resolvedInstallPath)) return false;
+
+	try {
+		return isWithinRoot(fs.realpathSync(resolvedRoot), fs.realpathSync(resolvedInstallPath));
+	} catch {
+		// Missing registry paths cannot be resolved physically; lexical containment
+		// still prevents them from naming a location outside the authoritative root.
+		return true;
+	}
+}
+
+function rejectEscapedRegistryInstallPath(
+	authoritativeRoot: string | undefined,
+	pluginId: string,
+	installPath: string,
+	warnings: string[],
+): boolean {
+	if (isRegistryInstallPathContained(authoritativeRoot, installPath)) return false;
+	warnings.push(`Ignored plugin ${pluginId}: installPath escapes the authoritative config root`);
+	return true;
+}
+
 const pluginRootsCache = new Map<string, { roots: ClaudePluginRoot[]; warnings: string[] }>();
 
 /**
@@ -839,8 +873,10 @@ export async function listClaudePluginRoots(
 	home: string,
 	cwd?: string,
 ): Promise<{ roots: ClaudePluginRoot[]; warnings: string[] }> {
+	const configHome = getConfigHomeDir(home);
+	const authoritativeRoot = getAuthoritativeConfigRoot();
 	const resolvedProjectPath = cwd ? await resolveActiveProjectRegistryPath(cwd) : null;
-	const cacheKey = `${home}:${resolvedProjectPath ?? ""}`;
+	const cacheKey = `${configHome}:${resolvedProjectPath ?? ""}`;
 	const cached = pluginRootsCache.get(cacheKey);
 	if (cached) return cached;
 
@@ -849,7 +885,7 @@ export async function listClaudePluginRoots(
 	const projectRoots: ClaudePluginRoot[] = [];
 
 	// ── Claude Code registry ──────────────────────────────────────────────────
-	const registryPath = path.join(home, ".claude", "plugins", "installed_plugins.json");
+	const registryPath = path.join(configHome, ".claude", "plugins", "installed_plugins.json");
 	const content = await readFile(registryPath);
 
 	if (content) {
@@ -878,6 +914,7 @@ export async function listClaudePluginRoots(
 						continue;
 					}
 					if (entry.enabled === false) continue;
+					if (rejectEscapedRegistryInstallPath(authoritativeRoot, pluginId, entry.installPath, warnings)) continue;
 
 					roots.push({
 						id: pluginId,
@@ -894,10 +931,9 @@ export async function listClaudePluginRoots(
 
 	// ── OMP installed plugins registry ───────────────────────────────────────
 	// OMP registry is authoritative: its entries replace Claude's entries for the same plugin ID.
-	// In production `home` is `os.homedir()`, so `getPluginsDir(home)` resolves to the
-	// same XDG-aware path the marketplace writer uses (reads and writes always agree).
-	// Tests pass a temp dir, which short-circuits the resolver for deterministic isolation.
-	const ompRegistryPath = path.join(getPluginsDir(home), "installed_plugins.json");
+	// `configHome` preserves explicit alternate-home test seams when no config-root
+	// override exists and clamps callers to the process-start root when it does.
+	const ompRegistryPath = path.join(getPluginsDir(configHome), "installed_plugins.json");
 	const ompContent = await readFile(ompRegistryPath);
 	if (ompContent) {
 		const ompRegistry = parseClaudePluginsRegistry(ompContent);
@@ -924,6 +960,7 @@ export async function listClaudePluginRoots(
 						continue;
 					}
 					if (entry.enabled === false) continue;
+					if (rejectEscapedRegistryInstallPath(authoritativeRoot, pluginId, entry.installPath, warnings)) continue;
 					// Deduplicate by installPath within same ID
 					if (roots.some(r => r.id === pluginId && r.path === entry.installPath)) continue;
 
@@ -965,6 +1002,8 @@ export async function listClaudePluginRoots(
 							continue;
 						}
 						if (entry.enabled === false) continue;
+						if (rejectEscapedRegistryInstallPath(authoritativeRoot, pluginId, entry.installPath, warnings))
+							continue;
 						projectRoots.push({
 							id: pluginId,
 							marketplace,
@@ -1020,7 +1059,7 @@ export function clearClaudePluginRootsCache(): void {
  * installing/uninstalling/enabling/disabling plugins.
  */
 export function clearPluginRootsAndCaches(extraPaths?: readonly string[]): void {
-	invalidateFsCache(path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json"));
+	invalidateFsCache(path.join(getConfigHomeDir(), ".claude", "plugins", "installed_plugins.json"));
 	invalidateFsCache(path.join(getPluginsDir(), "installed_plugins.json"));
 	for (const p of extraPaths ?? []) invalidateFsCache(p);
 	clearClaudePluginRootsCache();
@@ -1040,8 +1079,8 @@ let lastPreloadHome: string | undefined;
  * but before any LSP config is read.
  */
 export async function preloadPluginRoots(home: string, cwd?: string): Promise<void> {
-	lastPreloadHome = home;
-	const { roots } = await listClaudePluginRoots(home, cwd);
+	lastPreloadHome = getConfigHomeDir(home);
+	const { roots } = await listClaudePluginRoots(lastPreloadHome, cwd);
 	preloadedPluginRoots = roots;
 }
 
@@ -1082,11 +1121,11 @@ export async function injectPluginDirRoots(home: string, dirs: string[], cwd?: s
 
 	// Set injected roots BEFORE populating cache so listClaudePluginRoots merges them.
 	injectedPluginDirRoots = injected;
-	lastPreloadHome = home; // ensure cache-clear re-warm fires even when injectPluginDirRoots was the startup path
+	lastPreloadHome = getConfigHomeDir(home); // ensure cache-clear re-warm fires even when injectPluginDirRoots was the startup path
 	// Clear any stale cache entries (populated before injected roots were set).
 	pluginRootsCache.clear();
 	// Rebuild — cache miss triggers fresh load that includes both user+project registries
 	// and prepends injectedPluginDirRoots at highest precedence.
-	const { roots } = await listClaudePluginRoots(home, cwd);
+	const { roots } = await listClaudePluginRoots(lastPreloadHome, cwd);
 	preloadedPluginRoots = roots;
 }

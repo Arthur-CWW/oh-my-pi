@@ -1,6 +1,5 @@
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import { getProjectDir } from "@oh-my-pi/pi-utils";
+import { getConfigHomeDir, getProjectDir } from "@oh-my-pi/pi-utils";
 import {
 	isValidManagedSkillName,
 	MANAGED_SKILLS_PROVIDER_ID,
@@ -86,7 +85,7 @@ export async function loadSkillsFromDir(options: LoadSkillsFromDirOptions): Prom
 	const providerId = rawProviderId || "custom";
 	const level: "user" | "project" = rawLevel === "project" ? "project" : "user";
 	const result = await scanSkillsFromDir(
-		{ cwd: getProjectDir(), home: os.homedir(), repoRoot: null },
+		{ cwd: getProjectDir(), home: getConfigHomeDir(), repoRoot: null },
 		{
 			dir: options.dir,
 			providerId,
@@ -243,9 +242,9 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 
 	const customDirectoryResults = await Promise.all(
 		customDirectories.map(async dir => {
-			const expandedDir = expandTilde(dir);
+			const expandedDir = expandTilde(dir, getConfigHomeDir());
 			const scanResult = await scanSkillsFromDir(
-				{ cwd, home: os.homedir(), repoRoot: null },
+				{ cwd, home: getConfigHomeDir(), repoRoot: null },
 				{
 					dir: expandedDir,
 					providerId: "custom",

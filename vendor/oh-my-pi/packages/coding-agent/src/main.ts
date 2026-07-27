@@ -6,13 +6,13 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import * as fsSync from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { EventLoopKeepalive } from "@oh-my-pi/pi-agent-core";
 import type { MediaContent } from "@oh-my-pi/pi-ai";
 import {
 	$env,
+	getConfigHomeDir,
 	getLogPath,
 	getProjectDir,
 	isCompiledBinary,
@@ -72,6 +72,7 @@ import { CURRENT_SETUP_VERSION } from "./modes/setup-version";
 import { initTheme, stopThemeWatcher } from "./modes/theme/theme";
 import type { SubmittedUserInput } from "./modes/types";
 import { focusLiveCmuxOwner } from "./modes/utils/cmux-owner-navigation";
+import { AgentLifecycleManager } from "./registry/agent-lifecycle";
 import {
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,
@@ -80,7 +81,6 @@ import {
 	discoverAuthStorage,
 	loadSessionExtensions,
 } from "./sdk";
-import { AgentLifecycleManager } from "./registry/agent-lifecycle";
 import type { AgentSession } from "./session/agent-session";
 import type { AuthStorage } from "./session/auth-storage";
 import { resolveNewestInstalledRelease } from "./session/release-registry-validation";
@@ -104,12 +104,8 @@ import {
 } from "./session/session-ownership";
 import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
+import { reattachDetachedChildTask, respawnReAdoptedChildTask, resumeWaitingProviderChildTask } from "./task";
 import { createReAdoptedSessionReviver } from "./task/executor";
-import {
-	reattachDetachedChildTask,
-	respawnReAdoptedChildTask,
-	resumeWaitingProviderChildTask,
-} from "./task";
 import { reAdoptDirectChildren } from "./task/re-adopt";
 import { configureSpawnPolicyRouting } from "./task/spawn-route";
 import { initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
@@ -1029,7 +1025,8 @@ export async function runRootCommand(
 	const parsedArgs = parsed;
 	if (parsedArgs.localAttach !== undefined) {
 		if (parsedArgs.headlessOwner) throw new Error("--local-attach cannot be combined with --headless-owner");
-		if (!path.isAbsolute(parsedArgs.localAttach)) throw new Error("--local-attach requires an absolute Unix socket path");
+		if (!path.isAbsolute(parsedArgs.localAttach))
+			throw new Error("--local-attach requires an absolute Unix socket path");
 		stopStartupWatchdog();
 		await runAttachedTerminalMode(parsedArgs.localAttach);
 		stopThemeWatcher();
@@ -1101,7 +1098,7 @@ export async function runRootCommand(
 
 	// Kick off plugin-root preload in parallel with the remaining startup work.
 	// Awaited later (before extension/skill discovery in createAgentSession needs it).
-	const home = os.homedir();
+	const home = getConfigHomeDir();
 	const pluginPreloadPromise =
 		parsedArgs.pluginDirs && parsedArgs.pluginDirs.length > 0
 			? logger.time("injectPluginDirRoots", injectPluginDirRoots, home, parsedArgs.pluginDirs, getProjectDir())
@@ -1528,30 +1525,33 @@ export async function runRootCommand(
 		});
 
 		let interactiveRunner: Awaited<ReturnType<typeof createSessionRunner>>["runner"] | undefined;
-		const sessionResult = isInteractive || isHeadlessOwner
-			? await (async () => {
-					if (!sessionManager || !ownership || !runnerIdentity) {
-						throw new Error("A terminal session owner requires a persistent session; --no-session is not supported");
-					}
-					const result = await logger.time("createSessionRunner", createSessionRunner, {
+		const sessionResult =
+			isInteractive || isHeadlessOwner
+				? await (async () => {
+						if (!sessionManager || !ownership || !runnerIdentity) {
+							throw new Error(
+								"A terminal session owner requires a persistent session; --no-session is not supported",
+							);
+						}
+						const result = await logger.time("createSessionRunner", createSessionRunner, {
+							...sessionOptions,
+							eventBus,
+							preloadedExtensions: extensionsResult,
+							sessionManager,
+							ownership,
+							runnerIdentity,
+							mailboxCapacity: DISPOSABLE_TUI_MAILBOX_CAPACITY,
+							eventCapacity: DISPOSABLE_TUI_EVENT_CAPACITY,
+							childStopPolicy: "detach",
+						});
+						interactiveRunner = result.runner;
+						return result;
+					})()
+				: await createSession({
 						...sessionOptions,
 						eventBus,
 						preloadedExtensions: extensionsResult,
-						sessionManager,
-						ownership,
-						runnerIdentity,
-						mailboxCapacity: DISPOSABLE_TUI_MAILBOX_CAPACITY,
-						eventCapacity: DISPOSABLE_TUI_EVENT_CAPACITY,
-						childStopPolicy: "detach",
 					});
-					interactiveRunner = result.runner;
-					return result;
-				})()
-			: await createSession({
-					...sessionOptions,
-					eventBus,
-					preloadedExtensions: extensionsResult,
-				});
 		const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager } = sessionResult;
 		await applyStartupWorkstream(session.sessionManager, startupWorkstream, !isResumingLaunch);
 
@@ -1618,7 +1618,8 @@ export async function runRootCommand(
 				if (child.lifecycleState !== "waiting-provider" || !child.providerRecovery) continue;
 				const childSession = await AgentLifecycleManager.global().ensureLive(child.id);
 				const manager = session.asyncJobManager;
-				if (!manager) throw new Error(`Async job manager unavailable while restoring provider wait for ${child.id}`);
+				if (!manager)
+					throw new Error(`Async job manager unavailable while restoring provider wait for ${child.id}`);
 				resumeWaitingProviderChildTask({
 					manager,
 					child,

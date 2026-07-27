@@ -85,6 +85,8 @@
 - Eval `agent()`/`agentType` defaults, gallery fixtures, and the task tool prompt now use named responsibility templates; catch-all `task` is documented as a deprecated migration alias.
 - `Enter` on an empty prompt during streaming now aborts and delivers the next queued durable follow-up exactly once (removing it from the queue); with an empty queue it remains abort-only.
 ### Fixed
+- Config, command, skill, task-agent, and plugin discovery now resolve user paths through the canonical process config home, so `OMP_CONFIG_ROOT` cannot be bypassed by inherited HOME/XDG values or alternate-home helper arguments.
+- Plugin registry entries outside an active authoritative config root are now ignored, including lexical traversal and existing symlink escapes; explicit `--plugin-dir` roots remain intentional.
 - Lease-revoked session writers now become terminal before mutating memory or disk, cancel stale AgentSession callbacks, suppress recursive ErrorInbox writes, and retarget idempotent child-completion receipts to the live parent owner.
 - `read history://...` now separates line/raw selectors from local and fleet history targets before routing, including UUID sessions, session/agent paths, query projections, and colon-bearing agent IDs.
 - Task responsibility discovery now snapshots one executable roster per tool generation, omits settings-disabled roles from every prompt surface, and resolves execution against the same snapshot while later settings/model changes apply to subsequent generations and spawns.

@@ -5,18 +5,14 @@ import * as path from "node:path";
 import * as url from "node:url";
 import {
 	__resetProfileSnapshotForTests,
-	CONFIG_ROOT_ENV,
 	getActiveProfile,
 	getAgentDbPath,
 	getAgentDir,
 	getConfigAgentDirName,
-	getConfigDirName,
 	getConfigRootDir,
-	getProfileRootDir,
 	getPythonGatewayDir,
 	getSessionsDir,
 	getStatsDbPath,
-	InvalidConfigRootError,
 	normalizeProfileName,
 	resolveProfileEnv,
 	setAgentDir,
@@ -277,50 +273,6 @@ describe("profile env + name validation", () => {
 		expect(() => normalizeProfileName("Work")).toThrow("Invalid OMP profile");
 		expect(normalizeProfileName("work")).toBe("work");
 		expect(normalizeProfileName("work-2.0_a")).toBe("work-2.0_a");
-	});
-});
-
-describe("config root environment override", () => {
-	it("redirects profile-owned state at call time without changing HOME", () => {
-		const originalOverride = process.env[CONFIG_ROOT_ENV];
-		const originalHome = process.env.HOME;
-		try {
-			delete process.env[CONFIG_ROOT_ENV];
-			expect(getProfileRootDir(undefined)).toBe(path.join(os.homedir(), getConfigDirName()));
-
-			const firstRoot = path.join(os.tmpdir(), `omp-config-root-${Snowflake.next()}`);
-			process.env[CONFIG_ROOT_ENV] = firstRoot;
-			const profileRoot = getProfileRootDir("work");
-			expect(profileRoot).toBe(path.join(firstRoot, "profiles", "work"));
-			expect(path.join(profileRoot, "browser-sessions")).toBe(
-				path.join(firstRoot, "profiles", "work", "browser-sessions"),
-			);
-			expect(path.join(profileRoot, "eval-kernels")).toBe(path.join(firstRoot, "profiles", "work", "eval-kernels"));
-
-			const secondRoot = path.join(os.tmpdir(), `omp-config-root-${Snowflake.next()}`);
-			process.env[CONFIG_ROOT_ENV] = secondRoot;
-			expect(getProfileRootDir("work")).toBe(path.join(secondRoot, "profiles", "work"));
-
-			process.env[CONFIG_ROOT_ENV] = "relative/config-root";
-			let thrown: unknown;
-			try {
-				getProfileRootDir(undefined);
-			} catch (error) {
-				thrown = error;
-			}
-			expect(thrown).toBeInstanceOf(InvalidConfigRootError);
-			expect(thrown).toMatchObject({
-				code: "INVALID_CONFIG_ROOT",
-				root: "relative/config-root",
-			});
-			expect(process.env.HOME).toBe(originalHome);
-		} finally {
-			if (originalOverride === undefined) {
-				delete process.env[CONFIG_ROOT_ENV];
-			} else {
-				process.env[CONFIG_ROOT_ENV] = originalOverride;
-			}
-		}
 	});
 });
 

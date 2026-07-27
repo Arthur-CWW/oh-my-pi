@@ -13,9 +13,8 @@
  * Agent files use markdown with YAML frontmatter.
  */
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { getConfigHomeDir, logger } from "@oh-my-pi/pi-utils";
 import { isProviderEnabled } from "../capability";
 import { findAllNearestProjectConfigDirs, getConfigDirs } from "../config";
 import { listClaudePluginRoots } from "../discovery/helpers";
@@ -84,7 +83,6 @@ export function createTaskCapabilitySnapshot(
 	});
 }
 
-
 /** Stable data projection consumed by agent pickers and preview surfaces. */
 export interface AgentPickerEntry {
 	name: string;
@@ -132,7 +130,7 @@ async function loadAgentsFromDir(dir: string, source: AgentSource): Promise<Agen
  * Precedence (highest wins): project .omp, user .omp, Claude plugin agents, then bundled
  * @param cwd - Current working directory for project agent discovery
  */
-export async function discoverAgents(cwd: string, home: string = os.homedir()): Promise<DiscoveryResult> {
+export async function discoverAgents(cwd: string, home: string = getConfigHomeDir()): Promise<DiscoveryResult> {
 	const resolvedCwd = path.resolve(cwd);
 
 	const userDirs = getConfigDirs("agents", { project: false })
@@ -194,4 +192,3 @@ export async function discoverAgents(cwd: string, home: string = os.homedir()): 
 export function getAgent(agents: readonly AgentDefinition[], name: string): AgentDefinition | undefined {
 	return agents.find(a => a.name === name);
 }
-

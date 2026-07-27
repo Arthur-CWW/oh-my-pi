@@ -1,15 +1,12 @@
 /**
  * Centralized path helpers for omp config directories.
  *
- * Uses OMP_CONFIG_ROOT for an explicit absolute config root, otherwise
- * PI_CONFIG_DIR (default ".omp") under the user's home directory.
- * PI_CODING_AGENT_DIR overrides the default profile's agent directory.
- *
- * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME environment
- * variables are set, paths are redirected to XDG-compliant locations under
- * $XDG_*_HOME/omp/. This requires running `omp config migrate` first to
- * move data to the new locations. No filesystem existence checks are performed
- * — if the env var is set, omp trusts that the migration has been done.
+ * OMP_CONFIG_ROOT is an authoritative absolute root decoded at process start.
+ * When it is unset, PI_CONFIG_DIR (default ".omp") selects a directory under
+ * the user's home, PI_CODING_AGENT_DIR can override the default-profile agent
+ * directory, and XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME can redirect
+ * data, state, and cache paths to XDG-compliant locations under
+ * $XDG_*_HOME/omp/.
  */
 
 import * as fs from "node:fs";
@@ -23,10 +20,10 @@ export const APP_NAME: string = "omp";
 /** Config directory name (e.g. ".omp") */
 export const CONFIG_DIR_NAME: string = ".omp";
 
-/** Absolute config-root override, evaluated at call time. */
+/** Absolute config-root override, decoded once when this module is loaded. */
 export const CONFIG_ROOT_ENV = "OMP_CONFIG_ROOT";
 
-/** Raised when {@link CONFIG_ROOT_ENV} contains a relative filesystem path. */
+/** Raised when {@link CONFIG_ROOT_ENV} is empty or contains a relative filesystem path. */
 export class InvalidConfigRootError extends Error {
 	readonly code = "INVALID_CONFIG_ROOT";
 
@@ -34,6 +31,30 @@ export class InvalidConfigRootError extends Error {
 		super(`${CONFIG_ROOT_ENV} must be an absolute path, received ${JSON.stringify(root)}`);
 		this.name = "InvalidConfigRootError";
 	}
+}
+
+function decodeConfigRoot(value: string | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	if (value.length === 0 || !path.isAbsolute(value)) throw new InvalidConfigRootError(value);
+	return path.normalize(value);
+}
+
+const CONFIG_ROOT_OVERRIDE = decodeConfigRoot(process.env[CONFIG_ROOT_ENV]);
+
+/**
+ * Return the absolute config root captured at process start, when present.
+ * Unlike process.env, this value cannot be changed by dotenv loading or callers.
+ */
+export function getAuthoritativeConfigRoot(): string | undefined {
+	return CONFIG_ROOT_OVERRIDE;
+}
+
+function restoreConfigRootEnv(): void {
+	if (CONFIG_ROOT_OVERRIDE === undefined) {
+		delete process.env[CONFIG_ROOT_ENV];
+		return;
+	}
+	process.env[CONFIG_ROOT_ENV] = CONFIG_ROOT_OVERRIDE;
 }
 
 /** Version (e.g. "1.0.0" or "1.0.0+fork.abcdef1" for local fork binaries) */
@@ -115,13 +136,19 @@ function readProfileFromEnvSafe(): string | undefined {
 	}
 }
 
+/**
+ * Resolve the home used for global omp configuration discovery.
+ *
+ * The optional value preserves explicit alternate-home seams when the process
+ * has no config-root override. With an override, it is ignored so discovery
+ * cannot escape the process-start root.
+ */
+export function getConfigHomeDir(home: string = os.homedir()): string {
+	return CONFIG_ROOT_OVERRIDE ?? home;
+}
+
 function getBaseConfigRoot(): string {
-	const override = process.env[CONFIG_ROOT_ENV];
-	if (override) {
-		if (!path.isAbsolute(override)) throw new InvalidConfigRootError(override);
-		return path.normalize(override);
-	}
-	return path.join(os.homedir(), getConfigDirName());
+	return CONFIG_ROOT_OVERRIDE ?? path.join(getConfigHomeDir(), getConfigDirName());
 }
 
 function getProfileConfigRoot(profile: string | undefined): string {
@@ -245,7 +272,7 @@ class DirResolver {
 		this.configRoot = getProfileConfigRoot(profile);
 
 		const defaultAgent = path.join(this.configRoot, "agent");
-		const agentDirOverride = profile ? undefined : options.agentDirOverride;
+		const agentDirOverride = CONFIG_ROOT_OVERRIDE === undefined && !profile ? options.agentDirOverride : undefined;
 		this.agentDir = agentDirOverride ? path.resolve(agentDirOverride) : defaultAgent;
 		const isDefault = this.agentDir === defaultAgent;
 
@@ -264,7 +291,11 @@ class DirResolver {
 		let xdgData: string | undefined;
 		let xdgState: string | undefined;
 		let xdgCache: string | undefined;
-		if ((process.platform === "linux" || process.platform === "darwin") && isDefault) {
+		if (
+			CONFIG_ROOT_OVERRIDE === undefined &&
+			(process.platform === "linux" || process.platform === "darwin") &&
+			isDefault
+		) {
 			const resolveIf = (envVar: string) => {
 				const value = process.env[envVar];
 				if (!value) return undefined;
@@ -313,7 +344,7 @@ class DirResolver {
 
 	/** Agent subdirectory, with optional XDG override. */
 	agentSubdir(userAgentDir: string | undefined, subdir: string, xdg?: XdgCategory): string {
-		if (!userAgentDir || userAgentDir === this.agentDir) {
+		if (CONFIG_ROOT_OVERRIDE !== undefined || !userAgentDir || userAgentDir === this.agentDir) {
 			const cached = this.#agentCache.get(subdir);
 			if (cached) return cached;
 			const base = xdg ? this.#agentDirs[xdg] : this.agentDir;
@@ -340,6 +371,7 @@ function resolvePreProfileAgentDir(
 	agentDirEnv: string | undefined,
 	profileAgentDirSource: string | undefined = profile,
 ): string | undefined {
+	if (CONFIG_ROOT_OVERRIDE !== undefined) return undefined;
 	return isProfileDerivedAgentDir(profile ?? profileAgentDirSource, agentDirEnv) ? undefined : agentDirEnv;
 }
 
@@ -353,6 +385,7 @@ let activeProfile = readProfileFromEnvSafe();
  * {@link refreshDirsFromEnv} so both apply identical logic.
  */
 function resolveActiveAgentDirOverride(): string | undefined {
+	if (CONFIG_ROOT_OVERRIDE !== undefined) return undefined;
 	return activeProfile
 		? undefined
 		: resolvePreProfileAgentDir(undefined, process.env.PI_CODING_AGENT_DIR, readPiProfileFromEnvSafe());
@@ -378,11 +411,9 @@ let preProfileAgentDirEnv: string | undefined = resolvePreProfileAgentDir(
 	process.env.PI_CODING_AGENT_DIR,
 	activeProfile ?? readPiProfileFromEnvSafe(),
 );
-// Anchor home for the resolver. Captured at module load to stay stable across
-// test mocks of `os.homedir()`. `getPluginsDir(home)` compares against this so
-// production callers (`home === RESOLVER_HOME`) hit the XDG-aware resolver while
-// tests passing a temp HOME short-circuit to a deterministic path.
-const RESOLVER_HOME = os.homedir();
+// Anchor home for optional helper parameters. With an authoritative config root,
+// callers cannot redirect global paths by supplying a different home.
+const RESOLVER_HOME = getConfigHomeDir();
 
 /**
  * Rebuild the dirs resolver from the current environment, reusing the profile
@@ -391,10 +422,16 @@ const RESOLVER_HOME = os.homedir();
  * `process.env` *after* this module froze the resolver at import time, so
  * `env.ts` calls this once after applying its `.env` files. The agent `.env`
  * location derives from the profile name + home before this runs, so the
- * rebuild re-reads only the directory vars, never the profile selection. The
- * `preProfileAgentDirEnv` snapshot is intentionally left untouched.
+ * rebuild re-reads only the directory vars, never the profile selection.
+ *
+ * OMP_CONFIG_ROOT is restored to its process-start decoded value before the
+ * rebuild. This removes a late dotenv value when startup left it unset and
+ * prevents later mutation when startup set it, so spawned children inherit the
+ * same authority as their parent. The `preProfileAgentDirEnv` snapshot is
+ * intentionally left untouched.
  */
 export function refreshDirsFromEnv(): void {
+	restoreConfigRootEnv();
 	dirs = new DirResolver({
 		agentDirOverride: resolveActiveAgentDirOverride(),
 		profile: activeProfile,
@@ -410,12 +447,12 @@ export function getConfigRootDir(): string {
 	return dirs.configRoot;
 }
 
-/** Set the coding agent directory. Creates a fresh resolver, invalidating all cached paths. */
+/** Set the coding agent directory. An authoritative config root clamps it under that root. */
 export function setAgentDir(dir: string): void {
 	activeProfile = undefined;
 	dirs = new DirResolver({ agentDirOverride: dir });
-	process.env.PI_CODING_AGENT_DIR = dir;
-	preProfileAgentDirEnv = dir;
+	process.env.PI_CODING_AGENT_DIR = dirs.agentDir;
+	preProfileAgentDirEnv = CONFIG_ROOT_OVERRIDE === undefined ? dir : undefined;
 	for (const key of PROFILE_ENV_KEYS) {
 		delete process.env[key];
 	}
@@ -476,7 +513,7 @@ export function getActiveProfile(): string | undefined {
 	return activeProfile;
 }
 
-/** Resolve the config root that backs a profile, honoring `OMP_CONFIG_ROOT` at call time. */
+/** Resolve the config root that backs a profile using the process-start root. */
 export function getProfileRootDir(profile: string | undefined): string {
 	return getProfileConfigRoot(normalizeProfileName(profile));
 }
@@ -512,15 +549,14 @@ export function getLogPath(date = new Date()): string {
 /**
  * Get the plugins directory (~/.omp/plugins or its XDG equivalent).
  *
- * No-arg form (production callers) goes through the XDG-aware DirResolver so
- * reads and writes always agree. The optional `home` parameter is for test
- * isolation: when it differs from `os.homedir()` it short-circuits the resolver
- * and returns `<home>/<configDir>/plugins` so tests with a temp HOME get a
- * deterministic path. Passing `os.homedir()` explicitly is identical to the
- * no-arg form — XDG semantics are preserved.
+ * No-arg form (production callers) goes through the XDG-aware DirResolver.
+ * Without an authoritative config root, the optional `home` parameter supports
+ * callers that deliberately resolve a different user's configuration. When
+ * {@link CONFIG_ROOT_ENV} was set at process start, the argument is ignored so
+ * every global path remains contained by that root.
  */
 export function getPluginsDir(home?: string): string {
-	if (home !== undefined && home !== RESOLVER_HOME) {
+	if (CONFIG_ROOT_OVERRIDE === undefined && home !== undefined && home !== RESOLVER_HOME) {
 		return path.join(home, getConfigDirName(), "plugins");
 	}
 	return dirs.rootSubdir("plugins", "data");
@@ -610,23 +646,25 @@ export function getGpuCachePath(): string {
 
 /**
  * Get the GitHub view cache database path (~/.omp/cache/github-cache.db).
- * Honors the `OMP_GITHUB_CACHE_DB` env var when set so tests can isolate the
- * cache file without touching the rest of the config root.
+ * The dedicated override is honored only without an authoritative config root.
  */
 export function getGithubCacheDbPath(): string {
-	const override = process.env.OMP_GITHUB_CACHE_DB;
-	if (override) return override;
+	if (CONFIG_ROOT_OVERRIDE === undefined) {
+		const override = process.env.OMP_GITHUB_CACHE_DB;
+		if (override) return override;
+	}
 	return dirs.rootSubdir(path.join("cache", "github-cache.db"), "cache");
 }
 
 /**
  * Get the encrypted auth-broker snapshot cache path (~/.omp/cache/auth-broker-snapshot.enc).
- * Honors the `OMP_AUTH_BROKER_SNAPSHOT_CACHE` env var when set so tests and
- * operators can isolate or relocate the cache file.
+ * The dedicated override is honored only without an authoritative config root.
  */
 export function getAuthBrokerSnapshotCachePath(): string {
-	const override = process.env.OMP_AUTH_BROKER_SNAPSHOT_CACHE;
-	if (override) return override;
+	if (CONFIG_ROOT_OVERRIDE === undefined) {
+		const override = process.env.OMP_AUTH_BROKER_SNAPSHOT_CACHE;
+		if (override) return override;
+	}
 	return dirs.rootSubdir(path.join("cache", "auth-broker-snapshot.enc"), "cache");
 }
 

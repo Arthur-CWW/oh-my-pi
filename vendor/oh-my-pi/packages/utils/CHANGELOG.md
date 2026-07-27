@@ -4,7 +4,11 @@
 
 ### Added
 
-- Added the call-time `OMP_CONFIG_ROOT` override for profile-owned state roots, with typed rejection of relative paths, so in-process tests can isolate browser and eval ownership state without changing `HOME`.
+- Added a process-start `OMP_CONFIG_ROOT` override that rejects present empty or relative values and makes the absolute root authoritative over HOME, XDG, agent-dir, cache, profile, and optional-home path inputs.
+
+### Fixed
+
+- Restored `OMP_CONFIG_ROOT` to its decoded process-start value after dotenv directory refresh so spawned children cannot switch to a late or mutated root.
 
 ## [15.13.3] - 2026-06-15
 
