@@ -32,7 +32,7 @@ import {
 } from "../../irc/bus-external";
 import { watchSiblingTranscript } from "../../irc/sibling-session";
 import type { JournalTailChunk } from "../../journal/projection";
-import { decodeJournalEntries, JOURNAL_TAIL_BYTES } from "../../journal/projection";
+import { decodeJournalEntries } from "../../journal/projection";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
 import {
 	type AgentRef,
@@ -99,7 +99,6 @@ import {
 } from "./agent-hub-selected-state";
 import {
 	agentHistoryRank,
-	boundedStreamingAssistant,
 	cycleVisibleAgentSibling,
 	DurableJournalModelCache,
 	durableModelSelector,
@@ -127,6 +126,7 @@ import { formatContextUsage } from "./status-line/context-thresholds";
 import { calculateTokensPerSecond } from "./status-line/token-rate";
 import { ToolExecutionComponent } from "./tool-execution";
 import { TranscriptBlock, TranscriptContainer } from "./transcript-container";
+import { TranscriptViewportModel } from "./transcript-viewport";
 import { createUsageRowBlock } from "./usage-row";
 import { TablePreviewComponent, type TablePreviewSession } from "./table-preview";
 import { routeResolutionEvents, type RouteResolutionSource } from "../../task/route-events";
@@ -145,8 +145,6 @@ const CHAT_REFRESH_DEBOUNCE_MS = 80;
 const PROJECTION_WINDOW_MS = 16;
 const LEFT_TAP_WINDOW_MS = 500;
 const RECENT_COMPLETED_LIMIT = 20;
-const PREVIEW_TAIL_BYTES = JOURNAL_TAIL_BYTES;
-const PREVIEW_MAX_ENTRIES = 200;
 const DUAL_LANE_MIN_WIDTH = 160;
 const STACKED_LANE_MIN_HEIGHT = 6;
 const ROSTER_STRIP_HEIGHT = 9;
@@ -348,7 +346,11 @@ export interface AgentHubRemote {
 	readTranscript(id: string, fromByte: number): Promise<{ text: string; newSize: number } | null>;
 }
 
-export interface AgentHubDeps { interruptKeys?: KeyId[]; unfocusSession?: () => Promise<void>; initialSelection?: { kind: "agent" | "external"; id: string; viewportOffset: number }; observers: SessionObserverRegistry;
+export interface AgentHubDeps {
+	interruptKeys?: KeyId[];
+	unfocusSession?: () => Promise<void>;
+	initialSelection?: { kind: "agent" | "external"; id: string; viewportOffset: number };
+	observers: SessionObserverRegistry;
 	hubKeys: KeyId[];
 	onDone: () => void;
 	requestRender: () => void;
@@ -389,7 +391,10 @@ export interface AgentHubDeps { interruptKeys?: KeyId[]; unfocusSession?: () => 
 	/** Open the durable errors dock, optionally scoped by the selected agent. */
 	openErrors?: (agentId?: string) => void;
 	/** Open the global bookmarks surface. */
-	openBookmarks?: () => void; }
+	openBookmarks?: () => void;
+	/** Injectable real-reader cache for deterministic journal race coverage. */
+	journalTails?: AgentHubJournalTailCache;
+}
 
 export interface AgentHubRetentionMetrics {
 	activeIdentities: number;
@@ -401,8 +406,16 @@ export interface AgentHubRetentionMetrics {
 	externalOrderEntries: number;
 	cachedTranscriptEntries: number;
 	materializedChatComponents: number;
+	materializedTranscriptRows: number;
+	retainedJournalTextBytes: number;
 	previewFinalizedPrefixScans: number;
 	liveTimers: number;
+}
+
+interface TranscriptLoadRequest {
+	readonly generation: number;
+	readonly path: string;
+	readonly fromByte: number;
 }
 
 export type AgentHubInspectorSection = "prompt" | "route" | "comms";
@@ -470,7 +483,8 @@ function boundedRouteInspectionLines(input: RouteInspectionInput, resolvedModel?
 	return lines.slice(0, ROUTE_INSPECTOR_PANE_LINES);
 }
 
-export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[] = [];
+export class AgentHubOverlayComponent extends Container {
+	#interruptKeys: KeyId[] = [];
 	#unfocusSession: (() => Promise<void>) | undefined;
 	#registry: AgentRegistry;
 	#observers: SessionObserverRegistry;
@@ -550,7 +564,9 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	#archiveSourceSessionFile: string | null | undefined = null;
 	#sessionsDir: string | undefined;
 	#journalModels = new DurableJournalModelCache();
-	#journalTails = new AgentHubJournalTailCache();
+	#journalTails: AgentHubJournalTailCache;
+	#transcriptLoadGeneration = 0;
+	#transcriptLoadInFlight: TranscriptLoadRequest | undefined;
 
 	#foldedAgentIds = new Set<string>();
 	#treeDepthById = new Map<string, number>();
@@ -611,10 +627,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	#chatSearchMatchIndex = -1;
 	#chatRenderedContent: readonly string[] = [];
 
-	#scrollOffset = 0;
-	#lastMaxScroll = 0;
-	#viewportHeight = 20;
-	#wasAtBottom = true;
+	#transcriptViewport = new TranscriptViewportModel<string>();
 	#inspectorSection: AgentHubInspectorSection = "prompt";
 	#previewLaneFocus: "transcript" | "inspector" = "transcript";
 	#inspectorScrollOffset = 0;
@@ -665,6 +678,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#copyIdentity = deps.copyIdentity ?? copyToClipboard;
 		this.#sessionId = deps.sessionId ?? this.#registry.get(MAIN_AGENT_ID)?.session?.sessionManager.getSessionId();
 		this.#sessionsDir = deps.sessionsDir;
+		this.#journalTails = deps.journalTails ?? new AgentHubJournalTailCache();
 
 		this.#unsubscribers.push(
 			this.#registry.onChange(event => {
@@ -750,6 +764,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			externalOrderEntries: this.#externalOrder.size,
 			cachedTranscriptEntries: this.#transcriptCache?.entries.length ?? 0,
 			materializedChatComponents: this.#chatLog.children.length,
+			materializedTranscriptRows: this.#transcriptViewport.visibleRowCount,
+			retainedJournalTextBytes: this.#journalTails.retainedTextBytes,
 			previewFinalizedPrefixScans: this.#chatLog.getRetentionMetrics().finalizedPrefixScans,
 			liveTimers:
 				Number(this.#ageTimer !== undefined) +
@@ -776,18 +792,14 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#flushProjection();
 		const row = this.#selectedAgentRow();
 		const selectedAgentId =
-			this.#view === "chat"
-				? this.#chatAgentId
-				: row?.kind === "active"
-					? row.ref.id
-					: row?.descriptor.agentId;
+			this.#view === "chat" ? this.#chatAgentId : row?.kind === "active" ? row.ref.id : row?.descriptor.agentId;
 		return {
 			view: this.#view,
 			panelFocus: this.#panelFocus(),
 			inspectorSection: this.#inspectorSection,
 			...(selectedAgentId ? { selectedAgentId } : {}),
 			tableIndex: this.#tablePreview.selectedIndex,
-			transcriptOffset: this.#scrollOffset,
+			transcriptOffset: this.#transcriptViewport.offset,
 			inspectorOffset: this.#inspectorScrollOffset,
 			archivedChat: this.#chatArchived !== undefined,
 		};
@@ -830,6 +842,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	/** Tear down every subscription and timer. Called by the overlay owner on close. */
 	dispose(): void {
 		if (this.#disposed) return;
+		this.#releaseSelectedTranscriptRead();
 		this.#disposed = true;
 		void Effect.runPromise(Scope.close(this.#tableScope, Exit.void));
 		for (const unsubscribe of this.#unsubscribers.splice(0)) unsubscribe();
@@ -885,7 +898,10 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#chatExternal = undefined;
 	}
 
-	/** Return the stable identity represented by the current Hub row. */ getSelectedBookmarkTarget(): BookmarkTarget | undefined { this.#flushProjection();
+	/** Return the stable identity represented by the current Hub row. */ getSelectedBookmarkTarget():
+		| BookmarkTarget
+		| undefined {
+		this.#flushProjection();
 		const row = this.#selectedAgentRow();
 		if (row?.kind === "active") {
 			const sessionId = row.ref.sessionId ?? this.#sessionId;
@@ -916,7 +932,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		}
 		const external = this.#selectedExternalRow()?.peer;
 		if (!external) return undefined;
-		return { kind: "session", sessionId: external.sessionId, title: external.name || external.sessionId }; }
+		return { kind: "session", sessionId: external.sessionId, title: external.name || external.sessionId };
+	}
 
 	/** Return the stable row identity and viewport offset for the current selection. */
 	getSelectedSelection(): { kind: "agent" | "external"; id: string; viewportOffset: number } | undefined {
@@ -967,7 +984,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			if (this.#view === "chat" || this.#cockpitPreview) this.#rebuildChatContent();
 		}
 		return this.#view === "table" ? this.#renderTable(width) : this.#renderChat(width);
-	} handleInput(keyData: string): void {
+	}
+	handleInput(keyData: string): void {
 		if (matchesKey(keyData, "ctrl+c") || keyData === "q") {
 			this.#onDone();
 			return;
@@ -996,6 +1014,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	/** Open the chat view for an agent id (public for table Enter and tests). */
 	openChat(id: string): void {
 		if (!this.#registry.get(id)) return;
+		this.#releaseSelectedTranscriptRead();
 		this.#view = "chat";
 		this.#foldSequence.reset();
 		this.#chatArchived = undefined;
@@ -1007,8 +1026,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#remoteFetchInFlight = false;
 		this.#remoteFetchToken++;
 		this.#resetChatLog();
-		this.#scrollOffset = 0;
-		this.#wasAtBottom = true;
+		this.#transcriptViewport.reset();
 		this.#lastLeftTap = 0;
 		this.#attachLiveSession();
 		this.#rebuildChatContent();
@@ -1017,6 +1035,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 
 	/** Open a persisted completed child transcript without registering or reviving it. */
 	#openArchivedChat(row: ArchivedDirectChildDescriptor): void {
+		this.#releaseSelectedTranscriptRead();
 		this.#view = "chat";
 		this.#foldSequence.reset();
 		this.#detachLiveSession();
@@ -1029,14 +1048,14 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#remoteFetchInFlight = false;
 		this.#remoteFetchToken++;
 		this.#resetChatLog();
-		this.#scrollOffset = 0;
-		this.#wasAtBottom = true;
+		this.#transcriptViewport.reset();
 		this.#lastLeftTap = 0;
 		void this.#journalModels.load(row.childSessionFile).then(() => this.#requestRender());
 		this.#rebuildChatContent();
 		this.#requestRender();
 	}
 	#openExternalChat(peer: AgentHubExternalPeer): void {
+		this.#releaseSelectedTranscriptRead();
 		this.#view = "chat";
 		this.#foldSequence.reset();
 		this.#detachLiveSession();
@@ -1047,8 +1066,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#notice = undefined;
 		this.#transcriptCache = undefined;
 		this.#resetChatLog();
-		this.#scrollOffset = 0;
-		this.#wasAtBottom = true;
+		this.#transcriptViewport.reset();
 		if (peer.sessionFile) {
 			this.#siblingWatchDispose = watchSiblingTranscript(peer.sessionFile, () => this.#scheduleChatRefresh());
 		}
@@ -1236,7 +1254,6 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		return true;
 	}
 
-
 	#tableQuery(): string {
 		return this.#tablePreview?.searchQuery ?? "";
 	}
@@ -1384,6 +1401,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 				? row.ref.id
 				: row?.descriptor.agentId;
 		const nextArchive = row?.kind === "archived" ? row.descriptor : undefined;
+		this.#releaseSelectedTranscriptRead();
 		this.#foldSequence.reset();
 		this.#detachLiveSession();
 		this.#siblingWatchDispose?.();
@@ -1393,8 +1411,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#chatAgentId = nextId;
 		this.#chatArchived = nextArchive;
 		this.#chatExternal = external;
-		this.#scrollOffset = 0;
-		this.#wasAtBottom = true;
+		this.#transcriptViewport.reset();
 		this.#inspectorScrollOffset = 0;
 		this.#previewLaneFocus = "transcript";
 		this.#chatSearchQuery = "";
@@ -1428,6 +1445,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			external?.sessionId !== this.#chatExternal?.sessionId
 		)
 			return;
+		this.#releaseSelectedTranscriptRead();
 		this.#detachLiveSession();
 		this.#siblingWatchDispose?.();
 		this.#siblingWatchDispose = undefined;
@@ -1663,17 +1681,12 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			: this.#chatLog.render(innerWidth);
 		const rendered = this.#plainPreview ? richRendered.map(line => Bun.stripANSI(line)) : richRendered;
 		const content = rendered.length > 0 ? rendered : [theme.fg("dim", "No messages yet.")];
-		this.#viewportHeight = Math.max(1, targetHeight - 2);
-		this.#lastMaxScroll = Math.max(0, content.length - this.#viewportHeight);
-		if (this.#wasAtBottom && !this.#chatSearchQuery) this.#scrollOffset = this.#lastMaxScroll;
-		this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset, this.#lastMaxScroll));
+		this.#transcriptViewport.layout(content, Math.max(1, targetHeight - 2), !this.#chatSearchQuery);
 		this.#chatRenderedContent = content;
-		const focus =
-			this.#dualLaneActive && this.#panelFocus() === "transcript" ? theme.fg("accent", "●") : "";
+		const focus = this.#dualLaneActive && this.#panelFocus() === "transcript" ? theme.fg("accent", "●") : "";
 		const rate = this.#tokenRateBadge();
 		const lines = [` ${focus}${theme.fg("accent", "Preview transcript")}${rate ? `  ${rate}` : ""}`];
-		for (const row of content.slice(this.#scrollOffset, this.#scrollOffset + this.#viewportHeight))
-			lines.push(` ${row}`);
+		for (const row of this.#transcriptViewport.visibleRows()) lines.push(` ${row}`);
 		while (lines.length < targetHeight - 1) lines.push("");
 		lines.push(...new DynamicBorder().render(width));
 		if (trackHeight) this.#previewRenderedHeight = lines.length;
@@ -1706,7 +1719,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	}
 
 	#inspectorLines(observed: ObservableSession | undefined, width: number): string[] {
-		const sessionFile = this.#chatExternal?.sessionFile ??
+		const sessionFile =
+			this.#chatExternal?.sessionFile ??
 			(this.#chatAgentId
 				? (this.#registryRefs.get(this.#chatAgentId)?.sessionFile ?? this.#chatArchived?.childSessionFile)
 				: this.#chatArchived?.childSessionFile);
@@ -1782,7 +1796,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		}
 		const progress = observed?.progress;
 		const receipt = progress?.routeReceipt ?? durableSpawn?.route;
-		const transactionId = receipt?.consulted.find(candidate => candidate.policy?.transactionId)?.policy?.transactionId;
+		const transactionId = receipt?.consulted.find(candidate => candidate.policy?.transactionId)?.policy
+			?.transactionId;
 		const routeView = this.getSelectedAgentViewModel()?.route;
 		const explanationLines = routeView
 			? [
@@ -1791,8 +1806,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 					`responsibility: ${routeView.responsibility} · receipt source: ${routeView.receiptSource ?? "unknown"}`,
 					`escalation reason: ${routeView.escalationReason ?? "none"}${transactionId ? ` · transaction=${transactionId}` : ""}`,
 					...routeView.history.map(
-						event =>
-							`${event.kind}: ${event.model}:${event.effort}${event.reason ? ` · ${event.reason}` : ""}`,
+						event => `${event.kind}: ${event.model}:${event.effort}${event.reason ? ` · ${event.reason}` : ""}`,
 					),
 				]
 			: ["ROUTE EXPLANATION", "No route provenance available."];
@@ -1816,7 +1830,9 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			},
 			(ref ? this.#resolvedModelSelector(ref, observed) : undefined) ??
 				withModelSelectorEffort(durableSpawn?.resolvedModel, { route: durableSpawn?.route?.route.thinking }) ??
-				withModelSelectorEffort(`${receipt.route.provider}/${receipt.route.model}`, { route: receipt.route.thinking })!,
+				withModelSelectorEffort(`${receipt.route.provider}/${receipt.route.model}`, {
+					route: receipt.route.thinking,
+				})!,
 		);
 		return [...explanationLines, ...provenance.slice(1)];
 	}
@@ -1853,7 +1869,6 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		if ("childSessionFile" in row) return `archived:${row.childSessionFile}`;
 		return `agent:${row.id}`;
 	}
-
 
 	#selectionKey(selection: { kind: "agent" | "external"; id: string; viewportOffset: number }): string {
 		if (selection.kind === "external") return `external:${selection.id}`;
@@ -1924,7 +1939,9 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 						archived.state,
 						withModelSelectorEffort(archived.modelId, { session: archived.thinkingLevel }),
 						archived.childSessionFile,
-					].filter(Boolean).join(" · ")
+					]
+						.filter(Boolean)
+						.join(" · ")
 				: archived.agentId;
 			return this.#copyHubPayload(payload, full ? "full row" : "row");
 		}
@@ -1932,16 +1949,14 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		if (!external) return this.#copyHubPayload(undefined, "row");
 		const peer = external.peer;
 		const name = peer.name || peer.sessionId;
-		const payload = full
-			? [name, external.state, peer.cwd, peer.sessionId].filter(Boolean).join(" · ")
-			: name;
+		const payload = full ? [name, external.state, peer.cwd, peer.sessionId].filter(Boolean).join(" · ") : name;
 		this.#copyHubPayload(payload, full ? "full row" : "row");
 	}
 
 	#copyTranscriptUnit(full: boolean): void {
 		const lines = this.#chatRenderedContent.map(line => Bun.stripANSI(line).trimEnd());
 		if (full) return this.#copyHubPayload(lines.join("\n").trim(), "transcript section");
-		let index = Math.min(this.#scrollOffset, Math.max(0, lines.length - 1));
+		let index = Math.min(this.#transcriptViewport.offset, Math.max(0, lines.length - 1));
 		while (index < lines.length && !lines[index]?.trim()) index++;
 		if (index >= lines.length) return this.#copyHubPayload(undefined, "transcript paragraph");
 		let start = index;
@@ -2073,9 +2088,19 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		return undefined;
 	}
 
+	#invalidateTranscriptRead(sessionFile?: string): void {
+		this.#transcriptLoadGeneration++;
+		this.#transcriptLoadInFlight = undefined;
+		if (sessionFile) this.#journalTails.invalidate(sessionFile);
+	}
+
+	#releaseSelectedTranscriptRead(): void {
+		this.#invalidateTranscriptRead(this.#selectedJournalPath());
+	}
+
 	#scheduleChatRefresh(invalidateJournal = true): void {
 		const sessionFile = this.#selectedJournalPath();
-		if (invalidateJournal && sessionFile) this.#journalTails.invalidate(sessionFile);
+		if (invalidateJournal && sessionFile) this.#invalidateTranscriptRead(sessionFile);
 		if (this.#chatRefreshTimer) return;
 		this.#chatRefreshTimer = setTimeout(() => {
 			this.#chatRefreshTimer = undefined;
@@ -2094,7 +2119,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	#resolvedModelSelector(ref: AgentRef, observed: ObservableSession | undefined): string | undefined {
 		const progress = observed?.progress;
 		const cachedModel = this.#transcriptCache?.path === ref.sessionFile ? this.#transcriptCache.model : undefined;
-		const cachedThinking = this.#transcriptCache?.path === ref.sessionFile ? this.#transcriptCache.thinking : undefined;
+		const cachedThinking =
+			this.#transcriptCache?.path === ref.sessionFile ? this.#transcriptCache.thinking : undefined;
 		const liveModel = ref.session?.model;
 		const liveSelector = liveModel ? `${liveModel.provider}/${liveModel.id}` : undefined;
 		const durable = this.#journalModels.peek(ref.sessionFile);
@@ -2150,8 +2176,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 
 	#emptyTableLines(): readonly string[] {
 		const query = this.#tableQuery();
-		if (!this.#showHistoricalAgents)
-			return [` ${theme.fg("dim", "No active subagents · . to show history")}`];
+		if (!this.#showHistoricalAgents) return [` ${theme.fg("dim", "No active subagents · . to show history")}`];
 		if (this.#statusCounts.parked > 0 && !query)
 			return [` ${theme.fg("dim", `Parked (${this.#statusCounts.parked}) · / to search and expand`)}`];
 		if (!query) return [` ${theme.fg("dim", "no subagents yet — task spawns appear here")}`];
@@ -2222,12 +2247,9 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#tableBodyHeight = previewHeight + this.#tableViewportCapacity();
 		this.#animatedTableRowVisible = false;
 		lines.push(...this.#tablePreview.render(width));
-		this.#syncSpinnerTimer(
-			this.#animatedTableRowVisible || this.#selectedRailIsAnimated(this.#selectedStateItems()),
-		);
+		this.#syncSpinnerTimer(this.#animatedTableRowVisible || this.#selectedRailIsAnimated(this.#selectedStateItems()));
 		if (this.#notice) lines.push(` ${theme.fg("error", sanitizeLine(this.#notice, Math.max(10, width - 2)))}`);
-		if (this.#tableSearchEditing())
-			lines.push(` ${theme.fg("accent", "/")}${query}${theme.fg("accent", "▏")}`);
+		if (this.#tableSearchEditing()) lines.push(` ${theme.fg("accent", "/")}${query}${theme.fg("accent", "▏")}`);
 		lines.push("");
 		lines.push(
 			renderAgentHubFooter({
@@ -2315,7 +2337,6 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		return truncateToWidth(` ${cursor} ${rendered}`, Math.max(10, width - 1));
 	}
 
-
 	#attachSelectedExternalOwner(): void {
 		const row = this.#selectedExternalRow();
 		if (!row) {
@@ -2401,8 +2422,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			} else if (lane === "inspector") {
 				this.#inspectorScrollOffset = 0;
 			} else {
-				this.#scrollOffset = 0;
-				this.#wasAtBottom = false;
+				this.#transcriptViewport.scrollToTop();
 			}
 			this.#requestRender();
 			return true;
@@ -2423,8 +2443,8 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 					action,
 				);
 			} else {
-				this.#scrollOffset = applyAgentHubViewerSequenceAction(this.#scrollOffset, this.#lastMaxScroll, action);
-				this.#wasAtBottom = this.#scrollOffset >= this.#lastMaxScroll;
+				const down = action.kind === "display-row-down" || action.kind === "logical-down";
+				this.#transcriptViewport.scrollBy(down ? 1 : -1);
 			}
 			this.#requestRender();
 			return true;
@@ -2450,7 +2470,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			}
 		} else if (action.kind === "refresh") {
 			const sessionFile = this.#selectedJournalPath();
-			if (sessionFile) this.#journalTails.invalidate(sessionFile);
+			if (sessionFile) this.#invalidateTranscriptRead(sessionFile);
 			this.#rebuildObserverSnapshot();
 			this.#refreshExternalRows();
 			this.#orderedRegistryGeneration = -1;
@@ -2796,7 +2816,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 
 		const headerChrome = this.#viewerHeaderLines.length + 2 + Number(selectedRail !== undefined);
 		const footerChrome = editorLines.length + footerLines.length + (noticeLine ? 1 : 0) + 1;
-		this.#viewportHeight = Math.max(5, termHeight - headerChrome - footerChrome);
+		const viewportHeight = Math.max(5, termHeight - headerChrome - footerChrome);
 
 		for (const component of this.#chatRichRenderables)
 			component.setRichRendering(this.#transcriptDisplay.richTranscript);
@@ -2812,10 +2832,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		// Cache rendered lines for transcript search
 		this.#chatRenderedContent = contentLines;
 
-		const maxScroll = Math.max(0, contentLines.length - this.#viewportHeight);
-		this.#lastMaxScroll = maxScroll;
-		if (this.#wasAtBottom && !this.#chatSearchQuery) this.#scrollOffset = maxScroll;
-		this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset, maxScroll));
+		this.#transcriptViewport.layout(contentLines, viewportHeight, !this.#chatSearchQuery);
 
 		const lines: string[] = [];
 		lines.push(...new DynamicBorder().render(width));
@@ -2830,19 +2847,16 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		if (selectedRail) lines.push(` ${selectedRail}`);
 		lines.push(...new DynamicBorder().render(width));
 
-		if (contentLines.length <= this.#viewportHeight) {
-			for (const row of contentLines) lines.push(` ${row}`);
+		if (contentLines.length <= viewportHeight) {
+			for (const row of this.#transcriptViewport.visibleRows()) lines.push(` ${row}`);
 		} else {
-			const scrollView = new ScrollView(
-				contentLines.slice(this.#scrollOffset, this.#scrollOffset + this.#viewportHeight),
-				{
-					scrollbar: "auto",
-					height: this.#viewportHeight,
-					totalRows: contentLines.length,
-					theme: { track: t => theme.fg("dim", t), thumb: t => theme.fg("accent", t) },
-				},
-			);
-			scrollView.setScrollOffset(this.#scrollOffset);
+			const scrollView = new ScrollView(this.#transcriptViewport.visibleRows(), {
+				scrollbar: "auto",
+				height: viewportHeight,
+				totalRows: contentLines.length,
+				theme: { track: t => theme.fg("dim", t), thumb: t => theme.fg("accent", t) },
+			});
+			scrollView.setScrollOffset(this.#transcriptViewport.offset);
 			for (const row of scrollView.render(Math.max(1, width - 1))) lines.push(` ${row}`);
 		}
 
@@ -3292,7 +3306,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 		this.#chatSearchMatches = matches;
 		// Jump to first match at or after current scroll, or wrap to first
 		if (matches.length > 0) {
-			let idx = matches.findIndex(line => line >= this.#scrollOffset);
+			let idx = matches.findIndex(line => line >= this.#transcriptViewport.offset);
 			if (idx < 0) idx = 0;
 			this.#chatSearchMatchIndex = idx;
 			this.#scrollToSearchMatch();
@@ -3305,11 +3319,11 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	#scrollToSearchMatch(): void {
 		if (this.#chatSearchMatchIndex < 0 || this.#chatSearchMatchIndex >= this.#chatSearchMatches.length) return;
 		const matchLine = this.#chatSearchMatches[this.#chatSearchMatchIndex];
-		const maxScroll = this.#lastMaxScroll;
-		// Center the match in the viewport
-		const target = Math.max(0, Math.min(matchLine - Math.floor(this.#viewportHeight / 2), maxScroll));
-		this.#scrollOffset = target;
-		this.#wasAtBottom = this.#scrollOffset >= maxScroll;
+		const target = Math.max(
+			0,
+			Math.min(matchLine - Math.floor(this.#transcriptViewport.height / 2), this.#transcriptViewport.maxOffset),
+		);
+		this.#transcriptViewport.setOffset(target);
 	}
 
 	/** Open the chat for the agent's parent, or close the hub when the parent is the main session. */
@@ -3332,6 +3346,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 				: this.#chatAgentId
 					? `agent:${this.#chatAgentId}`
 					: undefined;
+		this.#releaseSelectedTranscriptRead();
 		this.#view = "table";
 		this.#chatAgentId = undefined;
 		this.#chatArchived = undefined;
@@ -3358,9 +3373,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 	/** `[`/`]` and bare arrow-key view cycling: next/previous visible sibling agent, falling back to inspector sections in dual-lane. */
 	#cycleSiblingOrSection(direction: 1 | -1): void {
 		const selected = this.#selectedInternalRef();
-		const sibling = selected
-			? cycleVisibleAgentSibling(this.#visibleActiveRows, selected.id, direction)
-			: undefined;
+		const sibling = selected ? cycleVisibleAgentSibling(this.#visibleActiveRows, selected.id, direction) : undefined;
 		if (sibling && sibling.id !== selected?.id) {
 			this.#tablePreview.selectKey(`agent:${sibling.id}`);
 		} else if (this.#dualLaneActive) {
@@ -3402,13 +3415,11 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 
 	/** Viewport scrolling for the chat transcript. Returns true when handled. */
 	#handleViewerNavigation(keyData: string): boolean {
-		const maxScroll = this.#lastMaxScroll;
 		const scrollBy = (delta: number) => {
-			this.#scrollOffset = Math.max(0, Math.min(this.#scrollOffset + delta, maxScroll));
-			this.#wasAtBottom = this.#scrollOffset >= maxScroll;
+			this.#transcriptViewport.scrollBy(delta);
 			this.#requestRender();
 		};
-		const delta = resolveViewerScrollDelta(keyData, this.#viewportHeight);
+		const delta = resolveViewerScrollDelta(keyData, this.#transcriptViewport.height);
 		if (delta !== undefined) {
 			scrollBy(delta);
 			return true;
@@ -3422,8 +3433,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			return true;
 		}
 		if (matchesNavigationBottom(keyData)) {
-			this.#scrollOffset = maxScroll;
-			this.#wasAtBottom = true;
+			this.#transcriptViewport.scrollToBottom();
 			this.#requestRender();
 			return true;
 		}
@@ -3483,7 +3493,7 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			this.#detachStreamingAssistant(true);
 			return;
 		}
-		const message = boundedStreamingAssistant(streamMessage, PREVIEW_TAIL_BYTES);
+		const message = streamMessage;
 		if (!this.#liveAssistantComponent) {
 			this.#liveAssistantComponent = new AssistantMessageComponent(
 				undefined,
@@ -3888,45 +3898,83 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 
 	#loadTranscript(sessionFile: string): SessionMessageEntry[] | null {
 		if (this.#transcriptCache?.path !== sessionFile) {
+			if (this.#transcriptCache) this.#invalidateTranscriptRead(this.#transcriptCache.path);
 			this.#transcriptCache = { path: sessionFile, bytesRead: 0, entries: [] };
 		}
 
 		const fromByte = this.#transcriptCache.bytesRead;
 		const cached = this.#journalTails.peek(sessionFile, fromByte);
 		if (cached === undefined) {
-			void this.#journalTails
-				.load(sessionFile, fromByte, PREVIEW_TAIL_BYTES)
-				.then(result => this.#applyTranscriptChunk(sessionFile, fromByte, result));
+			this.#requestTranscriptRead(sessionFile, fromByte);
 			return this.#transcriptCache.entries;
 		}
 		if (!cached) return null;
 		if (cached.newSize < fromByte) {
+			this.#invalidateTranscriptRead(sessionFile);
 			this.#transcriptCache = { path: sessionFile, bytesRead: 0, entries: [] };
-			this.#journalTails.invalidate(sessionFile);
-			void this.#journalTails
-				.load(sessionFile, 0, PREVIEW_TAIL_BYTES)
-				.then(result => this.#applyTranscriptChunk(sessionFile, 0, result));
+			this.#requestTranscriptRead(sessionFile, 0);
 			return this.#transcriptCache.entries;
 		}
-		this.#ingestTranscriptChunk(sessionFile, cached.text, cached.fromByte);
+		if (cached.fromByte !== fromByte) {
+			this.#invalidateTranscriptRead(sessionFile);
+			this.#requestTranscriptRead(sessionFile, fromByte);
+			return this.#transcriptCache.entries;
+		}
+		this.#ingestTranscriptChunk(sessionFile, cached.text, fromByte);
+		this.#journalTails.releaseText(sessionFile, fromByte, cached.newSize);
 		return this.#transcriptCache.entries;
 	}
 
-	#applyTranscriptChunk(sessionFile: string, fromByte: number, result: JournalTailChunk | null): void {
-		if (this.#transcriptCache?.path !== sessionFile || this.#transcriptCache.bytesRead !== fromByte) return;
+	#requestTranscriptRead(sessionFile: string, fromByte: number): void {
+		const inFlight = this.#transcriptLoadInFlight;
+		if (inFlight?.path === sessionFile && inFlight.fromByte === fromByte) return;
+		const request: TranscriptLoadRequest = {
+			generation: ++this.#transcriptLoadGeneration,
+			path: sessionFile,
+			fromByte,
+		};
+		this.#transcriptLoadInFlight = request;
+		// Initial reads must start at byte zero: a tail slice can begin inside
+		// one large JSONL record and silently make the transcript's head unreachable.
+		void this.#journalTails
+			.load(sessionFile, fromByte, Number.POSITIVE_INFINITY)
+			.then(result => this.#applyTranscriptChunk(request, result));
+	}
+
+	#applyTranscriptChunk(request: TranscriptLoadRequest, result: JournalTailChunk | null): void {
+		const requestIsCurrent =
+			request.generation === this.#transcriptLoadGeneration &&
+			this.#transcriptLoadInFlight?.generation === request.generation;
+		const cacheIsCurrent =
+			this.#transcriptCache?.path === request.path && this.#transcriptCache.bytesRead === request.fromByte;
+		if (!requestIsCurrent || !cacheIsCurrent || (result !== null && result.fromByte !== request.fromByte)) {
+			if (this.#transcriptLoadInFlight?.generation === request.generation) this.#transcriptLoadInFlight = undefined;
+			if (requestIsCurrent && result !== null && result.fromByte !== request.fromByte)
+				this.#journalTails.invalidate(request.path);
+			this.#scheduleCurrentTranscriptRead(request.path);
+			return;
+		}
+		this.#transcriptLoadInFlight = undefined;
 		if (!result) {
-			logger.debug("Agent hub: failed to read session file", { path: sessionFile });
+			logger.debug("Agent hub: failed to read session file", { path: request.path });
 			this.#requestRender();
 			return;
 		}
-		if (result.newSize < fromByte) {
-			this.#transcriptCache = { path: sessionFile, bytesRead: 0, entries: [] };
-			this.#journalTails.invalidate(sessionFile);
+		if (result.newSize < request.fromByte) {
+			this.#invalidateTranscriptRead(request.path);
+			this.#transcriptCache = { path: request.path, bytesRead: 0, entries: [] };
+			this.#requestTranscriptRead(request.path, 0);
 		} else {
-			this.#ingestTranscriptChunk(sessionFile, result.text, result.fromByte);
+			this.#ingestTranscriptChunk(request.path, result.text, request.fromByte);
+			this.#journalTails.releaseText(request.path, request.fromByte, result.newSize);
 		}
 		this.#rebuildChatContent();
 		this.#ui.requestComponentRender(this);
+	}
+
+	#scheduleCurrentTranscriptRead(sessionFile: string): void {
+		if (this.#selectedJournalPath() !== sessionFile || this.#transcriptCache?.path !== sessionFile) return;
+		this.#requestTranscriptRead(sessionFile, this.#transcriptCache.bytesRead);
 	}
 
 	/** Parse a complete-line JSONL chunk into the transcript cache and advance bytesRead. Shared by the local file and remote paths. */
@@ -3952,10 +4000,6 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 			} else if (entry.type === "thinking_level_change") {
 				this.#transcriptCache.thinking = entry.thinkingLevel ?? undefined;
 			}
-		}
-		if (this.#transcriptCache.entries.length > PREVIEW_MAX_ENTRIES) {
-			const excess = this.#transcriptCache.entries.length - PREVIEW_MAX_ENTRIES;
-			this.#transcriptCache.entries.splice(0, excess);
 		}
 		this.#transcriptCache.bytesRead = fromByte + Buffer.byteLength(completeChunk, "utf-8");
 	}
@@ -4002,4 +4046,5 @@ export class AgentHubOverlayComponent extends Container { #interruptKeys: KeyId[
 				if (token === this.#remoteFetchToken) this.#remoteFetchInFlight = false;
 				logger.warn("Agent hub: remote transcript fetch failed", { id, error: String(error) });
 			});
-	} }
+	}
+}
