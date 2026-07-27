@@ -37,6 +37,7 @@
 		"check:types": "tsgo -p tsconfig.json --noEmit",
 		"lint": "biome lint .",
 		"test": "bun test --parallel",
+		"gate:test-baseline-retirement": "bun run generate && bun test test/task/subagent-lsp.test.ts && bun run check:types",
 		"fix": "biome check --write --unsafe . && bun run format-prompts && bun run generate-docs-index",
 		"fmt": "biome format --write . && bun run format-prompts",
 		"format-prompts": "bun scripts/format-prompts.ts",

@@ -5,7 +5,7 @@ import { z } from "zod/v4";
 import type { DiskAdmissionDecision } from "../resource/disk-pressure";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type { SessionSpawnCordon } from "../session/session-control";
-import type { NestedRepoPatch } from "./worktree";
+import type { IsolationHandle, NestedRepoPatch } from "./worktree";
 import type { SpawnRouteReceipt } from "./route-resolution";
 
 /** Source of an agent definition */
@@ -413,6 +413,8 @@ export interface SingleResult {
 	outputPath?: string;
 	/** Patch path for isolated worktree output */
 	patchPath?: string;
+	/** Isolation backend materialized for this isolated task. */
+	isolationBackend?: IsolationHandle["backend"];
 	/** Branch name for isolated branch-mode output */
 	branchName?: string;
 	/** Nested repo patches to apply after parent merge */

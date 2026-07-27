@@ -2006,12 +2006,15 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 					// Isolated runs re-discover extensions/custom tools inside the
 					// worktree instead of reusing the parent's source paths.
-					const result = await executeChild({
-						...sharedRunOptions,
-						worktree: isolationDir,
-						preloadedExtensionPaths: undefined,
-						preloadedCustomToolPaths: undefined,
-					});
+					const result = {
+						...(await executeChild({
+							...sharedRunOptions,
+							worktree: isolationDir,
+							preloadedExtensionPaths: undefined,
+							preloadedCustomToolPaths: undefined,
+						})),
+						isolationBackend: isolationHandle.backend,
+					};
 					if (mergeMode === "branch" && result.exitCode === 0) {
 						try {
 							const commitResult = await commitToBranch(
