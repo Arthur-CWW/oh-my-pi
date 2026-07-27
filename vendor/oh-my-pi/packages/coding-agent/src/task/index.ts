@@ -23,15 +23,11 @@ import { $env, isEnoent, logger, prompt, Snowflake, VERSION } from "@oh-my-pi/pi
 import type { ToolSession } from "..";
 import { MCPManager } from "../mcp/manager";
 import type { Theme } from "../modes/theme/theme";
-import {
-	checkDiskAdmission,
-	type DiskAdmissionDecision,
-	type DiskOperationKind,
-} from "../resource/disk-pressure";
 import planModeSubagentPrompt from "../prompts/system/plan-mode-subagent.md" with { type: "text" };
 import subagentUserPromptTemplate from "../prompts/system/subagent-user-prompt.md" with { type: "text" };
 import taskDescriptionTemplate from "../prompts/tools/task.md" with { type: "text" };
 import taskSummaryTemplate from "../prompts/tools/task-summary.md" with { type: "text" };
+import { checkDiskAdmission, type DiskAdmissionDecision, type DiskOperationKind } from "../resource/disk-pressure";
 import { truncateForPrompt } from "../tools/approval";
 import { isIrcEnabled } from "../tools/irc";
 import { formatBytes, formatDuration } from "../tools/render-utils";
@@ -65,27 +61,21 @@ import {
 import { readProcessIdentity } from "../resource/process-identity";
 import type { AgentSession } from "../session/agent-session";
 import {
+	type ProviderRecoveryRecord,
 	transitionProviderRecoveryRecord,
 	waitForProviderRecovery,
-	type ProviderRecoveryRecord,
 } from "../session/provider-recovery";
 import { getSessionSpawnCordon, type SessionSpawnCordon } from "../session/session-control";
 import { generateCommitMessage } from "../utils/commit-message-generator";
-import * as git from "../utils/git";
 import * as jj from "../utils/jj";
-import {
-	createTaskCapabilitySnapshot,
-	type DiscoveryResult,
-	type TaskCapabilitySnapshot,
-	discoverAgents,
-	getAgent,
-} from "./discovery";
+import { createTaskCapabilitySnapshot, discoverAgents, getAgent, type TaskCapabilitySnapshot } from "./discovery";
 import { type ExecutorOptions, runSubprocess } from "./executor";
 import { generateTaskName } from "./name-generator";
 import { AgentOutputManager } from "./output-manager";
 import { mapWithConcurrencyLimit } from "./parallel";
 import { ProgressAggregator } from "./progress-aggregator";
 import { addUsageTotals, createUsageTotals } from "./progress-usage";
+import type { ReAdoptedChild } from "./re-adopt";
 import { renderResult, renderCall as renderTaskCall } from "./render";
 import { repairTaskParams } from "./repair-args";
 import { appendSpawnRouteResolution } from "./route-events";
@@ -98,8 +88,11 @@ import {
 	resolveTaskSpawnRoute,
 	snapshotTaskSpawnPolicy,
 } from "./spawn-route";
-import { monitorDetachedSpawnWorker, runSubagentSpawnProcess } from "./spawn-worker-client";
-import type { ReAdoptedChild } from "./re-adopt";
+import {
+	type DetachedSpawnWorkerOutcome,
+	monitorDetachedSpawnWorker,
+	runSubagentSpawnProcess,
+} from "./spawn-worker-client";
 import {
 	recordFinalizedSubagentFailure,
 	recordThrownSubagentFailure,
@@ -366,7 +359,6 @@ function createUnknownTaskCapabilityError(
 	};
 }
 
-
 function createSpawnCordonRefusal(cordon: SessionSpawnCordon): AgentToolResult<TaskToolDetails> {
 	return {
 		content: [
@@ -392,7 +384,9 @@ function createSessionPausedRefusal(): AgentToolResult<TaskToolDetails> {
 
 function createDiskPressureRefusal(decision: DiskAdmissionDecision): AgentToolResult<TaskToolDetails> {
 	return {
-		content: [{ type: "text", text: `Spawn refused: ${decision.reason ?? "new heavy work is blocked by disk pressure"}` }],
+		content: [
+			{ type: "text", text: `Spawn refused: ${decision.reason ?? "new heavy work is blocked by disk pressure"}` },
+		],
 		details: {
 			projectAgentsDir: null,
 			results: [],
@@ -672,9 +666,7 @@ export function findSpawnIdentityMatch(
 		}
 		if (!kind) continue;
 		const refuse =
-			(!candidate.archived &&
-				candidate.status === "running" &&
-				(kind === "exact" || kind === "continuation")) ||
+			(!candidate.archived && candidate.status === "running" && (kind === "exact" || kind === "continuation")) ||
 			(candidate.revivable &&
 				(candidate.status === "idle" || candidate.status === "parked") &&
 				(kind === "exact" || kind === "continuation"));
@@ -731,7 +723,6 @@ export function renderSpawnIdentityNotice(match: SpawnIdentityMatch): string {
 	);
 }
 
-
 export function reattachDetachedChildTask(options: {
 	manager: AsyncJobManager;
 	child: ReAdoptedChild;
@@ -749,7 +740,7 @@ export function reattachDetachedChildTask(options: {
 		child.id,
 		async ({ signal, markRunning }) => {
 			markRunning();
-			let outcome;
+			let outcome: DetachedSpawnWorkerOutcome;
 			try {
 				outcome = await monitorDetachedSpawnWorker({
 					sessionFile: child.sessionFile,
@@ -977,9 +968,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				`Cannot prove process identity before starting ${agentId}`,
 			);
 		}
-		const childReservationBytes = this.session.settings.getGlobal(
-			"task.globalAdmission.attemptReservationBytes",
-		);
+		const childReservationBytes = this.session.settings.getGlobal("task.globalAdmission.attemptReservationBytes");
 		return HostResourceAdmission.global({
 			memoryBudgetBytes: this.session.settings.getGlobal("task.globalAdmission.memoryBudgetBytes"),
 			userCap: this.session.settings.getGlobal("task.globalAdmission.maxConcurrency"),
@@ -1070,7 +1059,6 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (cordon) return createSpawnCordonRefusal(cordon);
 		const selectedAgent = getAgent(this.#capabilities.agents, params.agent ?? "");
 		if (!selectedAgent) return createUnknownTaskCapabilityError(params.agent ?? "", this.#capabilities);
-
 
 		if (batchEnabled) {
 			const context = await prepareSpawnContext(
