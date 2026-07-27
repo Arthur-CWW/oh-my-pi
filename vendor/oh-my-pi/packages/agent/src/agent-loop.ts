@@ -875,7 +875,7 @@ async function runLoopBody(
 			let steering = signal?.aborted ? [] : (await config.getSteeringMessages?.()) || [];
 			if (steering.length === 0 && settledToolBatch && !signal?.aborted) {
 				const admitted = await config.admitQueuedInput?.("tool");
-				if (admitted) steering = [admitted];
+				if (admitted) steering = admitted;
 			}
 			if (hasMoreToolCalls) {
 				// Mid-work: fold any non-interrupting asides into the next turn alongside steering.

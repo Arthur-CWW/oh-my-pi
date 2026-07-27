@@ -17,6 +17,7 @@ import { expandAtImports } from "./discovery/at-imports";
 import { loadSkills, type Skill } from "./extensibility/skills";
 import { hasObsidian } from "./internal-urls/vault-protocol";
 import customSystemPromptTemplate from "./prompts/system/custom-system-prompt.md" with { type: "text" };
+import currentUserAuthorityTemplate from "./prompts/system/current-user-authority.md" with { type: "text" };
 import defaultPersonality from "./prompts/system/personalities/default.md" with { type: "text" };
 import friendlyPersonality from "./prompts/system/personalities/friendly.md" with { type: "text" };
 import pragmaticPersonality from "./prompts/system/personalities/pragmatic.md" with { type: "text" };
@@ -41,6 +42,21 @@ interface AlwaysApplyRule {
 
 function normalizePromptBlock(content: string): string {
 	return prompt.format(content, { renderPhase: "post-render" }).trim();
+}
+
+export const CURRENT_USER_AUTHORITY_SYSTEM_PROMPT = normalizePromptBlock(currentUserAuthorityTemplate);
+
+/**
+ * Keep the current-user authority contract as the final system block.
+ *
+ * `before_agent_start` extensions may replace every other system block, but
+ * they cannot remove or place instructions after this invariant.
+ */
+export function ensureCurrentUserAuthoritySystemPrompt(systemPrompt: string[]): string[] {
+	if (systemPrompt.at(-1)?.trim() === CURRENT_USER_AUTHORITY_SYSTEM_PROMPT) return systemPrompt;
+	const retained = systemPrompt.filter(block => block.trim() !== CURRENT_USER_AUTHORITY_SYSTEM_PROMPT);
+	retained.push(CURRENT_USER_AUTHORITY_SYSTEM_PROMPT);
+	return retained;
 }
 
 function splitComparablePromptBlocks(content: string | null | undefined): string[] {
@@ -430,7 +446,7 @@ export interface BuildSystemPromptResult {
 /** Build the system prompt with tools, guidelines, and context */
 export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}): Promise<BuildSystemPromptResult> {
 	if ($env.NULL_PROMPT === "true") {
-		return { systemPrompt: [] };
+		return { systemPrompt: ensureCurrentUserAuthoritySystemPrompt([]) };
 	}
 
 	const {
@@ -669,5 +685,5 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		systemPrompt.push(projectPrompt);
 	}
 
-	return { systemPrompt };
+	return { systemPrompt: ensureCurrentUserAuthoritySystemPrompt(systemPrompt) };
 }

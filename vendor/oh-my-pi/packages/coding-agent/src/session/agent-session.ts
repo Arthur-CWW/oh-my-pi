@@ -263,6 +263,7 @@ import {
 	type SecretObfuscator,
 } from "../secrets/obfuscator";
 import { invalidateHostMetadata } from "../ssh/connection-manager";
+import { ensureCurrentUserAuthoritySystemPrompt } from "../system-prompt";
 import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
@@ -6368,9 +6369,9 @@ export class AgentSession {
 			return true;
 		}
 
-		// Magic keywords ("ultrathink", "orchestrate"): append hidden system notices after the
-		// user's message that steer this turn. User-authored prompts only — synthetic /
-		// agent-initiated turns never trigger them.
+		// Magic keywords ("ultrathink", "orchestrate"): inject hidden per-turn context before
+		// the current user message. User-authored prompts only — synthetic / agent-initiated
+		// turns never trigger them.
 		const keywordNotices = options?.synthetic ? [] : this.#createMagicKeywordNotices(expandedText);
 
 		// A user-initiated prompt (typed message or the `.`/`c` continue shortcut)
@@ -6385,19 +6386,12 @@ export class AgentSession {
 			if (!options?.streamingBehavior) {
 				throw new AgentBusyError();
 			}
-			if (options.streamingBehavior === "followUp") {
-				await this.#queueUserMessage(expandedText, options?.attachments, "followUp");
-			} else {
-				await this.#queueUserMessage(expandedText, options?.attachments, "steer");
-			}
-			// Follow-ups are re-entered through prompt(), which regenerates their
-			// keyword notices in the same provider turn. Enqueuing a second durable
-			// custom input here would admit the notice as a duplicate turn.
-			if (!this.#durableInputQueueRequired || options.streamingBehavior === "steer") {
-				for (const notice of keywordNotices) {
-					await this.sendCustomMessage(notice, { deliverAs: options.streamingBehavior });
-				}
-			}
+			await this.#queueUserMessage(
+				expandedText,
+				options?.attachments,
+				options.streamingBehavior,
+				keywordNotices,
+			);
 			return true;
 		}
 
@@ -6493,13 +6487,13 @@ export class AgentSession {
 			if (!options?.streamingBehavior) {
 				throw new AgentBusyError();
 			}
+			for (const notice of keywordNotices) {
+				await this.sendCustomMessage(notice, { deliverAs: options.streamingBehavior });
+			}
 			await this.sendCustomMessage(message, {
 				deliverAs: options.streamingBehavior,
 				queueChipText: options.queueChipText,
 			});
-			for (const notice of keywordNotices) {
-				await this.sendCustomMessage(notice, { deliverAs: options.streamingBehavior });
-			}
 			return;
 		}
 
@@ -6587,7 +6581,8 @@ export class AgentSession {
 				await this.#checkCompaction(lastAssistant, false, false, false);
 			}
 
-			// Build messages array (session context, eager todo prelude, then active prompt message)
+			// Build the provider turn in authority order: persistent and runtime-generated
+			// context first, then the current prompt after every structurally known injection.
 			const messages: AgentMessage[] = [];
 			const planReferenceMessage = await this.#buildPlanReferenceMessage?.();
 			if (planReferenceMessage) {
@@ -6604,11 +6599,6 @@ export class AgentSession {
 			if (options?.prependMessages) {
 				messages.push(...options.prependMessages);
 			}
-
-			messages.push(message);
-
-			// Inject the ultrathink notice (and any other per-turn appends) right after the
-			// user message so the model reads it as part of the same turn.
 			if (options?.appendMessages) {
 				messages.push(...options.appendMessages);
 			}
@@ -6619,7 +6609,7 @@ export class AgentSession {
 				return;
 			}
 
-			// Inject any pending "nextTurn" messages as context alongside the user message
+			// Inject pending "nextTurn" messages as context before the current prompt
 			for (const msg of this.#pendingNextTurnMessages) {
 				messages.push(msg);
 			}
@@ -6638,7 +6628,9 @@ export class AgentSession {
 				}
 			}
 
-			const beforeAgentStartSystemPrompt = await this.#buildSystemPromptForAgentStart(expandedText);
+			const beforeAgentStartSystemPrompt = ensureCurrentUserAuthoritySystemPrompt(
+				await this.#buildSystemPromptForAgentStart(expandedText),
+			);
 
 			// Emit before_agent_start extension event
 			if (this.#extensionRunner) {
@@ -6669,11 +6661,9 @@ export class AgentSession {
 					}
 				}
 
-				if (result?.systemPrompt !== undefined) {
-					this.agent.setSystemPrompt(result.systemPrompt);
-				} else {
-					this.agent.setSystemPrompt(beforeAgentStartSystemPrompt);
-				}
+				this.agent.setSystemPrompt(
+					ensureCurrentUserAuthoritySystemPrompt(result?.systemPrompt ?? beforeAgentStartSystemPrompt),
+				);
 			} else {
 				this.agent.setSystemPrompt(beforeAgentStartSystemPrompt);
 			}
@@ -6682,6 +6672,10 @@ export class AgentSession {
 			if (this.#promptGeneration !== generation) {
 				return;
 			}
+
+			// Runtime append/file/extension messages are context for this turn. Keep the
+			// current prompt last so later context cannot appear to supersede it.
+			messages.push(message);
 
 			// Auto thinking: classify this real user turn and set the effective level
 			// before the model request. Synthetic/tool-continuation turns (developer/
@@ -6881,6 +6875,7 @@ export class AgentSession {
 		text: string,
 		attachments: MediaContent[] | undefined,
 		mode: "steer" | "followUp",
+		keywordNotices: readonly CustomMessage[] = this.#createMagicKeywordNotices(text),
 	): Promise<void> {
 		// A queued user message is a deliberate resume; re-enable advisor auto-resume
 		// that a user interrupt suppressed.
@@ -6900,6 +6895,9 @@ export class AgentSession {
 		}
 		if (this.#durableInputQueueRequired) {
 			throw this.#durableInputQueueError ?? new Error("Durable input queue is unavailable");
+		}
+		for (const notice of keywordNotices) {
+			await this.sendCustomMessage(notice, { deliverAs: mode });
 		}
 		const content: UserContent[] = [{ type: "text", text }];
 		if (normalizedAttachments?.length) content.push(...normalizedAttachments);
@@ -7357,7 +7355,7 @@ export class AgentSession {
 		release?.();
 	}
 
-	async #admitDurableQueuedInputAtToolBoundary(): Promise<AgentMessage | undefined> {
+	async #admitDurableQueuedInputAtToolBoundary(): Promise<AgentMessage[] | undefined> {
 		await this.#pendingTurnEndProcessing;
 		if (this.#abortInProgress) {
 			this.#durableQueueDrainPending = true;
@@ -7416,17 +7414,18 @@ export class AgentSession {
 					timestamp: Date.now(),
 				};
 				this.#durableCustomDeliveries.set(message, { inputId: item.inputId, inputRevision: item.revision });
-				return message;
+				return [message];
 			}
 			const content: UserContent[] = [{ type: "text", text: item.payload.text }];
 			if (item.payload.attachments) content.push(...item.payload.attachments);
-			return {
+			const message: AgentMessage = {
 				role: "user",
 				content,
 				steering: true,
 				attribution: "user",
 				timestamp: Date.now(),
 			};
+			return [...this.#createMagicKeywordNotices(item.payload.text), message];
 		} catch (error) {
 			release();
 			if (this.#handleDurableOwnershipLoss(error as Error)) throw this.#durableOwnershipLostError ?? error;

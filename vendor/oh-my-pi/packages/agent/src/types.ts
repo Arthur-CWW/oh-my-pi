@@ -134,11 +134,11 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 */
 	getSteeringMessages?: () => Promise<AgentMessage[]>;
 	/**
-	 * Admits one host-owned queued input at a settled tool-batch boundary when
-	 * in-memory steering is empty. The loop never polls, caches, or invokes this
-	 * hook at terminal follow-up boundaries.
+	 * Admits one host-owned queued input as one or more adjacent messages at a
+	 * settled tool-batch boundary when in-memory steering is empty. The loop
+	 * never polls, caches, or invokes this hook at terminal follow-up boundaries.
 	 */
-	admitQueuedInput?: (boundary: "tool") => Promise<AgentMessage | undefined>;
+	admitQueuedInput?: (boundary: "tool") => Promise<AgentMessage[] | undefined>;
 
 	/**
 	 * Peeks whether steering messages are queued, without consuming them.

@@ -42,7 +42,7 @@ describe("Agent", () => {
 		const boundaries: string[] = [];
 		agent.admitQueuedInput = async boundary => {
 			boundaries.push(boundary);
-			return { role: "user", content: "host-admitted", timestamp: Date.now() };
+			return [{ role: "user", content: "host-admitted", timestamp: Date.now() }];
 		};
 
 		await agent.prompt("start");

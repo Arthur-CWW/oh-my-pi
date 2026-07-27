@@ -1,5 +1,7 @@
 <!-- Hidden continuation steer. role=user, suppressed from visible transcript. -->
 
+This continuation is valid only when no newer user request is pending. A newer user message is the primary instruction and supersedes this continuation for that turn: answer or act on it first, even when it is unrelated to the objective. NEVER defer, ignore, or replace it by restating the objective. A request to stop, pause, or change direction suspends this continuation for the turn.
+
 Continue work on the active goal.
 
 <objective>

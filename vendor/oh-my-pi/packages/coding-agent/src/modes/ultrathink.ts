@@ -7,8 +7,8 @@ import { keywordInProse } from "./markdown-prose";
  *
  * Typing the standalone word in the input editor paints it with a rainbow
  * gradient ({@link highlightUltrathink}); submitting a message that mentions it
- * appends a hidden {@link ULTRATHINK_NOTICE} nudging the model toward careful
- * multi-step reasoning. Matching is whitespace-delimited and case-sensitive
+ * injects a hidden {@link ULTRATHINK_NOTICE} as per-turn context before that
+ * message. Matching is whitespace-delimited and case-sensitive
  * (lowercase only), so "ultrathinking", "Ultrathink", or "ultrathink.ts" never
  * trigger either behavior.
  */
@@ -16,7 +16,7 @@ import { keywordInProse } from "./markdown-prose";
 // Detection: lowercase keyword flanked by whitespace or a string edge. Non-global so `.test` stays stateless.
 const ULTRATHINK_WORD = /(?<!\S)ultrathink(?!\S)/;
 
-/** Hidden system notice appended after a user message that mentions "ultrathink". */
+/** Hidden per-turn context injected before a user message that mentions "ultrathink". */
 export const ULTRATHINK_NOTICE: string = ultrathinkNotice.trim();
 
 /**

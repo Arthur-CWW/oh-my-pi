@@ -1175,7 +1175,7 @@ describe("agentLoop with AgentMessage", () => {
 			convertToLlm: identityConverter,
 			admitQueuedInput: async boundary => {
 				boundaries.push(boundary);
-				return admitted;
+				return [admitted];
 			},
 		};
 
