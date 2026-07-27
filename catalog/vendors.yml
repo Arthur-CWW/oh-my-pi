@@ -152,3 +152,24 @@ vendors:
     branch: master
     lastSync: 2026-07-14
     reason: clean nested git repository tracking origin/master
+  - path: vendor/antithesishq/bombadil
+    upstream: https://github.com/antithesishq/bombadil
+    policy: track
+    remote: origin
+    branch: main
+    lastSync: 2026-07-27
+    reason: clean nested git repository tracking origin/main
+  - path: vendor/antithesishq/antithesis-skills
+    upstream: https://github.com/antithesishq/antithesis-skills
+    policy: track
+    remote: origin
+    branch: main
+    lastSync: 2026-07-27
+    reason: clean nested git repository tracking origin/main
+  - path: vendor/hegeldev/hegel-skill
+    upstream: https://github.com/hegeldev/hegel-skill
+    policy: track
+    remote: origin
+    branch: main
+    lastSync: 2026-07-27
+    reason: clean nested git repository tracking origin/main
