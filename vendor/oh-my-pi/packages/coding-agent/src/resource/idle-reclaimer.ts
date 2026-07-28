@@ -7,7 +7,9 @@ import { getActiveProfile } from "@oh-my-pi/pi-utils/dirs";
 import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
 import { SessionControlBus, stopConfirmationToken } from "../session/session-control";
 import { deriveSessionStatus, type SessionStatus } from "../session/session-listing";
-import { inspectSessionOwnership, type ProcessIdentity } from "../session/session-ownership";
+import { type ProcessIdentity, readProcessIdentity } from "./process-identity";
+import { readProcessGroupId } from "./ps-command";
+import { inspectSessionOwnership } from "../session/session-ownership";
 
 export const IDLE_RECLAIMER_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 export const IDLE_RECLAIMER_THRESHOLD_MS = 6 * 60 * 60 * 1000;
@@ -298,22 +300,12 @@ function readControlOwner(dbPath: string, sessionId: string): string | null | un
 	}
 }
 
-function commandOutput(command: readonly string[]): string {
-	const result = Bun.spawnSync({ cmd: [...command], stdout: "pipe", stderr: "ignore" });
-	return result.exitCode === 0 ? new TextDecoder().decode(result.stdout).trim().replace(/\s+/g, " ") : "";
-}
-
 function processGroupId(pid: number): number | undefined {
-	if (process.platform === "win32" || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
-	const parsed = Number.parseInt(commandOutput(["/bin/ps", "-o", "pgid=", "-p", String(pid)]), 10);
-	return Number.isSafeInteger(parsed) && parsed > 1 ? parsed : undefined;
+	return readProcessGroupId(pid);
 }
 
 function processIdentityFor(pid: number): ProcessIdentity | undefined {
-	if (process.platform !== "darwin") return undefined;
-	const bootId = commandOutput(["/usr/sbin/sysctl", "-n", "kern.boottime"]);
-	const startFingerprint = commandOutput(["/bin/ps", "-o", "lstart=", "-p", String(pid)]);
-	return bootId && startFingerprint ? { bootId, pid, startFingerprint } : undefined;
+	return readProcessIdentity(pid) ?? undefined;
 }
 
 function matchesProcessIdentity(identity: ProcessIdentity): boolean {

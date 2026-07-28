@@ -1,4 +1,6 @@
-import { DEFAULT_STREAM_CAP_BYTES, readCapped, withCappedStreamNotice } from "@oh-my-pi/pi-utils";
+import { DEFAULT_STREAM_CAP_BYTES } from "@oh-my-pi/pi-utils";
+import { Effect } from "effect";
+import { bunPsExecutor } from "../resource/ps-command";
 
 export interface FleetResourceSample {
 	readonly rssMb: number;
@@ -39,17 +41,13 @@ export async function sampleFleetResources(pids: readonly number[]): Promise<Fle
 	const uniquePids = [...new Set(pids.filter(value => Number.isSafeInteger(value) && value > 0))];
 	if (uniquePids.length === 0) return new Map();
 	try {
-		const process = Bun.spawn({
-			cmd: ["/bin/ps", "-o", "pid=,rss=,pcpu=,etime=", "-p", uniquePids.join(",")],
-			stdout: "pipe",
-			stderr: "ignore",
-		});
-		const [stdout, exitCode] = await Promise.all([
-			readCapped(process.stdout, DEFAULT_STREAM_CAP_BYTES),
-			process.exited,
-		]);
-		const output = withCappedStreamNotice(stdout, "ps output");
-		if (exitCode !== 0) return new Map();
+		const output = await Effect.runPromise(
+			bunPsExecutor({
+				args: ["-o", "pid=,rss=,pcpu=,etime=", "-p", uniquePids.join(",")],
+				timeoutMs: 2_000,
+				maxOutputBytes: DEFAULT_STREAM_CAP_BYTES,
+			}),
+		);
 		return decodeFleetResourceSamples(output);
 	} catch {
 		return new Map();

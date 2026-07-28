@@ -18,11 +18,13 @@
  * array is materialised.
  */
 
+import * as path from "node:path";
 import { Effect, Schema } from "effect";
 
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1_048_576;
 const DEFAULT_MAX_PROCESSES = 100_000;
 const DEFAULT_TIMEOUT_MS = 2_000;
+const EXECUTABLE_FALLBACK_DIRS = ["/usr/sbin", "/sbin"] as const;
 const MAX_STDERR_BYTES = 64 * 1_024;
 
 /** Full-host snapshot argv. `lstart=` is last because it is the only field containing spaces. */
@@ -110,10 +112,11 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 
 const executablePaths = new Map<string, string | null>();
 
-function resolveExecutable(name: string): string | null {
+export function resolveExecutable(name: string): string | null {
 	const cached = executablePaths.get(name);
 	if (cached !== undefined) return cached;
-	const resolved = Bun.which(name) ?? null;
+	const fallbackPath = EXECUTABLE_FALLBACK_DIRS.join(path.delimiter);
+	const resolved = Bun.which(name) ?? Bun.which(name, { PATH: fallbackPath }) ?? null;
 	executablePaths.set(name, resolved);
 	return resolved;
 }
@@ -229,6 +232,17 @@ export const bunSyncCommandExecutor: SyncCommandExecutor = Effect.fn("HostResour
 				: new PsExecutionError({ message: String(error), reason: "spawn-failed" }),
 	});
 });
+
+/** Read a process group id through the same PATH-resolved synchronous `ps` boundary. */
+export function readProcessGroupId(
+	pid: number,
+	executor: SyncCommandExecutor = bunSyncCommandExecutor,
+): number | undefined {
+	if (process.platform === "win32" || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
+	const output = Effect.runSync(Effect.orElseSucceed(executor("ps", ["-o", "pgid=", "-p", String(pid)]), () => ""));
+	const parsed = Number.parseInt(output, 10);
+	return Number.isSafeInteger(parsed) && parsed > 1 ? parsed : undefined;
+}
 
 const PS_SNAPSHOT_ROW_PATTERN = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S.*?)\s*$/;
 

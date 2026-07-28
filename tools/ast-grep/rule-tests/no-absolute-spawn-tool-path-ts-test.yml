@@ -1,0 +1,9 @@
+id: no-absolute-spawn-tool-path-ts
+valid:
+  - 'Bun.spawn({ cmd: [psPath, "-o", "pid="] })'
+  - 'Bun.spawn({ cmd: ["ps", "-o", "pid="], cwd: "/usr/bin/work" })'
+  - 'const paths = ["/bin/ps"]'
+invalid:
+  - 'Bun.spawn({ cmd: ["/bin/ps", "-o", "pid="] })'
+  - 'Bun.spawnSync({ stdout: "pipe", cmd: ["/usr/sbin/sysctl", "-n", "kern.boottime"] })'
+  - 'spawn({ cmd: [tool, "/sbin/helper"] })'
