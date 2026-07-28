@@ -86,6 +86,47 @@ Complete: 4 dirs (2 male, 2 female) + 1 partial. None <30 min — these talents 
 
 Samples are personal, local prototyping references for a private entertainment bot. Real people's voices are their identity: any clone trained on these stays on this machine, is never published, never commercialized, never passed off as the performer, and is deleted on request. Nothing here was accessed behind auth; member-only content was excluded.
 
-## Clone-lane next steps
+## Clone lane — landed 2026-07-27 (F5-TTS)
 
-Per `tts-stt-survey.md` TTS #2: F5-TTS (f5-tts-mlx) does zero-shot voice matching from a **5–10 s reference clip** ([f5-tts-mlx](https://github.com/lucasnewman/f5-tts-mlx)). Next: for each sample, cut 3–4 candidate 5–10 s clips of *clean whispered/soft speech* (no ear-brushing foley, no BGM — e.g. Vox's hypnotherapy intro monologue, Fauna's trigger-intro whispers, Okayu's 囁き segment, Kanae's chat lulls) via ffmpeg, normalize to -16 LUFS mono 24 kHz, and A/B them through f5-tts-mlx for register match; keep the winner as the persona's "soft mode" reference. Note F5 weights are CC-BY-NC-4.0 — fine for this private lane. Chatterbox (`exaggeration` dial) is the backup engine if F5's ~4 s/utterance generation is too slow even for pre-rendered lines; finish the Kokuri fetch for the pure-whisper JP female reference.
+**Engine choice: F5-TTS, as the note predicted.** `lucasnewman/f5-tts-mlx` 0.2.6 on the Mac (MLX/Metal),
+`f5-tts` 1.1.7 + torch 2.8/cu128 on the RTX desktop for batch. Code MIT, **weights CC-BY-NC-4.0** — fine for
+this private lane, blocks commercialization. Chatterbox was not tried; F5 cleared the register bar on the
+first reference, so the backup stayed on the shelf.
+
+**Wired behind the existing seam, not over it:** `F5Tts` in `apps/ai-companion-rtc/src/tts.ts` implements the
+same `TtsEngine` interface as `KokoroTts`, talks the same NDJSON sidecar contract
+(`scripts/f5-tts-sidecar.py`, port 8801), and both now share one cancellation-correct stream reader. Kokoro
+stays the default placeholder; `AI_COMPANION_TTS=f5` or a persona declaring `voice.engine: "f5"` selects the
+clone. A "voice" for F5 is a **reference id** from `data/voice-refs/clips/refs.json`, not a speaker name.
+
+**Reference mining (batch lane, RTX desktop, tmux `companion-f5-clone`, logs `~/projects/companion-f5/logs/`):**
+`scripts/f5-refs/01-cut-refs.py` transcribes the VOD with word timestamps and scores every sentence-aligned
+5-10 s window for continuous clean soft speech, then cuts at -16 LUFS mono 24 kHz. Winning cuts:
+
+| id | talent | dur | reference text |
+|----|--------|-----|----------------|
+| `ceres-fauna-01` | Fauna (F/EN) | 5.34 s | "All you need to do is sit back and relax, my child." |
+| `ceres-fauna-02` | Fauna (F/EN) | 6.91 s | "Now, my dear, why have you traveled so far to reach this place?" |
+| `vox-akuma-01` | Vox (M/EN) | 8.66 s | "Feel the tension there as well. Because if you, like me, spend a lot of time indoors, they've been working hard too." |
+| `vox-akuma-02` | Vox (M/EN) | 9.55 s | "Floors and walls, too, of green grass that stretch as far as you could ever imagine." |
+
+**Gotcha worth keeping:** KU100 zero-distance whisper performers defeat default speech detection. Fauna's
+48-min VOD yielded **232 words** at Silero's default VAD floor. Pre-normalizing the decode to -20 LUFS and
+dropping the floor to 0.15 took it to 374 words and 5 usable candidates. Vox narrates at projected level and
+needed no tuning. JP talents (Okayu, Kokuri, Kanae) are unusable as-is: F5's base checkpoint is EN+ZH.
+
+**Measured (Mac, realtime lane, median of 2 after warmup):** first audio **2,315 ms**, end-to-end **7,978 ms**
+for 8,385 ms of audio, **RTF 0.95**. Non-autoregressive flow matching has no intra-sentence streaming, so the
+sidecar generates sentence by sentence and flushes each one — first audio is the *first sentence's* generation
+time, not the whole utterance's. Verdict: **cinematic lane**, not conversational (4-5× over the 500 ms floor).
+But RTF < 1 means it outruns playback after the lead-in, so it is a real streaming-monologue engine.
+Kokoro keeps the conversational lane at ~102 ms.
+
+**Presence, not just TTS:** `packages/spatial-audio-renderer` now reads a stem's artifact WAV when the file
+exists (it previously synthesized every stem procedurally — that was the "spatially real, emotionally not yet"
+limit of the 2026-07-03 proof). Proof clip, latency JSON, and scene manifests:
+`data/asmr-companion/voice-clone-proof/20260728/`.
+
+**Open:** the 4-way register A/B on the desktop (`02-sweep.py`) was still installing CUDA wheels at hand-off —
+`~/projects/companion-f5/out/sweep-report.json`. The rig's Speech-engine dropdown still lists Kokoro voices
+only; publishing per-engine voice lists means extending the frozen `ConfigStateEvent`, so it was left alone.

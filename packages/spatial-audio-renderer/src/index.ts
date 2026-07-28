@@ -120,7 +120,7 @@ export function renderSpatialAudioProof(inputs: SpatialRenderInputs): SpatialRen
     if (!stem) {
       throw new Error(`spatial object references missing stem: ${object.stemId}`)
     }
-    mixObject({ object, stem, sampleRateHz, left, right })
+    mixObject({ object, stem, sampleRateHz, left, right, pcm: loadStemPcm(stem) })
   }
 
   const peakBeforeNormalize = peakOf(left, right)
@@ -266,14 +266,26 @@ function validateRenderBundle(
   }
 }
 
+/**
+ * Recorded 16-bit PCM WAV for a stem, or null when the manifest's artifact is a placeholder
+ * and the deterministic synthesizer owns the sound. Real voice stems (the F5 clone lane) land
+ * here; the fixture stems keep their procedural generators, so existing renders stay byte-stable.
+ */
+function loadStemPcm(stem: Stem): StemPcm | null {
+  const resolved = resolveRepoPath(stem.artifact.path)
+  if (!existsSync(resolved)) return null
+  return decodeWav16(readFileSync(resolved))
+}
+
 function mixObject(args: {
   object: SpatialObject
   stem: Stem
   sampleRateHz: number
   left: Float32Array
   right: Float32Array
+  pcm: StemPcm | null
 }): void {
-  const { object, stem, sampleRateHz, left, right } = args
+  const { object, stem, sampleRateHz, left, right, pcm } = args
   const startFrame = Math.max(0, Math.floor(stem.timing.startSec * sampleRateHz))
   const endFrame = Math.min(left.length, Math.ceil((stem.timing.startSec + stem.timing.durationSec) * sampleRateHz))
   const seed = hashSeed(`${stem.stemId}:${stem.kind}:${stem.role}`)
@@ -283,7 +295,7 @@ function mixObject(args: {
     const absoluteTimeSec = frame / sampleRateHz
     const localTimeSec = absoluteTimeSec - stem.timing.startSec
     const sourceTimeSec = stem.timing.loop ? localTimeSec % loopPeriodSec(stem) : localTimeSec
-    const source = sourceSample(stem, sourceTimeSec, sampleRateHz, seed)
+    const source = pcm === null ? sourceSample(stem, sourceTimeSec, sampleRateHz, seed) : pcmSample(pcm, sourceTimeSec)
     const timingEnvelope = envelopeGain(localTimeSec, stem.timing.durationSec, stem.timing.fadeInSec ?? 0, stem.timing.fadeOutSec ?? 0)
     if (timingEnvelope <= 0) continue
 
@@ -293,6 +305,58 @@ function mixObject(args: {
     left[frame] += source * gain * spatial.left
     right[frame] += source * gain * spatial.right
   }
+}
+
+interface StemPcm {
+  samples: Float32Array
+  sampleRateHz: number
+}
+
+/** Linear interpolation across the recorded stem; silence past its end. */
+function pcmSample(pcm: StemPcm, timeSec: number): number {
+  if (timeSec < 0) return 0
+  const position = timeSec * pcm.sampleRateHz
+  const index = Math.floor(position)
+  if (index >= pcm.samples.length - 1) return index < pcm.samples.length ? pcm.samples[index] : 0
+  const fraction = position - index
+  return pcm.samples[index] * (1 - fraction) + pcm.samples[index + 1] * fraction
+}
+
+/** Minimal 16-bit PCM WAV reader; multi-channel input is downmixed to mono. */
+function decodeWav16(bytes: Buffer): StemPcm {
+  if (bytes.length < 44 || bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WAVE") {
+    throw new Error("stem artifact is not a RIFF/WAVE file")
+  }
+  let channels = 0
+  let sampleRateHz = 0
+  let bitsPerSample = 0
+  let offset = 12
+  while (offset + 8 <= bytes.length) {
+    const chunkId = bytes.toString("ascii", offset, offset + 4)
+    const chunkSize = bytes.readUInt32LE(offset + 4)
+    const body = offset + 8
+    if (chunkId === "fmt ") {
+      channels = bytes.readUInt16LE(body + 2)
+      sampleRateHz = bytes.readUInt32LE(body + 4)
+      bitsPerSample = bytes.readUInt16LE(body + 14)
+    } else if (chunkId === "data") {
+      if (bitsPerSample !== 16 || channels < 1 || sampleRateHz <= 0) {
+        throw new Error(`stem artifact must be 16-bit PCM WAV (got ${bitsPerSample}-bit, ${channels}ch)`)
+      }
+      const frames = Math.floor(Math.min(chunkSize, bytes.length - body) / 2 / channels)
+      const samples = new Float32Array(frames)
+      for (let frame = 0; frame < frames; frame += 1) {
+        let sum = 0
+        for (let channel = 0; channel < channels; channel += 1) {
+          sum += bytes.readInt16LE(body + (frame * channels + channel) * 2) / 32_768
+        }
+        samples[frame] = sum / channels
+      }
+      return { samples, sampleRateHz }
+    }
+    offset = body + chunkSize + (chunkSize % 2)
+  }
+  throw new Error("stem artifact has no data chunk")
 }
 
 function sourceSample(stem: Stem, timeSec: number, sampleRateHz: number, seed: number): number {
