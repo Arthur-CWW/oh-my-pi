@@ -21,7 +21,7 @@ import {
   type ReplayTraceEnvelope,
   type ReplayTraceEvent,
   type TimedProviderEvent,
-} from "../../../../../../packages/provider-testkit/src/index"
+} from "@agents/provider-testkit"
 import {
   appendChildLifecycleRecord,
   appendChildRestartRecord,

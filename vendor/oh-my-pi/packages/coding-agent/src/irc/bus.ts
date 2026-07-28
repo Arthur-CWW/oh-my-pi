@@ -18,6 +18,7 @@ import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { CustomMessage } from "../session/messages";
+import { ircMessageLengthError } from "./irc-limits";
 
 export type IrcMessageOrigin = "user" | "agent" | "system";
 
@@ -130,6 +131,8 @@ export class IrcBus {
 		msg: Omit<IrcMessage, "id" | "ts" | "origin"> & { origin?: IrcMessageOrigin },
 		opts?: { expectsReply?: boolean },
 	): Promise<IrcDeliveryReceipt> {
+		const lengthError = ircMessageLengthError(msg.body, "direct");
+		if (lengthError) return { to: msg.to, outcome: "failed", error: lengthError.message };
 		const message: IrcMessage = { ...msg, origin: msg.origin ?? "agent", id: Snowflake.next(), ts: Date.now() };
 		this.#recordQueued(message);
 		const ref = this.#registry.get(message.to);

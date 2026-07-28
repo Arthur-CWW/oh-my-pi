@@ -18,6 +18,7 @@ import type { Settings } from "../config/settings";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { IrcBus, type IrcDeliveryReceipt, type IrcDeliveryRecord, type IrcMessage } from "../irc/bus";
 import { getIrcExternalPeerDisplayState, IrcExternalBus, resolveIrcExternalPeerName } from "../irc/bus-external";
+import { ircMessageLengthError } from "../irc/irc-limits";
 import { renderTranscriptBodyLines } from "../modes/components/transcript-body";
 import type { Theme } from "../modes/theme/theme";
 import { type TranscriptDisplayContext, transcriptDisplayCacheVersion } from "../modes/transcript-display";
@@ -295,6 +296,8 @@ export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 				to,
 			});
 		}
+		const lengthError = ircMessageLengthError(message, isBroadcast ? "broadcast" : "direct");
+		if (lengthError) return errorResult(lengthError.message, { op: "send", from: senderId, to });
 
 		const external = this.#registerExternalPeer();
 		if (external?.name === to) {

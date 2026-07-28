@@ -1,5 +1,8 @@
 {
 	"extends": "../tsconfig.workspace.json",
+	"compilerOptions": {
+		"preserveSymlinks": true
+	},
 	"include": [
 		"src",
 		"test",

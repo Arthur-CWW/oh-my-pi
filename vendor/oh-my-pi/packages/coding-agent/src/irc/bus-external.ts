@@ -5,11 +5,12 @@ import * as path from "node:path";
 import { decodeProcessIdentity, type ProcessIdentity, readProcessIdentity } from "../resource/process-identity";
 import { classifyFleetBuildProvenance, decodeFleetCapability, type FleetCapability } from "../session/fleet-capability";
 import type { IrcDeliveryRecord, IrcMessageOrigin } from "./bus";
+import { assertIrcMessageLength, type IrcMessageAudience } from "./irc-limits";
 
 export type IrcExternalPeerState = "unknown" | "working" | "waiting_input" | "idle" | "paused";
 export type IrcExternalPeerDisplayState = IrcExternalPeerState | "disconnected";
 export type IrcExternalMessageOrigin = IrcMessageOrigin;
-export type IrcExternalMessageAudience = "direct" | "broadcast";
+export type IrcExternalMessageAudience = IrcMessageAudience;
 
 /** Structured self-description published by a session at registration and heartbeat. */
 export interface IrcExternalPeerLabels {
@@ -853,6 +854,7 @@ export class IrcExternalBus {
 		audience: IrcExternalMessageAudience;
 		origin?: IrcExternalMessageOrigin;
 	}): number {
+		assertIrcMessageLength(args.body, args.audience);
 		const result = this.#db
 			.query(
 				"INSERT INTO messages (ts, from_peer, to_peer, body, origin, audience) VALUES ($ts, $fromPeer, $toPeer, $body, $origin, $audience)",
