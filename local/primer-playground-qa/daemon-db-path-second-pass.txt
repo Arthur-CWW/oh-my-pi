@@ -1,1 +1,0 @@
-/tmp/primer-playground-qa2.XXXXXX.sqlite

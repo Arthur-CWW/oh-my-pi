@@ -136,3 +136,6 @@ streams/primer/wrapped-commentary-reader/
 # Local Obsidian vault symlink
 /vault
 local/omp-promote.log
+
+# disposable machine-local space (docs/state/agents-topology.md)
+/local/
