@@ -7,9 +7,9 @@ import { getActiveProfile } from "@oh-my-pi/pi-utils/dirs";
 import { IrcExternalBus, type IrcExternalPeer } from "../irc/bus-external";
 import { SessionControlBus, stopConfirmationToken } from "../session/session-control";
 import { deriveSessionStatus, type SessionStatus } from "../session/session-listing";
+import { inspectSessionOwnership } from "../session/session-ownership";
 import { type ProcessIdentity, readProcessIdentity } from "./process-identity";
 import { readProcessGroupId } from "./ps-command";
-import { inspectSessionOwnership } from "../session/session-ownership";
 
 export const IDLE_RECLAIMER_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 export const IDLE_RECLAIMER_THRESHOLD_MS = 6 * 60 * 60 * 1000;

@@ -23,7 +23,8 @@ export function decodeFleetResourceSamples(output: unknown): FleetResourceSample
 		const rssKb = Number(rssText);
 		const cpuPercent = Number(cpuText);
 		if (
-			(!Number.isSafeInteger(pid) || pid <= 0) ||
+			!Number.isSafeInteger(pid) ||
+			pid <= 0 ||
 			!Number.isFinite(rssKb) ||
 			rssKb < 0 ||
 			!Number.isFinite(cpuPercent) ||
