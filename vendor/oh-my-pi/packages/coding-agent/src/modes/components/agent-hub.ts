@@ -1196,7 +1196,13 @@ export class AgentHubOverlayComponent extends Container {
 				a.peer.name !== b.peer.name ||
 				a.peer.cwd !== b.peer.cwd ||
 				a.peer.sessionFile !== b.peer.sessionFile ||
-				a.peer.lastSeen !== b.peer.lastSeen
+				a.peer.lastSeen !== b.peer.lastSeen ||
+				a.peer.labels?.label !== b.peer.labels?.label ||
+				a.peer.labels?.activity !== b.peer.labels?.activity ||
+				a.peer.labels?.todoHead !== b.peer.labels?.todoHead ||
+				a.peer.labels?.objective !== b.peer.labels?.objective ||
+				a.peer.labels?.summary !== b.peer.labels?.summary ||
+				a.peer.labels?.model !== b.peer.labels?.model
 			)
 				return false;
 		}

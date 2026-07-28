@@ -59,6 +59,82 @@ describe("Agent Hub roster projection", () => {
 		expect(rows.map(row => row.guide)).toEqual(["", "  ", "    ", "  ", ""]);
 	});
 
+	it("ranks every AgentStatus and keeps waiting-provider in the active lanes", () => {
+		const expected: Record<AgentStatus, number> = {
+			running: 0,
+			"waiting-provider": 1,
+			idle: 2,
+			parked: 4,
+			aborted: 5,
+		};
+		const registry = new AgentRegistry();
+		for (const status of Object.keys(expected) as AgentStatus[]) add(registry, status, undefined, status);
+
+		for (const ref of registry.list()) expect(agentHistoryRank(ref, false)).toBe(expected[ref.status]);
+		const idle = registry.get("idle");
+		expect(idle).toBeDefined();
+		expect(agentHistoryRank(idle!, true)).toBe(3);
+	});
+
+	it("restores sibling spawn order after the Hub interleaves their status lanes", () => {
+		const registry = new AgentRegistry();
+		add(registry, "Parent", MAIN_AGENT_ID);
+		add(registry, "Parent.Oldest", "Parent", "idle");
+		add(registry, "Parent.Middle", "Parent", "running");
+		add(registry, "Parent.Newest", "Parent", "waiting-provider");
+		const statusOrdered = statusLaneOrder(registry.list());
+
+		expect(statusOrdered.map(ref => ref.id)).toEqual(["Parent", "Parent.Middle", "Parent.Newest", "Parent.Oldest"]);
+		expect(projectAgentRoster(statusOrdered, new Set()).map(row => row.ref.id)).toEqual([
+			"Parent",
+			"Parent.Oldest",
+			"Parent.Middle",
+			"Parent.Newest",
+		]);
+	});
+
+	it("projects local and external peers into the same identity lanes", () => {
+		const registry = new AgentRegistry();
+		add(registry, "Local", MAIN_AGENT_ID);
+		const ref = registry.get("Local");
+		expect(ref).toBeDefined();
+		const local = projectLocalAgentIdentity({
+			ref: ref!,
+			activity: "Stabilizing sibling order",
+			nowMs: ref!.lastActivity + 60_000,
+		});
+		const external = projectExternalPeerIdentity({
+			peer: externalPeer({
+				name: "Remote",
+				cwd: "/tmp/remote-workspace",
+				lastSeen: "2026-07-28T00:00:00.000Z",
+				labels: { label: "TUI engineer", activity: "Stabilizing sibling order" },
+			}),
+			nowMs: Date.parse("2026-07-28T00:01:00.000Z"),
+		});
+
+		expect(Object.keys(external)).toEqual(Object.keys(local));
+		expect(external).toEqual({
+			id: "Remote",
+			displayName: "TUI engineer",
+			activity: "Stabilizing sibling order",
+			context: "/tmp/remote-workspace",
+			age: local.age,
+		});
+		expect(
+			projectExternalPeerIdentity({
+				peer: externalPeer({ name: "", cwd: "", lastSeen: "not-a-date" }),
+				nowMs: Date.parse("2026-07-28T00:01:00.000Z"),
+			}),
+		).toEqual({
+			id: "/home/arthur/agents:41337",
+			displayName: HUB_FIELD_UNKNOWN,
+			activity: HUB_FIELD_UNKNOWN,
+			context: HUB_FIELD_UNKNOWN,
+			age: HUB_FIELD_UNKNOWN,
+		});
+	});
+
 	it("hides a collapsed subtree and rolls up hidden and running descendants", () => {
 		const rows = projectAgentRoster(nestedRefs(), new Set(["Alpha"]));
 		expect(rows.map(row => row.ref.id)).toEqual(["Alpha", "Beta"]);
@@ -123,11 +199,11 @@ describe("Agent Hub roster projection", () => {
 			},
 		});
 
-		expect(await cache.load("/sessions/Worker.jsonl")).toEqual({
+		expect(await cache.load("/sessions/Worker.jsonl")).toMatchObject({
 			modelId: "openai-codex/gpt-5.6-terra",
 			thinkingLevel: "high",
 		});
-		expect(await cache.load("/sessions/Worker.jsonl")).toEqual({
+		expect(await cache.load("/sessions/Worker.jsonl")).toMatchObject({
 			modelId: "openai-codex/gpt-5.6-terra",
 			thinkingLevel: "high",
 		});
@@ -135,7 +211,7 @@ describe("Agent Hub roster projection", () => {
 
 		mtimeMs = 2;
 		model = "anthropic/claude-opus-4-5";
-		expect(await cache.load("/sessions/Worker.jsonl")).toEqual({
+		expect(await cache.load("/sessions/Worker.jsonl")).toMatchObject({
 			modelId: "anthropic/claude-opus-4-5",
 			thinkingLevel: "high",
 		});

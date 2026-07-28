@@ -1,6 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
-import { AgentHubOverlayComponent } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
+import {
+	type AgentHubExternalPeer,
+	type AgentHubExternalPeerDataSource,
+	AgentHubOverlayComponent,
+} from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
 import { SessionObserverRegistry } from "@oh-my-pi/pi-coding-agent/modes/session-observer-registry";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -15,7 +19,10 @@ function add(registry: AgentRegistry, id: string, parentId = MAIN_AGENT_ID, stat
 	registry.register({ id, displayName: id, kind: "sub", parentId, session: liveSession(), status });
 }
 
-function makeHub(registry: AgentRegistry): AgentHubOverlayComponent {
+function makeHub(
+	registry: AgentRegistry,
+	externalIrc: AgentHubExternalPeerDataSource | null = null,
+): AgentHubOverlayComponent {
 	return new AgentHubOverlayComponent({
 		observers: new SessionObserverRegistry(),
 		hubKeys: [],
@@ -23,7 +30,8 @@ function makeHub(registry: AgentRegistry): AgentHubOverlayComponent {
 		requestRender: () => {},
 		registry,
 		irc: new IrcBus(registry),
-		externalIrc: null,
+		externalIrc,
+		externalSessionId: "tree-test-session",
 	});
 }
 
@@ -37,10 +45,7 @@ function selectedId(hub: AgentHubOverlayComponent): string | undefined {
 		.map(Bun.stripANSI)
 		.find(rendered => rendered.startsWith(" ❯ "));
 	if (!line) return undefined;
-	return line
-		.slice(23)
-		.trim()
-		.split(/\s+/)[0];
+	return line.slice(23).trim().split(/\s+/)[0];
 }
 
 function rosterLines(hub: AgentHubOverlayComponent): string[] {
@@ -84,11 +89,47 @@ describe("Agent Hub nested roster tree", () => {
 		add(registry, "Alpha.One.Leaf", "Alpha.One");
 		const hub = makeHub(registry);
 		const rendered = text(hub);
-		const indexes = ["Alpha Alpha", "  Alpha.One Alpha.One", "    Alpha.One.Leaf Alpha.One.Leaf", "  Alpha.Two Alpha.Two", "Beta Beta"].map(value =>
-			rendered.indexOf(value),
-		);
+		const indexes = [
+			"Alpha Alpha",
+			"  Alpha.One Alpha.One",
+			"    Alpha.One.Leaf Alpha.One.Leaf",
+			"  Alpha.Two Alpha.Two",
+			"Beta Beta",
+		].map(value => rendered.indexOf(value));
 		expect(indexes.every(index => index >= 0)).toBe(true);
 		expect(indexes).toEqual([...indexes].sort((left, right) => left - right));
+		hub.dispose();
+	});
+
+	it("renders parity identity lanes from external roster input without a live IRC bus", () => {
+		useGeometry();
+		const registry = new AgentRegistry();
+		let peers: AgentHubExternalPeer[] = [
+			{
+				sessionId: "external:roster-peer",
+				name: "RosterPeer",
+				cwd: "/tmp/roster-peer",
+				pid: 4242,
+				lastSeen: new Date(Date.now() - 60_000).toISOString(),
+				state: "working",
+				labels: {
+					label: "reviewer",
+					activity: "checking order",
+				},
+			},
+		];
+		const hub = makeHub(registry, { listPeers: () => peers });
+		const rendered = text(hub);
+
+		expect(rendered).toContain("RosterPeer external reviewer");
+		expect(rendered).toContain("checking order");
+		expect(rendered).toContain("/tmp/roster-peer");
+
+		peers = [{ ...peers[0]!, labels: { label: "reviewer", activity: "checking refreshed labels" } }];
+		add(registry, "Refresh");
+		const refreshed = text(hub);
+		expect(refreshed).toContain("checking refreshed labels");
+		expect(refreshed).not.toContain("checking order");
 		hub.dispose();
 	});
 

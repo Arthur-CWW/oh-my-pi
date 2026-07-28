@@ -85,7 +85,7 @@ function durableJournalModel(text: string): DurableJournalModel | undefined {
 			isChildRouteUpdateRecord(entry.data)
 		) {
 			childRouteUpdate = entry.data;
-	}
+		}
 	}
 	return modelId === undefined &&
 		thinkingLevel === undefined &&
@@ -214,11 +214,18 @@ export function isHistoricalAgent(ref: AgentRef, completed: boolean): boolean {
  * credential or quota recovery — so it ranks directly under `running`.
  */
 export function agentHistoryRank(ref: AgentRef, completed: boolean): number {
-	if (ref.status === "running") return 0;
-	if (ref.status === "waiting-provider") return 1;
-	if (ref.status === "idle") return completed ? 3 : 2;
-	if (ref.status === "parked") return 4;
-	return 5;
+	switch (ref.status) {
+		case "running":
+			return 0;
+		case "waiting-provider":
+			return 1;
+		case "idle":
+			return completed ? 3 : 2;
+		case "parked":
+			return 4;
+		case "aborted":
+			return 5;
+	}
 }
 
 /** Rendered in place of a roster lane whose source genuinely publishes no value. */
