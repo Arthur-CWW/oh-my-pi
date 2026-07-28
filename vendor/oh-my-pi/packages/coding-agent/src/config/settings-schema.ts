@@ -3949,6 +3949,23 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"task.memoryInterruptGraceMs": {
+		type: "number",
+		default: 20_000,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Subagent Memory Interrupt Grace",
+			description:
+				"How long a worker has to journal a hard-memory interruption before the parent writes the resumable terminal record and kills the owned process group (ms).",
+			options: [
+				{ value: "5000", label: "5 seconds" },
+				{ value: "20000", label: "20 seconds", description: "Default" },
+				{ value: "30000", label: "30 seconds" },
+			],
+		},
+	},
+
 	"task.agentIdleTtlMs": {
 		type: "number",
 		default: 420_000,

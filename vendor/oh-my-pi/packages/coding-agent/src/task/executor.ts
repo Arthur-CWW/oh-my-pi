@@ -58,6 +58,7 @@ import { buildNamedToolChoice } from "../utils/tool-choice";
 import type { WorkspaceTree } from "../workspace-tree";
 import {
 	appendChildLifecycleRecord,
+	appendInterruptedChildLifecycleFile,
 	type ChildFailureClass,
 	type ChildLifecycleState,
 	type ChildResumeDisposition,
@@ -75,6 +76,7 @@ import { getNumberField, getProgressUsageOutputTokens, getProgressUsageTokens } 
 import type { SpawnRouteReceipt } from "./route-resolution";
 import { createSpawnRecord } from "./spawn-record";
 import type { SpawnWorkerRunRequest } from "./spawn-worker-protocol";
+import { isMemoryWatermarkInterrupt } from "./subagent-failure";
 import { subprocessToolRegistry } from "./subprocess-tool-registry";
 import {
 	type AgentDefinition,
@@ -2079,8 +2081,20 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	} = options;
 	const startTime = Date.now();
 
-	// Check if already aborted
+	// A memory interrupt can arrive after request decode but before the executor
+	// installs its monitor. Preserve the typed reason and make the journal
+	// resumable instead of returning a generic, recordless cancellation.
 	if (signal?.aborted) {
+		const interruptReason = isAsyncJobInterruptReason(signal.reason) ? signal.reason.reason : undefined;
+		const memoryInterruptReason = isMemoryWatermarkInterrupt(interruptReason) ? interruptReason : undefined;
+		if (memoryInterruptReason && options.sessionFile && options.parentSessionFile) {
+			await appendInterruptedChildLifecycleFile({
+				agentId: id,
+				childSessionFile: options.sessionFile,
+				parentSessionFile: options.parentSessionFile,
+			});
+		}
+		const reason = memoryInterruptReason ?? "Cancelled before start";
 		return {
 			index,
 			id,
@@ -2091,16 +2105,16 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			description: options.description,
 			exitCode: 1,
 			output: "",
-			stderr: "Cancelled before start",
+			stderr: reason,
 			truncated: false,
 			durationMs: 0,
 			tokens: 0,
 			requests: 0,
 			modelOverride,
 			routeReceipt,
-			error: "Cancelled before start",
+			error: reason,
 			aborted: true,
-			abortReason: "Cancelled before start",
+			abortReason: reason,
 		};
 	}
 

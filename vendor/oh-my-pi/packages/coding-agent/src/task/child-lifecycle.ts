@@ -1,3 +1,4 @@
+import * as fs from "node:fs/promises";
 import type { CustomEntry, FileEntry } from "../session/session-entries";
 import type { SessionManager } from "../session/session-manager";
 
@@ -117,8 +118,7 @@ export function decodeChildLifecycleEntry(entry: FileEntry): ChildLifecycleRecor
 		!Number.isFinite(Date.parse(updatedAt)) ||
 		(modelId !== undefined && typeof modelId !== "string") ||
 		(thinkingLevel !== undefined && thinkingLevel !== null && typeof thinkingLevel !== "string") ||
-		(failureClass !== undefined &&
-			(typeof failureClass !== "string" || !(failureClass in CHILD_FAILURE_CLASSES))) ||
+		(failureClass !== undefined && (typeof failureClass !== "string" || !(failureClass in CHILD_FAILURE_CLASSES))) ||
 		(resumeDisposition !== undefined &&
 			(typeof resumeDisposition !== "string" || !(resumeDisposition in CHILD_RESUME_DISPOSITIONS)))
 	) {
@@ -136,9 +136,7 @@ export function decodeChildLifecycleEntry(entry: FileEntry): ChildLifecycleRecor
 			...(modelId === undefined ? {} : { modelId }),
 			...(thinkingLevel === undefined ? {} : { thinkingLevel }),
 			...(failureClass === undefined ? {} : { failureClass: failureClass as ChildFailureClass }),
-			...(resumeDisposition === undefined
-				? {}
-				: { resumeDisposition: resumeDisposition as ChildResumeDisposition }),
+			...(resumeDisposition === undefined ? {} : { resumeDisposition: resumeDisposition as ChildResumeDisposition }),
 		},
 	};
 }
@@ -195,12 +193,51 @@ export function latestChildRestartRecord(entries: readonly FileEntry[]): ChildRe
 	return latest;
 }
 /** Append one immutable lifecycle snapshot to its child journal. */
-export function appendChildLifecycleRecord(sessionManager: LifecycleSessionManager, record: ChildLifecycleRecord): void {
+export function appendChildLifecycleRecord(
+	sessionManager: LifecycleSessionManager,
+	record: ChildLifecycleRecord,
+): void {
 	sessionManager.appendCustomEntry(CHILD_LIFECYCLE_CUSTOM_TYPE, record);
 }
 
+export interface InterruptedChildLifecycleFile {
+	agentId: string;
+	childSessionFile: string;
+	parentSessionFile: string;
+}
+
+/**
+ * Append a resumable terminal record without taking over the child-owned
+ * SessionManager. One JSONL append stays atomic while the parent still owns the
+ * worker process group, and repeated writes preserve the same terminal state.
+ */
+export async function appendInterruptedChildLifecycleFile(child: InterruptedChildLifecycleFile): Promise<void> {
+	const updatedAt = new Date().toISOString();
+	const entry: CustomEntry<ChildLifecycleRecord> = {
+		type: "custom",
+		id: crypto.randomUUID(),
+		parentId: null,
+		timestamp: updatedAt,
+		customType: CHILD_LIFECYCLE_CUSTOM_TYPE,
+		data: {
+			version: 1,
+			agentId: child.agentId,
+			childSessionFile: child.childSessionFile,
+			parentSessionFile: child.parentSessionFile,
+			state: "interrupted",
+			updatedAt,
+			failureClass: "subprocess_abort",
+			resumeDisposition: "resumable",
+		},
+	};
+	await fs.appendFile(child.childSessionFile, `${JSON.stringify(entry)}\n`);
+}
+
 /** Advance an existing child journal without inventing lifecycle metadata for unrelated sessions. */
-export function transitionChildLifecycleRecord(sessionManager: LifecycleSessionManager, state: ChildLifecycleState): void {
+export function transitionChildLifecycleRecord(
+	sessionManager: LifecycleSessionManager,
+	state: ChildLifecycleState,
+): void {
 	const current = latestChildLifecycleRecord(sessionManager.getEntries());
 	if (!current || isTerminalChildLifecycleState(current.state)) return;
 	appendChildLifecycleRecord(sessionManager, { ...current, state, updatedAt: new Date().toISOString() });
@@ -212,7 +249,10 @@ export function latestChildLifecycleRecord(entries: readonly FileEntry[]): Child
 	for (const entry of entries) {
 		const decoded = decodeChildLifecycleEntry(entry);
 		if (decoded.kind === "invalid") return null;
-		if (decoded.kind === "valid" && (!latest || Date.parse(decoded.record.updatedAt) >= Date.parse(latest.updatedAt))) {
+		if (
+			decoded.kind === "valid" &&
+			(!latest || Date.parse(decoded.record.updatedAt) >= Date.parse(latest.updatedAt))
+		) {
 			latest = decoded.record;
 		}
 	}

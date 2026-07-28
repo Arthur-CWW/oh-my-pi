@@ -15,20 +15,24 @@ import type { Settings } from "../config/settings";
 import { AgentRegistry } from "../registry/agent-registry";
 import { matchesProcessIdentity, type ProcessIdentity } from "../resource/process-identity";
 import type { FileEntry } from "../session/session-entries";
-import { SessionManager } from "../session/session-manager";
 import type { EventBus } from "../utils/event-bus";
+import {
+	appendInterruptedChildLifecycleFile,
+	type ChildLifecycleState,
+	isTerminalChildLifecycleState,
+	latestChildLifecycleRecord,
+} from "./child-lifecycle";
 import { type ExecutorOptions, finalizeSubprocessOutput, snapshotExecutorSettings } from "./executor";
 import {
 	DEFAULT_MEMORY_HARD_WATERMARK_BYTES,
 	DEFAULT_MEMORY_SOFT_WATERMARK_BYTES,
 	deliverMemoryPressureNotice,
+	type MemoryWatermarks,
 	memoryHardWatermarkMessage,
 	memorySoftWatermarkNotice,
 	memoryWatermarkSampleInvalidMessage,
-	type MemoryWatermarks,
 	resolveMemoryWatermarks,
 } from "./memory-watermarks";
-import { isTerminalChildLifecycleState, latestChildLifecycleRecord, type ChildLifecycleState } from "./child-lifecycle";
 import {
 	decodeSpawnWorkerRecord,
 	type SerializableExecutorOptions,
@@ -50,6 +54,7 @@ const RSS_SAMPLE_INTERVAL_MS = 250;
 const RSS_SAMPLE_BYTES_PER_PID = 64;
 const SETUP_TIMEOUT_GRACE_MS = 60_000;
 const WORKER_REAP_TIMEOUT_MS = 1_500;
+const DEFAULT_MEMORY_INTERRUPT_GRACE_MS = 20_000;
 const DEFAULT_STALL_THRESHOLD_MS = 5 * 60_000;
 const SPAWN_CONTENTION_RETRY_DELAYS_MS = [50, 200] as const;
 let spawnLaunchTail: Promise<void> = Promise.resolve();
@@ -117,6 +122,8 @@ export interface SpawnWorkerClientOptions {
 	/** Sink for the soft-watermark notice; defaults to the child's external IRC peer. */
 	onMemoryPressureNotice?: (agentId: string, notice: string) => void;
 	timeoutMs?: number;
+	/** Bounded grace after a memory interrupt before the process group is killed. */
+	memoryInterruptGraceMs?: number;
 	/** Delay before a no-token/no-journal-activity worker is probed for liveness. */
 	stallThresholdMs?: number;
 	onProgress?: ExecutorOptions["onProgress"];
@@ -245,9 +252,10 @@ function signalWorkerProcessGroup(proc: Bun.Subprocess, signal: "SIGKILL"): void
 		// The worker may have exited between the live-owner check and the signal.
 	}
 }
-function signalWorkerMemoryInterrupt(proc: Bun.Subprocess): boolean {
+export function signalWorkerMemoryInterrupt(proc: Bun.Subprocess, expectedPid: number): boolean {
+	if (proc.pid !== expectedPid || proc.exitCode !== null || proc.signalCode !== null) return false;
 	try {
-		process.kill(proc.pid, "SIGUSR2");
+		proc.kill("SIGUSR2");
 		return true;
 	} catch {
 		return false;
@@ -282,9 +290,10 @@ function createProcessGroupTeardown(proc: Bun.Subprocess): (signalOwnedGroup: bo
 		},
 	);
 	return (signalOwnedGroup: boolean): void => {
+		// A graceful reap may already be waiting when the bounded memory grace
+		// expires. Escalation must still be able to kill the owned group.
+		if (signalOwnedGroup && !processExited && proc.exitCode === null) signalWorkerProcessGroup(proc, "SIGKILL");
 		if (teardown) return;
-
-		if (signalOwnedGroup && !processExited) signalWorkerProcessGroup(proc, "SIGKILL");
 		const work = waitForWorkerExit(proc, WORKER_REAP_TIMEOUT_MS);
 		teardown = work;
 		activeWorkerReapers.add(work);
@@ -327,14 +336,34 @@ export function enforceWorkerRssSample(
 		);
 		return;
 	}
-	for (const line of sample.text.split("\n")) {
-		const [pidText, rssText] = line.trim().split(/\s+/, 2);
-		const pid = Number.parseInt(pidText, 10);
-		const rssBytes = Number.parseInt(rssText, 10) * 1024;
+	const seen = new Set<number>();
+	for (const rawLine of sample.text.split("\n")) {
+		const line = rawLine.trim();
+		if (line.length === 0) continue;
+		const fields = line.split(/\s+/);
+		if (fields.length !== 2 || !/^\d+$/.test(fields[0]!) || !/^\d+$/.test(fields[1]!)) {
+			invalidateWorkerRssSample(watches, `ps emitted malformed row: ${JSON.stringify(line)}`);
+			return;
+		}
+		const pid = Number(fields[0]);
+		const rssKiB = Number(fields[1]);
+		if (!Number.isSafeInteger(pid) || pid <= 0 || !Number.isSafeInteger(rssKiB) || rssKiB < 0) {
+			invalidateWorkerRssSample(watches, `ps emitted invalid numeric row: ${JSON.stringify(line)}`);
+			return;
+		}
 		const watch = watches.get(pid);
-		if (!watch || !Number.isFinite(rssBytes)) continue;
+		if (!watch) continue;
+		seen.add(pid);
+		const rssBytes = rssKiB * 1024;
+		if (!Number.isSafeInteger(rssBytes)) {
+			invalidateWorkerRssSample(watches, `ps emitted overflowing RSS for pid ${pid}`);
+			return;
+		}
 		if (watch.hardBytes > 0 && rssBytes >= watch.hardBytes) watch.onHardWatermark(rssBytes);
 		else if (watch.softBytes > 0 && rssBytes >= watch.softBytes) watch.onSoftWatermark(rssBytes);
+	}
+	for (const [pid, watch] of watches) {
+		if (!seen.has(pid) && watch.hardBytes > 0) watch.onSampleInvalid(`ps omitted watched pid ${pid}`);
 	}
 }
 
@@ -713,6 +742,9 @@ async function runRequest(
 	let result: SingleResult | SyntheticSpawnResult | undefined;
 	let memoryInterruptRequested = false;
 	let memoryInterruptError: SpawnWorkerError | undefined;
+	let memoryInterruptSignaled = false;
+	let memoryEscalationStarted = false;
+	let memoryInterruptGraceTimer: ReturnType<typeof setTimeout> | undefined;
 	let sawReady = false;
 	let latestProgress = request.type === "run" ? initialWorkerProgress(request) : undefined;
 	let latestTokens = latestProgress?.tokens ?? 0;
@@ -723,6 +755,10 @@ async function runRequest(
 		softBytes: DEFAULT_MEMORY_SOFT_WATERMARK_BYTES,
 		hardBytes: DEFAULT_MEMORY_HARD_WATERMARK_BYTES,
 	};
+	const memoryInterruptGraceMs = Math.max(
+		0,
+		Math.trunc(options.memoryInterruptGraceMs ?? DEFAULT_MEMORY_INTERRUPT_GRACE_MS),
+	);
 	const stallThresholdMs = Math.max(1, Math.trunc(options.stallThresholdMs ?? DEFAULT_STALL_THRESHOLD_MS));
 	const probeIntervalMs = Math.max(10, Math.min(30_000, Math.trunc(stallThresholdMs / 4)));
 
@@ -735,6 +771,11 @@ async function runRequest(
 		clearTimeout(timeout);
 		timeout = undefined;
 	};
+	const disarmMemoryInterruptGrace = (): void => {
+		clearTimeout(memoryInterruptGraceTimer);
+		memoryInterruptGraceTimer = undefined;
+	};
+	void proc.exited.then(disarmMemoryInterruptGrace, disarmMemoryInterruptGrace);
 	const claimError = (error: TerminalError, signalOwnedGroup = true): void => {
 		if (terminalClaimed) return;
 		terminalPending = false;
@@ -803,6 +844,65 @@ async function runRequest(
 			void recoverOrFail(new SpawnWorkerError("timeout", `Subagent subprocess exceeded ${options.timeoutMs}ms`));
 		}, options.timeoutMs);
 	}
+	const persistParentMemoryInterrupt = async (): Promise<boolean> => {
+		if (request.type !== "run" || !request.options.sessionFile || !request.options.parentSessionFile) {
+			return false;
+		}
+		await appendInterruptedChildLifecycleFile({
+			agentId: request.options.id,
+			childSessionFile: request.options.sessionFile,
+			parentSessionFile: request.options.parentSessionFile,
+		});
+		return true;
+	};
+	const escalateMemoryInterrupt = async (): Promise<void> => {
+		if (memoryEscalationStarted) return;
+		memoryEscalationStarted = true;
+		disarmMemoryInterruptGrace();
+		const error =
+			memoryInterruptError ?? new SpawnWorkerError("memory-watermark", "Subagent memory interrupt grace expired");
+		let persisted = false;
+		if (!terminalClaimed) {
+			try {
+				persisted = await persistParentMemoryInterrupt();
+			} catch (journalError) {
+				beginTeardown(true);
+				claimError(
+					new JournalRecoveryError(
+						`Failed to persist resumable memory interruption: ${
+							journalError instanceof Error ? journalError.message : String(journalError)
+						}`,
+					),
+					false,
+				);
+				return;
+			}
+			await recoverOrFail(error, true);
+		}
+		beginTeardown(true);
+		if (persisted) {
+			void proc.exited.then(async () => {
+				// A worker can finish its own abort record just as the grace
+				// expires. Reassert the parent's terminal record after exit so
+				// the last durable state remains resumable and interrupted.
+				try {
+					await persistParentMemoryInterrupt();
+				} catch {
+					// The pre-kill durable record remains authoritative.
+				}
+			});
+		}
+	};
+	const armMemoryInterruptGrace = (): void => {
+		if (memoryInterruptGraceTimer || memoryEscalationStarted) return;
+		memoryInterruptGraceTimer = setTimeout(() => void escalateMemoryInterrupt(), memoryInterruptGraceMs);
+		memoryInterruptGraceTimer.unref?.();
+	};
+	const signalReadyWorkerForMemoryInterrupt = (): void => {
+		if (!memoryInterruptRequested || memoryInterruptSignaled || memoryEscalationStarted || !sawReady) return;
+		memoryInterruptSignaled = signalWorkerMemoryInterrupt(proc, proc.pid);
+		if (!memoryInterruptSignaled) void escalateMemoryInterrupt();
+	};
 	const watchedAgentId = request.type === "run" ? request.options.id : undefined;
 	const notifyMemoryPressure =
 		options.onMemoryPressureNotice ??
@@ -817,7 +917,11 @@ async function runRequest(
 		if (memoryInterruptRequested || terminalClaimed || terminalPending) return;
 		memoryInterruptRequested = true;
 		memoryInterruptError = error;
-		if (!signalWorkerMemoryInterrupt(proc)) void recoverOrFail(error, false);
+		armMemoryInterruptGrace();
+		// Before ready, SIGUSR2 may still have its default action because the
+		// worker entry module has not installed its handler. Defer the signal;
+		// the already-armed grace still bounds a worker that never becomes ready.
+		signalReadyWorkerForMemoryInterrupt();
 	};
 	const stopRssWatch = watchWorkerRss(proc.pid, {
 		softBytes: watermarks.softBytes,
@@ -870,6 +974,7 @@ async function runRequest(
 						return;
 					}
 					sawReady = true;
+					signalReadyWorkerForMemoryInterrupt();
 					break;
 				case "phase":
 					options.onPhase?.(record.phase);
@@ -1020,7 +1125,7 @@ async function runRequest(
 					new SpawnWorkerError(
 						"exit",
 						!sawReady
-							? "Subagent subprocess exited before ready or writing a terminal journal record"
+							? `Subagent subprocess exited before ready or writing a terminal journal record${stderr.trim() ? `: ${stderr.trim()}` : ""}`
 							: exitCode !== 0
 								? `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`
 								: "Subagent subprocess exited without a result or terminal journal record",
@@ -1091,6 +1196,7 @@ export function runSubagentSpawnProcess(
 		...clientOptions,
 		signal: clientOptions.signal ?? options.signal,
 		timeoutMs: clientOptions.timeoutMs ?? timeoutMs,
+		memoryInterruptGraceMs: clientOptions.memoryInterruptGraceMs ?? settings.get("task.memoryInterruptGraceMs"),
 		stallThresholdMs: clientOptions.stallThresholdMs ?? settings.get("task.stallThresholdMs"),
 		memoryWatermarks: clientOptions.memoryWatermarks ?? resolveMemoryWatermarks(settings),
 		onProgress: clientOptions.onProgress ?? options.onProgress,

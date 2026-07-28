@@ -1,21 +1,23 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
+import { AsyncJobManager, createAsyncJobInterruptReason } from "@oh-my-pi/pi-coding-agent/async/job-manager";
+import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import {
 	DEFAULT_ATTEMPT_RESERVATION_BYTES,
 	HostResourceAdmission,
 } from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
-import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { CURRENT_SESSION_VERSION, type FileEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import {
 	CHILD_LIFECYCLE_CUSTOM_TYPE,
-	classifyChildResumeEvidence,
 	type ChildFailureClass,
 	type ChildLifecycleRecord,
+	classifyChildResumeEvidence,
+	latestChildLifecycleRecord,
 } from "@oh-my-pi/pi-coding-agent/task/child-lifecycle";
+import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import {
 	listDurableChildJobs,
 	type ReAdoptedChild,
@@ -25,6 +27,7 @@ import { enforceWorkerRssSample } from "@oh-my-pi/pi-coding-agent/task/spawn-wor
 import {
 	isResumableSubagentFailureClass,
 	isTransientHostResourceFailure,
+	MEMORY_WATERMARK_MARKER,
 	type SubagentFailureClass,
 } from "@oh-my-pi/pi-coding-agent/task/subagent-failure";
 
@@ -48,7 +51,7 @@ function ownership(parent: string) {
 	};
 }
 
-async function fixture(id: string, failureClass: ChildFailureClass = "wall_timeout") {
+async function fixture(id: string, failureClass: ChildFailureClass = "wall_timeout", includeLifecycle = true) {
 	const base = path.join(process.cwd(), "test/.tmp");
 	await fs.mkdir(base, { recursive: true });
 	const root = await fs.mkdtemp(path.join(base, "child-resume-"));
@@ -72,40 +75,41 @@ async function fixture(id: string, failureClass: ChildFailureClass = "wall_timeo
 		failureClass,
 		resumeDisposition: failureClass === "fatal" ? "unrecoverable" : "resumable",
 	};
-	await fs.writeFile(
-		child,
-		[
-			JSON.stringify({ type: "session", version: CURRENT_SESSION_VERSION, id, timestamp, cwd: root }),
-			JSON.stringify({
-				type: "session_init",
-				id: "init",
-				parentId: null,
-				timestamp,
-				systemPrompt: "preserved system prompt",
-				task: "preserved rendered assignment",
-				tools: ["yield"],
-				subagent: {
+	const entries = [
+		JSON.stringify({ type: "session", version: CURRENT_SESSION_VERSION, id, timestamp, cwd: root }),
+		JSON.stringify({
+			type: "session_init",
+			id: "init",
+			parentId: null,
+			timestamp,
+			systemPrompt: "preserved system prompt",
+			task: "preserved rendered assignment",
+			tools: ["yield"],
+			subagent: {
+				agentId: id,
+				parentSessionFile: parent,
+				parentSessionId: "parent",
+				displayName: `${id} display`,
+				model: "provider/model",
+				taskDepth: 1,
+				parentTaskPrefix: id,
+				isolation: false,
+				isolated: false,
+				spawnRecord: {
+					version: 1,
 					agentId: id,
-					parentSessionFile: parent,
-					parentSessionId: "parent",
-					displayName: `${id} display`,
-					model: "provider/model",
-					taskDepth: 1,
-					parentTaskPrefix: id,
-					isolation: false,
-					isolated: false,
-					spawnRecord: {
-						version: 1,
-						agentId: id,
-						spawnerId: "Main",
-						agentType: "implementer",
-						definitionSourcePath: "embedded:implementer.md",
-						assignment: "original assignment",
-						context: "original context",
-						prompt: "original context\n\noriginal assignment",
-					},
+					spawnerId: "Main",
+					agentType: "implementer",
+					definitionSourcePath: "embedded:implementer.md",
+					assignment: "original assignment",
+					context: "original context",
+					prompt: "original context\n\noriginal assignment",
 				},
-			}),
+			},
+		}),
+	];
+	if (includeLifecycle) {
+		entries.push(
 			JSON.stringify({
 				type: "custom",
 				id: "lifecycle",
@@ -114,8 +118,9 @@ async function fixture(id: string, failureClass: ChildFailureClass = "wall_timeo
 				customType: CHILD_LIFECYCLE_CUSTOM_TYPE,
 				data: lifecycle,
 			}),
-		].join("\n") + "\n",
-	);
+		);
+	}
+	await fs.writeFile(child, `${entries.join("\n")}\n`);
 	return { root, parent, child };
 }
 
@@ -240,11 +245,13 @@ describe("resumeInterruptedChild", () => {
 			manager,
 			idleTtlMs: 0,
 			createReviver: async (resumedChild: ReAdoptedChild) => {
-				expect(resumedChild).toEqual(expect.objectContaining({
-					id: "Interrupted",
-					sessionFile: child,
-					task: "preserved rendered assignment",
-				}));
+				expect(resumedChild).toEqual(
+					expect.objectContaining({
+						id: "Interrupted",
+						sessionFile: child,
+						task: "preserved rendered assignment",
+					}),
+				);
 				return async () => {
 					reopened = await SessionManager.open(child);
 					expect(reopened.getCwd()).toBe(root);
@@ -272,13 +279,15 @@ describe("resumeInterruptedChild", () => {
 		const first = resumeInterruptedChild(options);
 		const second = resumeInterruptedChild(options);
 		const [left, right] = await Promise.all([first, second]);
-		expect(left).toEqual(expect.objectContaining({
-			status: "started",
-			agentId: "Interrupted",
-			jobId: "Interrupted",
-			transcriptUri: "history://Interrupted",
-			assignment: "original assignment",
-		}));
+		expect(left).toEqual(
+			expect.objectContaining({
+				status: "started",
+				agentId: "Interrupted",
+				jobId: "Interrupted",
+				transcriptUri: "history://Interrupted",
+				assignment: "original assignment",
+			}),
+		);
 		expect(right).toEqual(left);
 		expect(await resumeInterruptedChild(options)).toEqual({
 			status: "already_running",
@@ -295,14 +304,97 @@ describe("resumeInterruptedChild", () => {
 			.trim()
 			.split("\n")
 			.map(line => JSON.parse(line) as { customType?: string; data?: { agentId?: string; state?: string } });
-		expect(appended).toContainEqual(expect.objectContaining({
-			customType: CHILD_LIFECYCLE_CUSTOM_TYPE,
-			data: expect.objectContaining({ agentId: "Interrupted", state: "running" }),
-		}));
+		expect(appended).toContainEqual(
+			expect.objectContaining({
+				customType: CHILD_LIFECYCLE_CUSTOM_TYPE,
+				data: expect.objectContaining({ agentId: "Interrupted", state: "running" }),
+			}),
+		);
 		turn.resolve("done");
 		await reopened?.flush();
 	});
 
+	it("journals a typed memory interrupt that arrives before executor monitoring and resumes it", async () => {
+		const { root, parent, child } = await fixture("StartupInterrupted", "subprocess_abort", false);
+		const controller = new AbortController();
+		const reason = `${MEMORY_WATERMARK_MARKER} crossed before executor start; resumable`;
+		controller.abort(createAsyncJobInterruptReason("harness-memory", reason));
+
+		const cancelled = await runSubprocess({
+			cwd: root,
+			agent: {
+				name: "task",
+				description: "test",
+				systemPrompt: "test",
+				source: "bundled",
+			},
+			task: "report result",
+			assignment: "original assignment",
+			index: 0,
+			id: "StartupInterrupted",
+			sessionFile: child,
+			parentSessionFile: parent,
+			signal: controller.signal,
+		});
+
+		expect(cancelled.abortReason).toBe(reason);
+		const entries = (await fs.readFile(child, "utf8"))
+			.trim()
+			.split("\n")
+			.map(line => JSON.parse(line) as FileEntry);
+		expect(latestChildLifecycleRecord(entries)).toEqual(
+			expect.objectContaining({
+				agentId: "StartupInterrupted",
+				state: "interrupted",
+				failureClass: "subprocess_abort",
+				resumeDisposition: "resumable",
+			}),
+		);
+
+		HostResourceAdmission.global({
+			dbPath: path.join(root, "host-resource.sqlite"),
+			memoryBudgetBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES * 2,
+			queuePollMs: 5,
+		});
+		const manager = new AsyncJobManager({ onJobComplete: () => {} });
+		let reopened: SessionManager | undefined;
+		const resumed = await resumeInterruptedChild({
+			agentId: "StartupInterrupted",
+			parentSessionFile: parent,
+			parentSessionId: "parent",
+			parentJournal: parentJournal(parent) as never,
+			manager,
+			idleTtlMs: 0,
+			createReviver: async () => async () => {
+				reopened = await SessionManager.open(child);
+				return {
+					sessionManager: reopened,
+					model: undefined,
+					thinkingLevel: undefined,
+					subscribe: () => () => {},
+				} as never;
+			},
+			startTurn: () =>
+				manager.register(
+					"task",
+					"StartupInterrupted",
+					async ({ markRunning }) => {
+						markRunning();
+						return "resumed";
+					},
+					{ id: "StartupInterrupted", replaceTerminal: true },
+				),
+		});
+
+		expect(resumed).toEqual(
+			expect.objectContaining({
+				status: "started",
+				agentId: "StartupInterrupted",
+				jobId: "StartupInterrupted",
+			}),
+		);
+		await reopened?.close();
+	});
 	it("refuses when a live owner already holds the journal", async () => {
 		const { parent, child } = await fixture("LiveOwner");
 		const registry = AgentRegistry.global();
@@ -326,10 +418,12 @@ describe("resumeInterruptedChild", () => {
 			createReviver: async () => async () => ({}) as never,
 			startTurn: () => "LiveOwner",
 		});
-		expect(result).toEqual(expect.objectContaining({
-			status: "refused",
-			reason: "a live owner still holds this child",
-		}));
+		expect(result).toEqual(
+			expect.objectContaining({
+				status: "refused",
+				reason: "a live owner still holds this child",
+			}),
+		);
 	});
 
 	it("refuses a malformed lifecycle journal without invoking the reviver or changing bytes", async () => {
@@ -360,14 +454,16 @@ describe("resumeInterruptedChild", () => {
 			},
 			startTurn: () => "Corrupt",
 		});
-		expect(result).toEqual(expect.objectContaining({
-			status: "refused",
-			reason: "the child journal is malformed or unreadable",
-			classification: expect.objectContaining({
-				outcome: "unusable_journal",
-				disposition: "unrecoverable",
+		expect(result).toEqual(
+			expect.objectContaining({
+				status: "refused",
+				reason: "the child journal is malformed or unreadable",
+				classification: expect.objectContaining({
+					outcome: "unusable_journal",
+					disposition: "unrecoverable",
+				}),
 			}),
-		}));
+		);
 		expect(revived).toBe(false);
 		expect(await fs.readFile(child, "utf8")).toBe(before);
 	});
@@ -378,31 +474,35 @@ describe("resumeInterruptedChild", () => {
 		const records = await listDurableChildJobs({
 			parentSessionFile: parent,
 			parentSessionId: "parent",
-			parentEntries: [{
-				type: "custom",
-				id: "failure",
-				parentId: null,
-				timestamp: new Date(timestamp).toISOString(),
-				customType: "ui_error",
-				data: {
-					version: 2,
-					source: "task",
-					agent: "LostTranscript",
-					job: "LostTranscript",
-					errorClass: "lost-transcript",
-					disposition: "resumable",
-					message: "worker died before terminal journal write",
-					historyUri: "history://LostTranscript",
-					finalOutputAvailable: false,
-					lastTimestamp: timestamp,
+			parentEntries: [
+				{
+					type: "custom",
+					id: "failure",
+					parentId: null,
+					timestamp: new Date(timestamp).toISOString(),
+					customType: "ui_error",
+					data: {
+						version: 2,
+						source: "task",
+						agent: "LostTranscript",
+						job: "LostTranscript",
+						errorClass: "lost-transcript",
+						disposition: "resumable",
+						message: "worker died before terminal journal write",
+						historyUri: "history://LostTranscript",
+						finalOutputAvailable: false,
+						lastTimestamp: timestamp,
+					},
 				},
-			}],
+			],
 		});
-		expect(records).toContainEqual(expect.objectContaining({
-			id: "LostTranscript",
-			status: "failed",
-			disposition: "resumable",
-			outcome: "lost_transcript",
-		}));
+		expect(records).toContainEqual(
+			expect.objectContaining({
+				id: "LostTranscript",
+				status: "failed",
+				disposition: "resumable",
+				outcome: "lost_transcript",
+			}),
+		);
 	});
 });
