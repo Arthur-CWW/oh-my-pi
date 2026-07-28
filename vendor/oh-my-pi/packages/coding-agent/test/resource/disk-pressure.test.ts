@@ -117,3 +117,38 @@ describe("disk admission", () => {
 		expect(evaluateDiskAdmission(blocking, "readOnly").admitted).toBeTrue();
 	});
 });
+
+describe("statfs filesystem magic", () => {
+	// 0xCA451A4E, the bcachefs magic, as the platform delivers it: signed 32-bit.
+	const BCACHEFS_TYPE = -901440946;
+
+	it("admits a child on a filesystem whose magic has the high bit set", async () => {
+		const projection = await probeDiskPressure({
+			stateFile: null,
+			statfs: async () => ({ ...statfsFixture(40), type: BCACHEFS_TYPE }),
+			dryRun: true,
+		});
+		expect(projection.state).not.toBe("unavailable");
+		expect(evaluateDiskAdmission(projection, "heavy").admitted).toBeTrue();
+	});
+
+	it("keeps rejecting negative statfs quantities", async () => {
+		for (const field of ["bsize", "blocks", "bfree", "bavail"] as const) {
+			const projection = await probeDiskPressure({
+				stateFile: null,
+				statfs: async () => ({ ...statfsFixture(40), [field]: -1 }),
+				dryRun: true,
+			});
+			expect(projection.state).toBe("unavailable");
+		}
+	});
+
+	it("rejects a magic that is not a representable integer", async () => {
+		const projection = await probeDiskPressure({
+			stateFile: null,
+			statfs: async () => ({ ...statfsFixture(40), type: 1.5 }),
+			dryRun: true,
+		});
+		expect(projection.state).toBe("unavailable");
+	});
+});

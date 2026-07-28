@@ -110,6 +110,21 @@ const severity: Readonly<Record<DiskPressureState, number>> = {
 	unavailable: 4,
 };
 
+/**
+ * `statfs.type` is a filesystem magic number — an opaque bit pattern, not a
+ * quantity. Any magic with the high bit set is delivered as a negative signed
+ * value, so a non-negativity check rejects the filesystem outright. bcachefs
+ * (`0xCA451A4E`) arrives as `-901440946` and previously failed the probe, which
+ * made every child spawn on a bcachefs host abort with
+ * "Disk pressure probe unavailable". Validate that it is representable, and
+ * nothing more.
+ */
+function assertSafeInteger(value: number, name: string): void {
+	if (!Number.isSafeInteger(value)) {
+		throw new Error(`statfs ${name} must be a safe integer`);
+	}
+}
+
 function assertFiniteNonNegativeInteger(value: number, name: string): void {
 	if (!Number.isSafeInteger(value) || value < 0) {
 		throw new Error(`statfs ${name} must be a non-negative safe integer`);
@@ -118,7 +133,7 @@ function assertFiniteNonNegativeInteger(value: number, name: string): void {
 
 export function decodeStatfsBoundary(input: unknown): StatfsBoundary {
 	const decoded = Schema.decodeUnknownSync(StatfsBoundarySchema)(input);
-	assertFiniteNonNegativeInteger(decoded.type, "type");
+	assertSafeInteger(decoded.type, "type");
 	assertFiniteNonNegativeInteger(decoded.bsize, "bsize");
 	assertFiniteNonNegativeInteger(decoded.blocks, "blocks");
 	assertFiniteNonNegativeInteger(decoded.bfree, "bfree");
