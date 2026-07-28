@@ -1,9 +1,0 @@
-[package]
-name = "dst-mini-rs"
-version = "0.1.0"
-edition = "2024"
-description = "Rust implementation of the desktop deterministic simulation testing prototype"
-
-[profile.release]
-lto = "thin"
-codegen-units = 1

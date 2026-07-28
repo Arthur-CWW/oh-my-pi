@@ -1,24 +1,17 @@
-## Changed
+## What
 
-- 
+<!-- Brief description of the change -->
 
-## Proof
+## Why
 
-List the commands and artifacts that prove the work.
+<!-- Motivation, context, or link to issue (fixes #N) -->
 
-- Command: `...` -> passed/failed/skipped
-- Report: `docs/qa/...`
-- Video, screenshots, logs, CSV, JSON, or snapshots: `artifacts/...`
+## Testing
 
-## Rerun
+<!-- How was this tested? -->
 
-```bash
-# exact commands, from exact cwd
-```
+---
 
-## Review Notes
-
-- Expensive/live calls skipped:
-- Manual steps required:
-- Unrelated dirty files or known caveats:
-
+- [ ] `bun check` passes
+- [ ] Tested locally
+- [ ] CHANGELOG updated (if user-facing)

@@ -1,1 +1,0 @@
-restrict,command="/usr/libexec/remote-auth-broker/current/bin/remote-auth-broker-sudo-ingest",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,no-user-rc

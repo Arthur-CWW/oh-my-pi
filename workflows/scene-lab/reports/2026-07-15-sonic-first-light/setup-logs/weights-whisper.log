@@ -1,3 +1,0 @@
-Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:12,  1.22it/s]Fetching 16 files:  12%|█▎        | 2/16 [00:00<00:05,  2.40it/s]Fetching 16 files:  31%|███▏      | 5/16 [07:45<20:21, 111.05s/it]Fetching 16 files:  81%|████████▏ | 13/16 [08:22<01:39, 33.16s/it]Fetching 16 files: 100%|██████████| 16/16 [08:22<00:00, 31.41s/it]
-[32m✓ Downloaded[0m
-  path: /home/arthur/sonic-lab/Sonic/checkpoints/whisper-tiny

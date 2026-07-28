@@ -1,6 +1,0 @@
-.build/
-.swiftpm/
-dist/
-node_modules/
-ubuntu/target/
-.DS_Store

@@ -1,3 +1,0 @@
-[submodule "packages/web-access/vendor/kagi-chrome-extension"]
-	path = packages/web-access/vendor/kagi-chrome-extension
-	url = https://github.com/kagisearch/chrome_extension_basic.git

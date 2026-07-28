@@ -1,9 +1,0 @@
-#!/bin/sh
-# Promote the OMP fork asynchronously after commits that change its source.
-if ! git diff-tree --no-commit-id --name-only -r HEAD | grep -q '^vendor/oh-my-pi/'; then
-	exit 0
-fi
-
-mkdir -p local 2>/dev/null || exit 0
-nohup mise run omp-promote >> local/omp-promote.log 2>&1 </dev/null &
-exit 0

@@ -1,6 +1,0 @@
-packages:
-  - "extensions/*"
-  - "packages/*"
-  - "skills/*"
-  - "tools/*"
-  - "reveng/*"

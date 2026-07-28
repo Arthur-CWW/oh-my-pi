@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Boot out and remove the disk-pressure user LaunchAgent"
-set -euo pipefail
-target_plist="${HOME}/Library/LaunchAgents/com.wirebabel.disk-pressure.plist"
-domain="gui/$(id -u)"
-if /bin/launchctl print "${domain}/com.wirebabel.disk-pressure" >/dev/null 2>&1; then
-  /bin/launchctl bootout "${domain}/com.wirebabel.disk-pressure"
-fi
-/bin/rm -f "${target_plist}"

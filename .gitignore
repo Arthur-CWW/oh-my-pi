@@ -1,141 +1,79 @@
+# Dependencies
 node_modules/
-packages/*/node_modules/
-apps/*/node_modules/
-packages/*/target/
-.pi/npm/
-.pi/git/
-bun.lock
-package-lock.json
+.npm/
 
+# Build output
+dist/
+packages/*/dist/
+packages/*/dist-chrome/
+packages/*/dist-firefox/
+target/
+*.tsbuildinfo
+*.node
+*.b64.js
+
+# Environment
 .env
-.claude-trace
-pi-session-*
-*.mp4
-prompt.md
--.en.vtt
+
+# Editors
+.vscode/
+.zed/
+.idea/
+*.swp
+*.swo
+*.kate-swp
+*~
+
+# OS
+*.tmp
 .DS_Store
 
-# Local scratch/artifacts
-# Session exports, crash dumps, and test output
-erl_crash.dump
-omp-session-*.html
-telegram_upload_session.session
-packages/spatial-audio-renderer/test-output/
-.omp/bin/*.bak.*
-apps/scene-playground/.tmp-test/
+# Logs & profiling
+*.log
+tui-debug.log
+*.cpuprofile
 
-codex-decomp/
-tmp/
-vault
-data/
-artifacts/
-VoiceInk/
-.cache/
-*.sqlite
-*.sqlite-*
+# Test & coverage
+coverage/
+.nyc_output/
+packages/ai/test/.temp-images/
 
-# Large vendored repos and generated skill/tool checkouts
-vendor/*
-!vendor/oh-my-pi/
-!vendor/oh-my-pi/**
-!vendor/openai/
-vendor/openai/*
-!vendor/openai/README.md
-!vendor/openai/codex-plugin-catalog.json
-!vendor/openai/symphony/
-!vendor/openai/symphony/**
-vendor/openai/symphony/.git/
-vendor/openai/symphony/elixir/_build/
-vendor/openai/symphony/elixir/deps/
-!vendor/openai/codex-plugin-router-skills/
-!vendor/openai/codex-plugin-router-skills/**
-!vendor/mitsuhiko/
-vendor/mitsuhiko/*
-!vendor/mitsuhiko/README.md
-!vendor/mitsuhiko/agent-stuff/
-!vendor/mitsuhiko/agent-stuff/**
-!vendor/mattiamanzati/
-vendor/mattiamanzati/*
-!vendor/mattiamanzati/README.md
-!vendor/noumena/
-vendor/noumena/*
-!vendor/noumena/code/
-!vendor/noumena/code/**
-vendor/noumena/code/node_modules/
-vendor/noumena/code/dist/
-vendor/noumena/code/.tmp/
-vendor/noumena/code/.git/
-!vendor/badlogic/
-vendor/badlogic/*
-!vendor/badlogic/pi-skills/
-!vendor/badlogic/pi-skills/**
-!vendor/pluginslab/
-vendor/pluginslab/*
-!vendor/pluginslab/vphone-mcp/
-!vendor/pluginslab/vphone-mcp/**
-!vendor/vercel/
-vendor/vercel/*
-!vendor/vercel/agent-skills/
-!vendor/vercel/agent-skills/**
-!vendor/zanwei/
-vendor/zanwei/*
-!vendor/zanwei/design-dna/
-!vendor/zanwei/design-dna/**
-!vendor/stablyai/
-vendor/stablyai/*
-!vendor/stablyai/orca/
-!vendor/stablyai/orca/**
-!vendor/alipay/
-vendor/alipay/*
-!vendor/alipay/payment-skills/
-!vendor/alipay/payment-skills/**
-vendor/alipay/payment-skills/.git/
-!vendor/wechatpay-apiv3/
-vendor/wechatpay-apiv3/*
-!vendor/wechatpay-apiv3/wechatpay-skills/
-!vendor/wechatpay-apiv3/wechatpay-skills/**
-vendor/wechatpay-apiv3/wechatpay-skills/.git/
-!vendor/nexu-io--open-design/
-!vendor/nexu-io--open-design/**
-vendor/nexu-io--open-design/.git/
-vendor/nexu-io--open-design/**/node_modules/
-vendor/nexu-io--open-design/**/dist/
-vendor/nexu-io--open-design/**/out/
-vendor/nexu-io--open-design/**/.tmp/
-vendor/nexu-io--open-design/**/.od/
-vendor/nexu-io--open-design/**/.next/
-packages/web-access/vendor/*
-!packages/web-access/vendor/kagi-chrome-extension/
-!vendor/ln-dev7/
-vendor/ln-dev7/*
-!vendor/ln-dev7/circle/
-!vendor/ln-dev7/circle/**
-vendor/ln-dev7/circle/node_modules/
-vendor/ln-dev7/circle/.next/
-skills/chrome-devtools-mcp/
-packages/web-access/skills/chrome-devtools-mcp/
-vendor/badlogic/pi-skills/browser-tools/output/
+# Project specific
+!.omp/
+.omp/plugins/
+.pi_config/
+.opencode/
+.worktrees/
+compaction-results/
+changes/
+__pycache__/
 
-# Machine-local OMP release/proof storage (shared outside jj workspaces)
-/vendor/oh-my-pi/local/
-/local/*/vendor/oh-my-pi/local/
-.pi/extensions/*.disabled
+# Scratch files
+syntax.jsonl
+out.jsonl
+out.html
+pi-*.html
 
-# Nested local-first AI companion RTC testbed (separate git repo)
-apps/ai-companion-rtc/
+# Generated files
+packages/coding-agent/src/internal-urls/docs-index.generated.ts
+packages/coding-agent/src/export/html/tool-views.generated.js
+packages/natives/npm/
+/runs/
+python/omp-rpc/src/omp_rpc.egg-info/
+# parallel-agent worktrees
+.wt/
+CPU*.md
+packages/coding-agent/binaries/
 
-# stream reference material (moved/symlinked, indexed in tracked INDEX.md files)
-streams/*/inspiration/
-streams/*/feedstock/
-streams/*/repos/
-streams/primer/wrapped-commentary-reader/
+# robomp runtime state
+python/robomp/data/
+python/robomp/.cache/
+python/robomp/src/robomp/static/
+python/robomp/web/dist/
+python/robomp/.env
 
-# ToS-removed content (archived locally, never committed)
-.archive/
+# Local, machine-specific boot perf baseline (see packages/coding-agent/scripts/bench-guard.ts)
+packages/coding-agent/bench/boot-baseline.json
 
-# Local Obsidian vault symlink
-/vault
-local/omp-promote.log
-
-# disposable machine-local space (docs/state/agents-topology.md)
+# Machine-local release/proof state is externalized under XDG_DATA_HOME.
 /local/

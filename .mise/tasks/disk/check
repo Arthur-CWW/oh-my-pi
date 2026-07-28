@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Dry-run disk notification and new-heavy-work admission without state mutation"
-set -euo pipefail
-repo_root="${MISE_PROJECT_ROOT:-$(pwd)}"
-exec bun "${repo_root}/vendor/oh-my-pi/packages/coding-agent/scripts/disk-pressure.ts" check --dry-run "$@"

@@ -1,3 +1,0 @@
-{"type":"session","version":3,"id":"terminal-session","timestamp":"2026-07-01T00:00:00.000Z","cwd":"/tmp/project"}
-{"type":"message","id":"user-1","timestamp":"2026-07-01T00:01:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Complete the already finished task"}]}}
-{"type":"message","id":"assistant-1","timestamp":"2026-07-01T00:02:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}],"stopReason":"stop"}}

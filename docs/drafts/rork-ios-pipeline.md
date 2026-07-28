@@ -1,1 +1,0 @@
-I’ll focus this on an iOS-first, Swift/SwiftUI-native pipeline, separating simulator feedback loops from real-device testing because the tooling and costs differ.
