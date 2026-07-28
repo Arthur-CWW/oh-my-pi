@@ -89,7 +89,7 @@
 		"sherpa-onnx-node": "1.13.2"
 	},
 	"devDependencies": {
-		"@agents/provider-testkit": "file:../../../../packages/provider-testkit",
+		"@agents/provider-testkit": "file:../../../packages/provider-testkit",
 		"@types/bun": "catalog:",
 		"fast-check": "4.8.0"
 	},
