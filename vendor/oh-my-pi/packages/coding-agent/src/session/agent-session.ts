@@ -12974,7 +12974,7 @@ export class AgentSession {
 				type: "auto_retry_end",
 				success: false,
 				attempt,
-				finalError: `Provider requested a wait beyond retry.maxDelayMs (${maxDelayMs}ms).`,
+				finalError: `Provider requested ${Math.ceil(delayMs)}ms wait, exceeds retry.maxDelayMs (${maxDelayMs}ms).`,
 			});
 			this.#resolveRetry();
 			return false;

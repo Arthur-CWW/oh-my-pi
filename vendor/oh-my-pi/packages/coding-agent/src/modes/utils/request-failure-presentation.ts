@@ -6,6 +6,7 @@ import {
 	type RetryCause,
 	requestFailureCauseFromRetryCause,
 } from "@oh-my-pi/pi-ai";
+import { isRetryableError } from "@oh-my-pi/pi-utils";
 import type { DiagnosticEventInput } from "../../session/error-inbox-ledger";
 
 import type { AssistantMessageComponent } from "../components/assistant-message";
@@ -189,7 +190,10 @@ export function shouldAwaitRetryDisposition(message: AssistantMessage): boolean 
 	)
 		return false;
 	const cause = classifyAssistantRequestFailure(message);
-	return cause === "provider-stream-abort" || cause === "timeout" || cause === "network" || cause === "rate-limit";
+	if (cause === "provider-stream-abort" || cause === "timeout" || cause === "network" || cause === "rate-limit") {
+		return true;
+	}
+	return isRetryableError({ message: extractRequestFailureDetail(message), status: message.errorStatus });
 }
 
 interface PendingRequestFailure {
