@@ -24,7 +24,7 @@ import { Effect, Schema } from "effect";
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1_048_576;
 const DEFAULT_MAX_PROCESSES = 100_000;
 const DEFAULT_TIMEOUT_MS = 2_000;
-const EXECUTABLE_FALLBACK_DIRS = ["/usr/sbin", "/sbin"] as const;
+const EXECUTABLE_FALLBACK_PATH = ["/usr/sbin", "/sbin"].join(path.delimiter);
 const MAX_STDERR_BYTES = 64 * 1_024;
 
 /** Full-host snapshot argv. `lstart=` is last because it is the only field containing spaces. */
@@ -112,11 +112,10 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 
 const executablePaths = new Map<string, string | null>();
 
-export function resolveExecutable(name: string): string | null {
+function resolveExecutable(name: string): string | null {
 	const cached = executablePaths.get(name);
 	if (cached !== undefined) return cached;
-	const fallbackPath = EXECUTABLE_FALLBACK_DIRS.join(path.delimiter);
-	const resolved = Bun.which(name) ?? Bun.which(name, { PATH: fallbackPath }) ?? null;
+	const resolved = Bun.which(name) ?? Bun.which(name, { PATH: EXECUTABLE_FALLBACK_PATH }) ?? null;
 	executablePaths.set(name, resolved);
 	return resolved;
 }
