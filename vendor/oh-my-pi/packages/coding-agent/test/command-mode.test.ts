@@ -20,6 +20,7 @@ import {
 	canEnterCommandMode,
 	installCommandLine,
 } from "@oh-my-pi/pi-coding-agent/modes/components/command-line";
+import { IdentityPanelState } from "@oh-my-pi/pi-coding-agent/modes/components/identity-panel";
 import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { toggleRichTranscript } from "@oh-my-pi/pi-coding-agent/modes/transcript-commands";
 import type { TranscriptDisplayContext } from "@oh-my-pi/pi-coding-agent/modes/transcript-display";
@@ -47,10 +48,13 @@ class CommandFixture implements CommandModeContext {
 	tabsRuns = 0;
 	feedback: string[] = [];
 	copied: string[] = [];
+	identityPanels: IdentityPanelState[] = [];
 	identity = {
 		sessionId: "019f6141-df73-7000-b792-985f12d9db5d",
 		sessionName: "Identity repro",
 		agentId: "Main",
+		hostname: "nixbox",
+		projectDir: "/work/agents",
 		journalPath: "/tmp/session.jsonl",
 		binaryVersion: "16.0.1+fork.test",
 	};
@@ -80,8 +84,13 @@ class CommandFixture implements CommandModeContext {
 		return this.identity;
 	}
 
-	copyIdentityHandle(handle: string): void {
-		this.copied.push(handle);
+	async showIdentityPanel(identity: CommandFixture["identity"]): Promise<void> {
+		const state = new IdentityPanelState(identity);
+		await state.activate(handle => {
+			this.copied.push(handle);
+		});
+		this.identityPanels.push(state);
+		this.feedback.push(state.content);
 	}
 
 	showVersion(): void {
@@ -192,19 +201,42 @@ describe("colon command registry", () => {
 		expect(help.feedback.at(-1)).toContain("press ? for selected-agent metadata");
 	});
 
-	it(":id and :whoami emit a structured identity and copy the paste-ready handle", async () => {
+	it(":id and :whoami share one identity panel command and copy the paste-ready handle", async () => {
 		const ctx = new CommandFixture();
 		for (const command of [":id", ":whoami"]) expect(await dispatchCommandLine(command, ctx)).toBe(true);
 		const output = ctx.feedback.at(-1) ?? "";
 		expect(output).toContain("session id: 019f6141-df73-7000-b792-985f12d9db5d");
 		expect(output).toContain("session name: Identity repro");
-		expect(output).toContain("agent id: Main");
+		expect(output).toContain("agent IRC id: Main");
+		expect(output).toContain("host/project: nixbox · /work/agents");
 		expect(output).toContain("journal: /tmp/session.jsonl");
-		expect(output).toContain("status segment: session (renders 019f6141)");
+		expect(output).toContain("copied: 019f6141-df73-7000-b792-985f12d9db5d/Main via OSC52");
+		expect(ctx.identityPanels).toHaveLength(2);
 		expect(ctx.copied).toEqual([
 			"019f6141-df73-7000-b792-985f12d9db5d/Main",
 			"019f6141-df73-7000-b792-985f12d9db5d/Main",
 		]);
+	});
+
+	it("keeps identity state open until Esc and performs its copy activation once", async () => {
+		const identity = new CommandFixture().identity;
+		const state = new IdentityPanelState(identity);
+		const copied: string[] = [];
+		const activate = () =>
+			state.activate(handle => {
+				copied.push(handle);
+			});
+
+		await Promise.all([activate(), activate()]);
+		expect(state.content).toContain("agent IRC id: Main");
+		expect(state.content).toContain("host/project: nixbox · /work/agents");
+		expect(state.copied).toBe(true);
+		expect(copied).toEqual(["019f6141-df73-7000-b792-985f12d9db5d/Main"]);
+		expect(state.handleInput("c")).toBe(false);
+		expect(state.dismissed).toBe(false);
+		expect(state.handleInput("\u001b")).toBe(true);
+		expect(state.dismissed).toBe(true);
+		expect(state.handleInput("\u001b")).toBe(false);
 	});
 
 	it("keeps colon mode and view-local commands available while a child is focused", async () => {
@@ -235,7 +267,7 @@ describe("colon command registry", () => {
 			"bookmarks",
 		]);
 		expect(await dispatchCommandLine(":id", ctx, childCommands)).toBe(true);
-		expect(ctx.feedback.at(-1)).toContain("agent id: CardQualityAudit");
+		expect(ctx.feedback.at(-1)).toContain("agent IRC id: CardQualityAudit");
 		expect(ctx.copied.at(-1)).toBe("019f6141-df73-7000-b792-985f12d9db5d/CardQualityAudit");
 	});
 

@@ -5,7 +5,7 @@ import {
 	resolvePrimitiveCategory,
 } from "./components/primitives-inspector-state";
 import { renderCommandShortcutSection } from "./interaction-registry";
-import { formatSessionIdentity, type SessionIdentity, sessionIdentityHandle } from "./session-identity";
+import type { SessionIdentity } from "./session-identity";
 
 export interface CommandModeContext {
 	readonly collabGuest?: CollabGuestLink;
@@ -25,7 +25,7 @@ export interface CommandModeContext {
 	showLoopStats(): void | Promise<void>;
 	showTabs(): void | Promise<void>;
 	getSessionIdentity(): SessionIdentity;
-	copyIdentityHandle(handle: string): void | Promise<void>;
+	showIdentityPanel(identity: SessionIdentity): void | Promise<void>;
 	bookmarkCurrent?(args: readonly string[]): void | Promise<void>;
 	showBookmarks?(): void;
 	readonly commands?: readonly CommandModeCommand[];
@@ -108,7 +108,9 @@ function showGlobalCommandHelp(ctx: CommandModeContext): void {
 					: "";
 				return `:${command.name}${aliases} — ${command.description}`;
 			})
-			.join("\n")}${renderCommandShortcutSection()}\n\nInside Agent Hub, press ? for selected-agent metadata and contextual keys.`,
+			.join(
+				"\n",
+			)}${renderCommandShortcutSection()}\n\nInside Agent Hub, press ? for selected-agent metadata and contextual keys.`,
 	);
 }
 
@@ -124,10 +126,8 @@ export const COMMAND_MODE_COMMANDS: readonly CommandModeCommand[] = [
 		aliases: ["whoami"],
 		description: "show and copy the focused session/agent identity",
 		viewLocal: true,
-		async run(ctx) {
-			const identity = ctx.getSessionIdentity();
-			await ctx.copyIdentityHandle(sessionIdentityHandle(identity));
-			ctx.showFeedback(formatSessionIdentity(identity));
+		run(ctx) {
+			return ctx.showIdentityPanel(ctx.getSessionIdentity());
 		},
 	},
 	{

@@ -4,7 +4,7 @@ import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { TERMINAL } from "@oh-my-pi/pi-tui";
 import { formatDuration, formatNumber, getProjectDir, pathIsWithin, relativePathWithinRoot } from "@oh-my-pi/pi-utils";
 import { settings } from "../../../config/settings";
-import { type ThemeColor, theme } from "../../../modes/theme/theme";
+import { theme } from "../../../modes/theme/theme";
 import { shortenPath } from "../../../tools/render-utils";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
 import { sanitizeStatusText } from "../../shared";
@@ -15,8 +15,8 @@ import {
 	getContextUsageLevel,
 	getContextUsageThemeColor,
 } from "./context-thresholds";
-import { processMemoryFootprintSampler } from "./memory-footprint";
 import { mainTokenRateSegment } from "./main-token-rate";
+import { processMemoryFootprintSampler } from "./memory-footprint";
 import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
 
 export type { SegmentContext } from "./types";
@@ -79,7 +79,9 @@ const piSegment: StatusLineSegment = {
 			const icon = theme.icon.ghost ? `${theme.icon.ghost} ` : "";
 			return { content: theme.fg("warning", `${icon}${ctx.focusedAgentId} `), visible: true };
 		}
-		const content = theme.icon.pi ? `${theme.icon.pi} ` : "";
+		const icon = theme.icon.pi ? `${theme.icon.pi} ` : "";
+		const agentId = ctx.session.getAgentId() ?? "Main";
+		const content = ctx.width < 40 ? icon : `${icon}${agentId} `;
 		return { content: theme.fg("accent", content), visible: true };
 	},
 };
@@ -100,10 +102,10 @@ const modelSegment: StatusLineSegment = {
 			opts.showThinkingLevel === false
 				? baseSelector
 				: (withModelSelectorEffort(baseSelector, {
-					session: effort,
-					modelDefault: model?.thinking?.defaultLevel,
-					reasoning: model?.reasoning,
-				}) ?? baseSelector);
+						session: effort,
+						modelDefault: model?.thinking?.defaultLevel,
+						reasoning: model?.reasoning,
+					}) ?? baseSelector);
 		const label = renderModelSelectorStatusLabel(selector);
 		let content = theme.icon.model ? `${theme.fg("statusLineModel", `${theme.icon.model} `)}${label}` : label;
 		if (ctx.session.isAdvisorActive()) content += theme.fg("success", "++");

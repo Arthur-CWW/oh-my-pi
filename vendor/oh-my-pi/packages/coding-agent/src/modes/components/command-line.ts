@@ -1,10 +1,10 @@
+import * as os from "node:os";
 import { CompletionBehavior, Container, Input, matchesKey, type SelectItem, SelectList, Text } from "@oh-my-pi/pi-tui";
-import { logger, VERSION } from "@oh-my-pi/pi-utils";
+import { getProjectDir, logger, VERSION } from "@oh-my-pi/pi-utils";
 import type { HistoryStorage } from "../../session/history-storage";
 import { formatLoopStats } from "../../slash-commands/loopstats";
 import { formatTabs } from "../../slash-commands/tabs";
 import { buildVersionViewModel, formatVersion } from "../../slash-commands/version";
-import { DynamicBorder } from "./dynamic-border";
 import { routeCommandOutput } from "../../task/route-inspector";
 import { listTabs } from "../../tools/browser/tab-supervisor";
 import { copyToClipboard } from "../../utils/clipboard";
@@ -19,10 +19,13 @@ import {
 	dispatchCommandLine,
 	getCommandModeCompletions,
 } from "../command-registry";
+import type { SessionIdentity } from "../session-identity";
 import { getSelectListTheme } from "../theme/theme";
 import { toggleRichTranscript, toggleTranscriptWrap } from "../transcript-commands";
 import type { InteractiveModeContext } from "../types";
 import { matchesUiDismiss } from "../utils/keybinding-matchers";
+import { DynamicBorder } from "./dynamic-border";
+import { IdentityPanelComponent, IdentityPanelState } from "./identity-panel";
 
 const DEFAULT_MAX_VISIBLE = 12;
 const MAX_COMMAND_OUTPUT_LINES = 12;
@@ -259,6 +262,11 @@ export function commandModeContextForInteractive(
 	ctx: InteractiveModeContext,
 	commands: readonly CommandModeCommand[],
 	showOutput: (message: string) => void = message => ctx.showStatus(message),
+	showIdentityPanel: CommandModeContext["showIdentityPanel"] = async identity => {
+		const state = new IdentityPanelState(identity);
+		await state.activate(copyToClipboard);
+		showOutput(state.content);
+	},
 ): CommandModeContext {
 	return {
 		collabGuest: ctx.collabGuest,
@@ -303,11 +311,13 @@ export function commandModeContextForInteractive(
 				sessionId: ctx.sessionManager.getSessionId(),
 				sessionName: ctx.sessionManager.getSessionName(),
 				agentId: ctx.focusedAgentId ?? viewSession.getAgentId() ?? "Main",
+				hostname: os.hostname(),
+				projectDir: getProjectDir(),
 				journalPath: viewSession.sessionManager.getSessionFile(),
 				binaryVersion: VERSION,
 			};
 		},
-		copyIdentityHandle: handle => copyToClipboard(handle),
+		showIdentityPanel,
 		bookmarkCurrent: args => ctx.bookmarkCurrent(args),
 		showBookmarks: () => ctx.showBookmarks(),
 		showFeedback: showOutput,
@@ -322,17 +332,38 @@ export function installCommandLine(ctx: InteractiveModeContext): void {
 	let outputOverlay: ReturnType<InteractiveModeContext["ui"]["showOverlay"]> | undefined;
 	const showOutput = (message: string): void => {
 		outputOverlay?.hide();
-		let component: CommandOutputOverlayComponent;
 		const dismiss = (): void => {
 			outputOverlay?.hide();
 			outputOverlay = undefined;
 			ctx.ui.requestRender();
 		};
-		component = new CommandOutputOverlayComponent(message, dismiss);
+		const component = new CommandOutputOverlayComponent(message, dismiss);
 		outputOverlay = ctx.ui.showOverlay(component, {
 			anchor: "bottom-center",
 			width: "100%",
 			maxHeight: MAX_COMMAND_OUTPUT_LINES + 2,
+			margin: { bottom: 1 },
+		});
+		ctx.ui.setFocus(component);
+		ctx.ui.requestRender();
+	};
+	let identityOverlay: ReturnType<InteractiveModeContext["ui"]["showOverlay"]> | undefined;
+	const showIdentityPanel = async (identity: SessionIdentity): Promise<void> => {
+		identityOverlay?.hide();
+		const priorFocus = ctx.ui.getFocused();
+		const state = new IdentityPanelState(identity);
+		await state.activate(copyToClipboard);
+		const dismiss = (): void => {
+			identityOverlay?.hide();
+			identityOverlay = undefined;
+			ctx.ui.setFocus(priorFocus);
+			ctx.ui.requestRender();
+		};
+		const component = new IdentityPanelComponent(state, dismiss);
+		identityOverlay = ctx.ui.showOverlay(component, {
+			anchor: "bottom-center",
+			width: "100%",
+			maxHeight: 14,
 			margin: { bottom: 1 },
 		});
 		ctx.ui.setFocus(component);
@@ -358,10 +389,14 @@ export function installCommandLine(ctx: InteractiveModeContext): void {
 			ctx.ui.setFocus(priorFocus);
 			ctx.ui.requestRender();
 		};
-		commandLine = new CommandLineComponent(commandModeContextForInteractive(ctx, commands, showOutput), restore, {
-			commands,
-			historyStorage: ctx.historyStorage,
-		});
+		commandLine = new CommandLineComponent(
+			commandModeContextForInteractive(ctx, commands, showOutput, showIdentityPanel),
+			restore,
+			{
+				commands,
+				historyStorage: ctx.historyStorage,
+			},
+		);
 		if (useEditorSlot) {
 			ctx.editorContainer.clear();
 			ctx.editorContainer.addChild(commandLine);

@@ -87,6 +87,7 @@
 - Eval `agent()`/`agentType` defaults, gallery fixtures, and the task tool prompt now use named responsibility templates; catch-all `task` is documented as a deprecated migration alias.
 - `Enter` on an empty prompt during streaming now aborts and delivers the next queued durable follow-up exactly once (removing it from the queue); with an empty queue it remains abort-only.
 ### Fixed
+- `:id`/`:whoami` now opens a persistent Esc-dismissed identity panel, copies the focused session/agent handle once with confirmation, includes authoritative host/project context, and keeps the current IRC peer id visible in the default HUD without widening narrow layouts.
 - Subagent HUD rows now budget against the padded block's inner width, preventing the throughput number and its `t/s` unit from soft-wrapping past the terminal border.
 - Active Goal Mode turns now keep runtime append/file/extension context before the current user message, retain an appended current-user authority block when extensions replace the system prompt, enqueue ultrathink notices before streaming and durable user input, honor explicit STOP/pause/redirect/direction changes immediately, and reserve unattended continuation for turns with no current request.
 - Config, command, skill, task-agent, and plugin discovery now resolve user paths through the canonical process config home, so `OMP_CONFIG_ROOT` cannot be bypassed by inherited HOME/XDG values or alternate-home helper arguments.
