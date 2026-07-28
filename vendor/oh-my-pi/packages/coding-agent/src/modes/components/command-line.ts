@@ -1,6 +1,7 @@
 import * as os from "node:os";
 import { CompletionBehavior, Container, Input, matchesKey, type SelectItem, SelectList, Text } from "@oh-my-pi/pi-tui";
 import { getProjectDir, logger, VERSION } from "@oh-my-pi/pi-utils";
+import { MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { HistoryStorage } from "../../session/history-storage";
 import { formatLoopStats } from "../../slash-commands/loopstats";
 import { formatTabs } from "../../slash-commands/tabs";
@@ -310,7 +311,7 @@ export function commandModeContextForInteractive(
 			return {
 				sessionId: ctx.sessionManager.getSessionId(),
 				sessionName: ctx.sessionManager.getSessionName(),
-				agentId: ctx.focusedAgentId ?? viewSession.getAgentId() ?? "Main",
+				agentId: ctx.focusedAgentId ?? viewSession.getAgentId() ?? MAIN_AGENT_ID,
 				hostname: os.hostname(),
 				projectDir: getProjectDir(),
 				journalPath: viewSession.sessionManager.getSessionFile(),

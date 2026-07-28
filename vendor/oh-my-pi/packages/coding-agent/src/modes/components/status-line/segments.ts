@@ -5,6 +5,7 @@ import { TERMINAL } from "@oh-my-pi/pi-tui";
 import { formatDuration, formatNumber, getProjectDir, pathIsWithin, relativePathWithinRoot } from "@oh-my-pi/pi-utils";
 import { settings } from "../../../config/settings";
 import { theme } from "../../../modes/theme/theme";
+import { MAIN_AGENT_ID } from "../../../registry/agent-registry";
 import { shortenPath } from "../../../tools/render-utils";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../../../utils/session-color";
 import { sanitizeStatusText } from "../../shared";
@@ -80,7 +81,7 @@ const piSegment: StatusLineSegment = {
 			return { content: theme.fg("warning", `${icon}${ctx.focusedAgentId} `), visible: true };
 		}
 		const icon = theme.icon.pi ? `${theme.icon.pi} ` : "";
-		const agentId = ctx.session.getAgentId() ?? "Main";
+		const agentId = ctx.session.getAgentId() ?? MAIN_AGENT_ID;
 		const content = ctx.width < 40 ? icon : `${icon}${agentId} `;
 		return { content: theme.fg("accent", content), visible: true };
 	},
