@@ -189,7 +189,7 @@ describe("two-step immutable OMP registry", () => {
 		expect(runWorkspace(machine, workspaceTwo, ["bless", digest, receipt(release)]).exitCode).toBe(
 			0,
 		);
-		const sharedRoot = path.join(machine, "xdg-data", "omp");
+		const sharedRoot = fs.realpathSync(path.join(machine, "xdg-data", "omp"));
 		expect(fs.realpathSync(path.join(workspaceOne, "test-repo", "local"))).toBe(
 			path.join(sharedRoot, "workspace-local"),
 		);
