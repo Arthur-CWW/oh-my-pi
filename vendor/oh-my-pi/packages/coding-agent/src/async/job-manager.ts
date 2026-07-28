@@ -44,7 +44,10 @@ export function isAsyncJobInterruptReason(value: unknown): value is AsyncJobInte
 	return (value as { type?: unknown }).type === ASYNC_JOB_INTERRUPT_REASON_TYPE;
 }
 
-function createInterruptReason(requestedBy: string | undefined, reason: string | undefined): AsyncJobInterruptReason {
+export function createAsyncJobInterruptReason(
+	requestedBy: string | undefined,
+	reason: string | undefined,
+): AsyncJobInterruptReason {
 	return {
 		type: ASYNC_JOB_INTERRUPT_REASON_TYPE,
 		...(requestedBy ? { requestedBy } : {}),
@@ -466,7 +469,7 @@ export class AsyncJobManager {
 		job.interruptRequested = true;
 		job.interruptRequestedBy = attribution;
 		if (interruptReason) job.interruptReason = interruptReason;
-		job.abortController.abort(createInterruptReason(attribution, interruptReason));
+		job.abortController.abort(createAsyncJobInterruptReason(attribution, interruptReason));
 		return true;
 	}
 

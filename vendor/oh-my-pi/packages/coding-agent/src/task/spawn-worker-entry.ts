@@ -1,3 +1,4 @@
+import { createAsyncJobInterruptReason } from "../async/job-manager";
 import { Settings } from "../config/settings";
 import { IrcExternalBus } from "../irc/bus-external";
 import { type AgentRef, AgentRegistry } from "../registry/agent-registry";
@@ -14,6 +15,8 @@ import {
 	type SpawnWorkerRequest,
 	type SpawnWorkerRunRequest,
 } from "./spawn-worker-protocol";
+import { MEMORY_PRESSURE_NOTICE_PEER } from "./memory-watermarks";
+import { MEMORY_WATERMARK_MARKER } from "./subagent-failure";
 import { TASK_SUBAGENT_EVENT_CHANNEL, TASK_SUBAGENT_LIFECYCLE_CHANNEL, TASK_SUBAGENT_PROGRESS_CHANNEL } from "./types";
 
 interface QueuedRecord {
@@ -236,6 +239,16 @@ export async function startSpawnWorker(): Promise<void> {
 	let requestId = "unparsed";
 	let workerIrcBus: IrcExternalBus | undefined;
 	let workerIrcSessionId: string | undefined;
+	const memoryInterruptController = new AbortController();
+	const interruptForMemoryWatermark = (): void => {
+		memoryInterruptController.abort(
+			createAsyncJobInterruptReason(
+				MEMORY_PRESSURE_NOTICE_PEER,
+				`${MEMORY_WATERMARK_MARKER} hard limit crossed; the turn was interrupted resumably`,
+			),
+		);
+	};
+	process.once("SIGUSR2", interruptForMemoryWatermark);
 	try {
 		const request = await readRequest();
 		requestId = request.requestId;
@@ -325,6 +338,7 @@ export async function startSpawnWorker(): Promise<void> {
 			writer.enqueue({ ...recordBase(requestId), type: "phase", phase: "run", at: Date.now() });
 			const { runSubprocessWorkerRequest } = await import("./executor");
 			const result = await runSubprocessWorkerRequest(request, {
+				signal: memoryInterruptController.signal,
 				eventBus,
 				onProgress: progress => writer.enqueue({ ...recordBase(requestId), type: "progress", progress }, true),
 			});
@@ -366,6 +380,7 @@ export async function startSpawnWorker(): Promise<void> {
 		const message = error instanceof Error ? error.stack || error.message : String(error);
 		writer.enqueue({ ...recordBase(requestId), type: "error", code: "protocol", message });
 	} finally {
+		process.removeListener("SIGUSR2", interruptForMemoryWatermark);
 		if (workerIrcBus && workerIrcSessionId) {
 			workerIrcBus.unregisterPeer(workerIrcSessionId, process.pid);
 			workerIrcBus.close();

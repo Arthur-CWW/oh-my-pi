@@ -245,6 +245,14 @@ function signalWorkerProcessGroup(proc: Bun.Subprocess, signal: "SIGKILL"): void
 		// The worker may have exited between the live-owner check and the signal.
 	}
 }
+function signalWorkerMemoryInterrupt(proc: Bun.Subprocess): boolean {
+	try {
+		process.kill(proc.pid, "SIGUSR2");
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 async function waitForWorkerExit(proc: Bun.Subprocess, timeoutMs: number): Promise<void> {
 	const { promise: timedOut, resolve } = Promise.withResolvers<void>();
@@ -325,8 +333,8 @@ export function enforceWorkerRssSample(
 		const rssBytes = Number.parseInt(rssText, 10) * 1024;
 		const watch = watches.get(pid);
 		if (!watch || !Number.isFinite(rssBytes)) continue;
-		if (watch.hardBytes > 0 && rssBytes > watch.hardBytes) watch.onHardWatermark(rssBytes);
-		else if (watch.softBytes > 0 && rssBytes > watch.softBytes) watch.onSoftWatermark(rssBytes);
+		if (watch.hardBytes > 0 && rssBytes >= watch.hardBytes) watch.onHardWatermark(rssBytes);
+		else if (watch.softBytes > 0 && rssBytes >= watch.softBytes) watch.onSoftWatermark(rssBytes);
 	}
 }
 
@@ -342,7 +350,7 @@ async function sampleWorkerRss(): Promise<void> {
 	try {
 		const pids = [...watches.keys()];
 		const sample = Bun.spawn({
-			cmd: ["/bin/ps", "-o", "pid=,rss=", "-p", pids.join(",")],
+			cmd: ["ps", "-o", "pid=,rss=", "-p", pids.join(",")],
 			stdout: "pipe",
 			stderr: "ignore",
 		});
@@ -703,6 +711,8 @@ async function runRequest(
 	let terminalPending = false;
 	let terminalError: TerminalError | undefined;
 	let result: SingleResult | SyntheticSpawnResult | undefined;
+	let memoryInterruptRequested = false;
+	let memoryInterruptError: SpawnWorkerError | undefined;
 	let sawReady = false;
 	let latestProgress = request.type === "run" ? initialWorkerProgress(request) : undefined;
 	let latestTokens = latestProgress?.tokens ?? 0;
@@ -798,25 +808,31 @@ async function runRequest(
 		options.onMemoryPressureNotice ??
 		((agentId: string, notice: string): void => void deliverMemoryPressureNotice(agentId, notice));
 	let softNoticeSent = false;
+	const emitSoftNotice = (rssBytes: number): void => {
+		if (softNoticeSent || !watchedAgentId || watermarks.softBytes === 0) return;
+		softNoticeSent = true;
+		notifyMemoryPressure(watchedAgentId, memorySoftWatermarkNotice(rssBytes, watermarks));
+	};
+	const interruptForMemoryWatermark = (error: SpawnWorkerError): void => {
+		if (memoryInterruptRequested || terminalClaimed || terminalPending) return;
+		memoryInterruptRequested = true;
+		memoryInterruptError = error;
+		if (!signalWorkerMemoryInterrupt(proc)) void recoverOrFail(error, false);
+	};
 	const stopRssWatch = watchWorkerRss(proc.pid, {
 		softBytes: watermarks.softBytes,
 		hardBytes: watermarks.hardBytes,
-		// Warn-only: the child is steered to shed footprint and keeps running.
-		onSoftWatermark: rssBytes => {
-			if (softNoticeSent || !watchedAgentId) return;
-			softNoticeSent = true;
-			notifyMemoryPressure(watchedAgentId, memorySoftWatermarkNotice(rssBytes, watermarks));
-		},
-		// Resumable interrupt: any completed turn is salvaged from the journal
-		// first, and the residual failure classifies as host pressure so
-		// `job resume` re-adopts the child instead of refusing it.
+		onSoftWatermark: emitSoftNotice,
+		// A direct hard crossing may be the first observed sample. Persist the
+		// warning before asking the worker to abort its live turn gracefully.
 		onHardWatermark: rssBytes => {
-			void recoverOrFail(
+			emitSoftNotice(rssBytes);
+			interruptForMemoryWatermark(
 				new SpawnWorkerError("memory-watermark", memoryHardWatermarkMessage(rssBytes, watermarks)),
 			);
 		},
 		onSampleInvalid: reason => {
-			void recoverOrFail(
+			interruptForMemoryWatermark(
 				new SpawnWorkerError("memory-watermark", memoryWatermarkSampleInvalidMessage(reason, watermarks)),
 			);
 		},
@@ -885,7 +901,7 @@ async function runRequest(
 						break;
 					}
 					try {
-						const recovered = await recoverCurrentTurn(true);
+						const recovered = await recoverCurrentTurn(!memoryInterruptRequested);
 						if (!recovered && !terminalClaimed) {
 							claimError(new JournalRecoveryError("Yield record was not recoverable from the child journal"));
 						}
@@ -904,14 +920,17 @@ async function runRequest(
 						await failProtocol("Subagent subprocess emitted a result before ready");
 						break;
 					}
-					claimResult(record.result);
+					claimResult(record.result, !memoryInterruptRequested);
 					break;
 				case "synthetic-result":
 					if (!sawReady) {
 						await failProtocol("Subagent subprocess emitted a result before ready");
 						break;
 					}
-					claimResult({ allocatedBytes: record.allocatedBytes, rssBytes: record.rssBytes });
+					claimResult(
+						{ allocatedBytes: record.allocatedBytes, rssBytes: record.rssBytes },
+						!memoryInterruptRequested,
+					);
 					break;
 				case "error":
 					if (!sawReady) {
@@ -997,14 +1016,15 @@ async function runRequest(
 			);
 			if (terminalClaimed) return;
 			await recoverOrFail(
-				new SpawnWorkerError(
-					"exit",
-					!sawReady
-						? "Subagent subprocess exited before ready or writing a terminal journal record"
-						: exitCode !== 0
-							? `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`
-							: "Subagent subprocess exited without a result or terminal journal record",
-				),
+				memoryInterruptError ??
+					new SpawnWorkerError(
+						"exit",
+						!sawReady
+							? "Subagent subprocess exited before ready or writing a terminal journal record"
+							: exitCode !== 0
+								? `Subagent subprocess exited with code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`
+								: "Subagent subprocess exited without a result or terminal journal record",
+					),
 				false,
 				true,
 			);
@@ -1013,6 +1033,7 @@ async function runRequest(
 				error instanceof SpawnWorkerError
 					? error
 					: new SpawnWorkerError("protocol", error instanceof Error ? error.message : String(error)),
+				!memoryInterruptRequested,
 			);
 		}
 	})();

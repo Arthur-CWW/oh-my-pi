@@ -2,6 +2,10 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
+import {
+	DEFAULT_ATTEMPT_RESERVATION_BYTES,
+	HostResourceAdmission,
+} from "@oh-my-pi/pi-coding-agent/resource/host-resource-admission";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -17,6 +21,7 @@ import {
 	type ReAdoptedChild,
 	resumeInterruptedChild,
 } from "@oh-my-pi/pi-coding-agent/task/re-adopt";
+import { enforceWorkerRssSample } from "@oh-my-pi/pi-coding-agent/task/spawn-worker-client";
 import {
 	isResumableSubagentFailureClass,
 	isTransientHostResourceFailure,
@@ -188,16 +193,40 @@ describe("resumeInterruptedChild", () => {
 	beforeEach(() => {
 		AgentRegistry.resetGlobalForTests();
 		AgentLifecycleManager.resetGlobalForTests();
+		HostResourceAdmission.resetGlobalForTests();
 	});
 
 	afterEach(async () => {
 		AgentLifecycleManager.resetGlobalForTests();
 		AgentRegistry.resetGlobalForTests();
+		HostResourceAdmission.resetGlobalForTests();
 		await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 	});
 
-	it("coalesces double resume, rejects a later duplicate, and appends without rewriting the journal", async () => {
+	it("resumes a worker after its hard memory watermark interrupts the turn", async () => {
 		const { root, parent, child } = await fixture("Interrupted");
+		HostResourceAdmission.global({
+			dbPath: path.join(root, "host-resource.sqlite"),
+			memoryBudgetBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES * 2,
+			queuePollMs: 5,
+		});
+		const watermarkEvents: string[] = [];
+		enforceWorkerRssSample(
+			{ text: "4242 1\n", keptBytes: 7, totalBytes: 7, truncated: false },
+			new Map([
+				[
+					4242,
+					{
+						softBytes: 512,
+						hardBytes: 1024,
+						onSoftWatermark: () => watermarkEvents.push("soft"),
+						onHardWatermark: () => watermarkEvents.push("hard"),
+						onSampleInvalid: () => watermarkEvents.push("invalid"),
+					},
+				],
+			]),
+		);
+		expect(watermarkEvents).toEqual(["hard"]);
 		const before = await fs.readFile(child, "utf8");
 		const manager = new AsyncJobManager({ onJobComplete: () => {} });
 		const turn = Promise.withResolvers<string>();

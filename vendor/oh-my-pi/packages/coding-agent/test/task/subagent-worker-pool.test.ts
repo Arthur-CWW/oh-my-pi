@@ -94,8 +94,13 @@ describe("SubagentWorkerPool real process boundary", () => {
 	});
 
 	it("reports a hard crossing while still committing the turn that crossed it", async () => {
-		const pool = createPool({ width: 1, softWorkerRssBytes: 1, hardWorkerRssBytes: 1 });
-		const allocated = await pool.run({ value: "allocated", allocateBytes: 8 * 1024 * 1024 });
+		const hardWatermark = 96 * 1024 * 1024;
+		const pool = createPool({
+			width: 1,
+			softWorkerRssBytes: hardWatermark,
+			hardWorkerRssBytes: hardWatermark,
+		});
+		const allocated = await pool.run({ value: "allocated", allocateBytes: hardWatermark });
 		const replacement = await pool.run({ value: "replacement" });
 
 		// The hard crossing degrades the worker: its result is still delivered
