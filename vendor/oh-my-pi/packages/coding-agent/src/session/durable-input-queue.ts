@@ -9,6 +9,7 @@ import {
 } from "@oh-my-pi/pi-ai";
 import { getBlobsDir } from "@oh-my-pi/pi-utils";
 import { type BlobRef, BlobStore } from "./blob-store";
+import { readProcessIdentity } from "../resource/process-identity";
 import {
 	decodeInputPayload,
 	decodeJsonValue,
@@ -283,15 +284,14 @@ interface WriterLock {
 }
 
 
+/**
+ * PID-reuse discriminator for the writer lock. Routed through the shared
+ * PATH-resolving `ps` boundary (resource/ps-command) — a hardcoded `/bin/ps`
+ * does not exist on NixOS and crashed queue open. Normalization is identical
+ * to the legacy inline probe, so persisted fingerprint locks keep comparing.
+ */
 function processStartFingerprint(pid: number): string | undefined {
-	const result = Bun.spawnSync({
-		cmd: ["/bin/ps", "-o", "lstart=", "-p", String(pid)],
-		stdout: "pipe",
-		stderr: "ignore",
-	});
-	if (result.exitCode !== 0) return undefined;
-	const value = new TextDecoder().decode(result.stdout).trim().replace(/\s+/g, " ");
-	return value || undefined;
+	return readProcessIdentity(pid)?.startFingerprint;
 }
 
 function pidIsLive(pid: number): boolean {
