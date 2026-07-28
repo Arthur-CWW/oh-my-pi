@@ -1,15 +1,45 @@
 import { describe, expect, it } from "bun:test";
 import {
 	agentAncestorPath,
+	agentHistoryRank,
 	cycleVisibleAgentSibling,
 	DurableJournalModelCache,
 	expandAgentAncestors,
+	type ExternalRosterPeer,
+	HUB_FIELD_UNKNOWN,
 	projectAgentRoster,
+	projectExternalPeerIdentity,
+	projectLocalAgentIdentity,
 } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub-roster";
+import type { AgentRef } from "@oh-my-pi/pi-coding-agent/registry/agent-ref";
 import { AgentRegistry, type AgentStatus, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 
 function add(registry: AgentRegistry, id: string, parentId?: string, status: AgentStatus = "running"): void {
 	registry.register({ id, displayName: id, kind: "sub", parentId, session: null, status });
+}
+
+/**
+ * Reproduce the exact array the Hub hands to the projection: one flat list
+ * sorted by status lane, then spawn index. Roots carry the lane order the
+ * section headers label, and every descendant inherits that same global sort.
+ */
+function statusLaneOrder(refs: readonly AgentRef[]): AgentRef[] {
+	return [...refs].sort(
+		(left, right) =>
+			agentHistoryRank(left, false) - agentHistoryRank(right, false) ||
+			left.spawnIndex - right.spawnIndex ||
+			left.id.localeCompare(right.id),
+	);
+}
+
+function externalPeer(overrides: Partial<ExternalRosterPeer> = {}): ExternalRosterPeer {
+	return {
+		sessionId: "/home/arthur/agents:41337",
+		name: "agents-vlix62",
+		cwd: "/home/arthur/agents",
+		lastSeen: "2026-07-28T00:00:00.000Z",
+		...overrides,
+	};
 }
 
 function nestedRefs() {

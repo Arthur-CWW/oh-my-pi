@@ -1,8 +1,9 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { getSessionsDir } from "@oh-my-pi/pi-utils";
-import type { AgentRef } from "../../registry/agent-registry";
+import { formatAge, getSessionsDir } from "@oh-my-pi/pi-utils";
+import type { IrcExternalPeerLabels } from "../../irc/bus-external";
+import { type AgentRef, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import {
 	CHILD_ROUTE_UPDATE_CUSTOM_TYPE,
 	type ChildRouteUpdateRecord,
@@ -10,6 +11,7 @@ import {
 } from "../../task/child-route-update";
 import { isRouteResolutionSource, ROUTE_RESOLUTION_ENTRY, type RouteResolutionSource } from "../../task/route-events";
 import { isSpawnRecord, type SpawnRecord } from "../../task/spawn-record";
+import { shortenPath } from "../../tools/render-utils";
 
 export interface DurableJournalModel {
 	modelId?: string;
@@ -202,12 +204,115 @@ export function isHistoricalAgent(ref: AgentRef, completed: boolean): boolean {
 	return ref.status === "parked" || completed;
 }
 
-/** Group active work before completed and parked history while preserving spawn order within each group. */
+/**
+ * Group active work before completed and parked history while preserving spawn
+ * order within each group.
+ *
+ * Every `AgentStatus` needs its own branch. An unranked status falls through to
+ * the terminal bucket and sinks below parked history, dragging its whole subtree
+ * with it. `waiting-provider` is a turn still in flight — durably blocked on
+ * credential or quota recovery — so it ranks directly under `running`.
+ */
 export function agentHistoryRank(ref: AgentRef, completed: boolean): number {
 	if (ref.status === "running") return 0;
-	if (ref.status === "idle") return completed ? 2 : 1;
-	if (ref.status === "parked") return 3;
-	return 4;
+	if (ref.status === "waiting-provider") return 1;
+	if (ref.status === "idle") return completed ? 3 : 2;
+	if (ref.status === "parked") return 4;
+	return 5;
+}
+
+/** Rendered in place of a roster lane whose source genuinely publishes no value. */
+export const HUB_FIELD_UNKNOWN = "unknown";
+
+/**
+ * The identity lanes one hub roster row renders. In-process children and
+ * external OMP peers project into this single shape, so a sibling process is
+ * described with the same fields as a child instead of a bare name and a path.
+ *
+ * An absent lane is `undefined` for a local child — the column is simply
+ * dropped, as it always has been — and `HUB_FIELD_UNKNOWN` for an external peer,
+ * where a blank cell reads as "no activity" rather than "this peer does not
+ * publish activity".
+ */
+export interface AgentHubRosterIdentity {
+	/** Stable addressable identity: registry agent id locally, bus peer name externally. */
+	id: string;
+	/** Role or display name the source published for itself. */
+	displayName: string | undefined;
+	/** One-line description of the work currently in flight. */
+	activity: string | undefined;
+	/** Where the work lives: parent-context lane locally, working directory externally. */
+	context: string;
+	/** Age of the last observed activity. */
+	age: string;
+}
+
+/** The peer fields the roster reads; a structural subset of the IRC bus peer row. */
+export interface ExternalRosterPeer {
+	sessionId: string;
+	name: string;
+	cwd: string;
+	lastSeen: string;
+	labels?: IrcExternalPeerLabels;
+}
+
+function formatAgeSince(timestampMs: number, nowMs: number): string {
+	return formatAge(Math.max(1, Math.round((nowMs - timestampMs) / 1000)));
+}
+
+/** First value that carries printable text, so a blank lane never masks a populated one. */
+function firstPublished(...values: readonly (string | undefined)[]): string | undefined {
+	for (const value of values) {
+		const trimmed = value?.trim();
+		if (trimmed) return trimmed;
+	}
+	return undefined;
+}
+
+/**
+ * The most specific self-description an external peer published, from live turn
+ * label down to observer prose. Exported so the roster filter searches exactly
+ * the text the row renders.
+ */
+export function externalPeerActivity(peer: ExternalRosterPeer): string | undefined {
+	const labels = peer.labels;
+	return firstPublished(labels?.activity, labels?.todoHead, labels?.objective, labels?.summary);
+}
+
+/** Project an in-process child into the shared roster lanes. */
+export function projectLocalAgentIdentity(input: {
+	ref: AgentRef;
+	activity: string | undefined;
+	nowMs: number;
+}): AgentHubRosterIdentity {
+	const { ref } = input;
+	return {
+		id: ref.id,
+		displayName: firstPublished(ref.displayName),
+		activity: firstPublished(input.activity),
+		context: ref.parentId === MAIN_AGENT_ID ? "MAIN CONTEXT" : ref.parentId ? "GROUP CONTEXT" : "SEPARATE/HUB-ONLY",
+		age: formatAgeSince(ref.lastActivity, input.nowMs),
+	};
+}
+
+/**
+ * Project an external OMP peer into the same lanes as a child. A lane the peer
+ * does not publish resolves to `HUB_FIELD_UNKNOWN`; no lane is ever inferred
+ * from another lane's value.
+ */
+export function projectExternalPeerIdentity(input: {
+	peer: ExternalRosterPeer;
+	nowMs: number;
+}): AgentHubRosterIdentity {
+	const { peer } = input;
+	const lastSeenMs = Date.parse(peer.lastSeen);
+	return {
+		id: firstPublished(peer.name) ?? peer.sessionId,
+		displayName: firstPublished(peer.labels?.label) ?? HUB_FIELD_UNKNOWN,
+		activity: externalPeerActivity(peer) ?? HUB_FIELD_UNKNOWN,
+		context: firstPublished(peer.cwd) ? shortenPath(peer.cwd) : HUB_FIELD_UNKNOWN,
+		age: Number.isFinite(lastSeenMs) ? formatAgeSince(lastSeenMs, input.nowMs) : HUB_FIELD_UNKNOWN,
+	};
 }
 
 export interface AgentRosterRollup {
@@ -331,6 +436,16 @@ export function projectAgentRoster(
 		const children = visibleChildrenByParent.get(parentId);
 		if (children) children.push(ref);
 		else visibleChildrenByParent.set(parentId, [ref]);
+	}
+	// Roots keep the caller's incoming order, which carries the status lanes the
+	// section headers label. Descendants must NOT inherit that global status sort:
+	// ranking a nested child by its own status reshuffles it among its siblings on
+	// every transition, so a child appears to jump around the tree while nothing
+	// about the parent chain changed. Below the root, the parent chain owns the
+	// order and each sibling group stays in spawn order for the life of the subtree.
+	for (const [parentId, children] of visibleChildrenByParent) {
+		if (parentId === undefined || children.length < 2) continue;
+		children.sort((left, right) => left.spawnIndex - right.spawnIndex || left.id.localeCompare(right.id));
 	}
 	const rollups = revealIncludedPaths ? undefined : subtreeRollups(topology, visibleChildrenByParent);
 	const rows: AgentRosterRow[] = [];

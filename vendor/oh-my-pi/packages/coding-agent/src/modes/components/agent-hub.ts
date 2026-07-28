@@ -110,11 +110,15 @@ import {
 	DurableJournalModelCache,
 	durableModelSelector,
 	expandAgentAncestors,
+	externalPeerActivity,
 	getModelLaneWidth,
 	getStateLaneWidth,
+	HUB_FIELD_UNKNOWN,
 	isHistoricalAgent,
 	listAutomationJournalRows,
 	projectAgentRoster,
+	projectExternalPeerIdentity,
+	projectLocalAgentIdentity,
 } from "./agent-hub-roster";
 import { AssistantMessageComponent } from "./assistant-message";
 import { renderModelSelectorAbbreviation, withModelSelectorEffort } from "./model-selector-abbreviation";
@@ -1322,10 +1326,16 @@ export class AgentHubOverlayComponent extends Container {
 					recentCompleted.push(ref);
 			} else idle.push(ref);
 		}
+		const waitingProvider = matches(this.#orderedStatus("waiting-provider"));
 		const parked = this.#showHistoricalAgents ? matches(this.#orderedStatus("parked")) : [];
 		const terminal = !this.#showTerminalAgents ? [] : matches(this.#orderedStatus("aborted"));
+		// Every status a roster row can hold needs a lane here. A status missing
+		// from this list is not eligible: such an agent is dropped outright when it
+		// is a leaf, and is readmitted only as an unlabelled revealed ancestor when
+		// it has children — landing its whole subtree in a neighbouring section.
 		const sections = [
 			["Running", running],
+			["Waiting on provider", waitingProvider],
 			["Idle / needs attention", idle],
 			["Recent completed", recentCompleted],
 			["Parked history", parked],
@@ -1409,7 +1419,14 @@ export class AgentHubOverlayComponent extends Container {
 
 	#matchesExternalFilter(row: ExternalPeerRow, q: string): boolean {
 		const peer = row.peer;
-		return (peer.name || peer.sessionId).toLowerCase().includes(q) || displayedExternalPeerState(peer).includes(q);
+		// Search exactly the lanes the enriched row renders, so a peer stays
+		// reachable by the role or activity it publishes and not only by the
+		// ambient name the bus generated for it.
+		if ((peer.name || peer.sessionId).toLowerCase().includes(q)) return true;
+		if (displayedExternalPeerState(peer).includes(q)) return true;
+		if (peer.labels?.label?.toLowerCase().includes(q) === true) return true;
+		if (externalPeerActivity(peer)?.toLowerCase().includes(q) === true) return true;
+		return peer.cwd.length > 0 && shortenPath(peer.cwd).toLowerCase().includes(q);
 	}
 
 	#matchesArchivedFilter(row: ArchivedDirectChildDescriptor, q: string): boolean {
@@ -2301,7 +2318,7 @@ export class AgentHubOverlayComponent extends Container {
 
 	#statusSummary(): string {
 		const parts: string[] = [];
-		for (const status of ["running", "idle", "parked", "aborted"] as const) {
+		for (const status of ["running", "waiting-provider", "idle", "parked", "aborted"] as const) {
 			const count = this.#statusCounts[status];
 			if (count > 0) parts.push(`${count} ${status}`);
 		}
@@ -2319,10 +2336,11 @@ export class AgentHubOverlayComponent extends Container {
 	): string {
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
 		const prefix = this.#treeGuideById.get(ref.id) ?? "";
-		const context =
-			ref.parentId === MAIN_AGENT_ID ? "MAIN CONTEXT" : ref.parentId ? "GROUP CONTEXT" : "SEPARATE/HUB-ONLY";
-		const task = projectAgentHubRowActivity(ref, observed);
-		const age = formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000)));
+		const identity = projectLocalAgentIdentity({
+			ref,
+			activity: projectAgentHubRowActivity(ref, observed),
+			nowMs: Date.now(),
+		});
 		const unread = this.#irc.unreadCount(ref.id);
 		const hiddenDescendants = this.#hiddenDescendantsById.get(ref.id);
 		const rollup = hiddenDescendants
@@ -2334,10 +2352,10 @@ export class AgentHubOverlayComponent extends Container {
 			width: Math.max(10, width - 1),
 			model,
 			state: animation ? this.#spinnerStateLabel(animation) : statusBadge(ref.status),
-			name: `${prefix}${theme.bold(replaceTabs(ref.id))} ${theme.fg("dim", replaceTabs(ref.displayName))}${rollup}`,
-			task,
-			context,
-			age: tail ? `${tail} ${age}` : age,
+			name: `${prefix}${theme.bold(replaceTabs(identity.id))} ${theme.fg("dim", replaceTabs(identity.displayName ?? ""))}${rollup}`,
+			task: identity.activity,
+			context: identity.context,
+			age: tail ? `${tail} ${identity.age}` : identity.age,
 		});
 		return truncateToWidth(` ${cursor} ${row}`, Math.max(10, width - 1));
 	}
@@ -2361,13 +2379,18 @@ export class AgentHubOverlayComponent extends Container {
 	#renderExternalRow(row: ExternalPeerRow, selected: boolean, width: number, animation?: string): string {
 		const cursor = selected ? theme.fg("accent", theme.nav.cursor) : " ";
 		const peer = row.peer;
+		const identity = projectExternalPeerIdentity({ peer, nowMs: Date.now() });
+		// The peer republishes its own resolved selector on every heartbeat; the
+		// durable journal only wins when this host could actually read the file.
+		const model = durableModelSelector(this.#journalModels.peek(peer.sessionFile)) ?? peer.labels?.model;
 		const rendered = renderHubColumns({
 			width: Math.max(10, width - 1),
 			state: animation ? this.#spinnerStateLabel(animation) : externalStateBadge(row.state),
-			name: `${theme.bold(replaceTabs(peer.name || peer.sessionId))} ${theme.fg("dim", "external")}`,
-			model: withModelSelectorEffort(durableModelSelector(this.#journalModels.peek(peer.sessionFile)), {}) ?? "-",
-			context: shortenPath(peer.cwd),
-			age: formatLastSeenAge(peer.lastSeen),
+			name: `${theme.bold(replaceTabs(identity.id))} ${theme.fg("dim", "external")} ${theme.fg("dim", replaceTabs(identity.displayName ?? HUB_FIELD_UNKNOWN))}`,
+			model: withModelSelectorEffort(model, {}) ?? "-",
+			task: identity.activity,
+			context: identity.context,
+			age: identity.age,
 		});
 		return truncateToWidth(` ${cursor} ${rendered}`, Math.max(10, width - 1));
 	}
