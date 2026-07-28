@@ -7,7 +7,8 @@ function createPool(overrides: Partial<ConstructorParameters<typeof SubagentWork
 	const pool = new SubagentWorkerPool({
 		width: 2,
 		maxTurnsPerWorker: 100,
-		maxWorkerRssBytes: Number.MAX_SAFE_INTEGER,
+		softWorkerRssBytes: 0,
+		hardWorkerRssBytes: 0,
 		...overrides,
 	});
 	pools.add(pool);
@@ -81,13 +82,27 @@ describe("SubagentWorkerPool real process boundary", () => {
 		expect(third.workerTurnsCompleted).toBe(1);
 	});
 
-	it("touches requested pages, reports RSS, then recycles at the watermark", async () => {
-		const pool = createPool({ width: 1, maxWorkerRssBytes: 1 });
+	it("touches requested pages, reports RSS, then recycles at the soft watermark", async () => {
+		const pool = createPool({ width: 1, softWorkerRssBytes: 1 });
 		const allocated = await pool.run({ value: "allocated", allocateBytes: 8 * 1024 * 1024 });
 		const replacement = await pool.run({ value: "replacement" });
 
 		expect(allocated.workerRssBytes).toBeGreaterThan(8 * 1024 * 1024);
+		expect(allocated.workerMemoryWatermark).toBe("soft");
 		expect(replacement.workerPid).not.toBe(allocated.workerPid);
 		expect(pool.coordinatorPid).toBe(process.pid);
+	});
+
+	it("reports a hard crossing while still committing the turn that crossed it", async () => {
+		const pool = createPool({ width: 1, softWorkerRssBytes: 1, hardWorkerRssBytes: 1 });
+		const allocated = await pool.run({ value: "allocated", allocateBytes: 8 * 1024 * 1024 });
+		const replacement = await pool.run({ value: "replacement" });
+
+		// The hard crossing degrades the worker: its result is still delivered
+		// and the pool replaces it — the coordinator never kills it mid-turn.
+		expect(allocated.payload).toBe("allocated");
+		expect(allocated.workerMemoryWatermark).toBe("hard");
+		expect(replacement.workerPid).not.toBe(allocated.workerPid);
+		expect(replacement.workerMemoryWatermark).toBeUndefined();
 	});
 });

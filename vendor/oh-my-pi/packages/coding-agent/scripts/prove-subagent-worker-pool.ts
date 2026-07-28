@@ -15,7 +15,8 @@ const deliveries: Array<{ value: number; pid: number; attempt: number; rssBytes:
 const pool = new SubagentWorkerPool({
 	width: 1,
 	maxTurnsPerWorker: 3,
-	maxWorkerRssBytes: Number.MAX_SAFE_INTEGER,
+	softWorkerRssBytes: 0,
+	hardWorkerRssBytes: 0,
 });
 
 try {

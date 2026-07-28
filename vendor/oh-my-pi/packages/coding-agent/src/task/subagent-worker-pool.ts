@@ -2,6 +2,7 @@ import * as path from "node:path";
 import {
 	decodeWorkerMessage,
 	type Serializable,
+	type WorkerMemoryWatermark,
 	type WorkerResultMessage,
 	type WorkerRunMessage,
 	type WorkerToCoordinatorMessage,
@@ -11,7 +12,10 @@ import {
 export interface SubagentWorkerPoolOptions {
 	width: number;
 	maxTurnsPerWorker: number;
-	maxWorkerRssBytes: number;
+	/** RSS at which a worker is recycled after finishing its turn. 0 disables. */
+	softWorkerRssBytes: number;
+	/** RSS at which a worker is retired without taking another turn. 0 disables. */
+	hardWorkerRssBytes: number;
 	maxAttempts?: number;
 	workerEntry?: string;
 }
@@ -23,6 +27,8 @@ export interface SubagentWorkerResult {
 	workerPid: number;
 	workerRssBytes: number;
 	workerTurnsCompleted: number;
+	/** Set when the turn ended over a memory watermark; the worker was recycled, not killed. */
+	workerMemoryWatermark?: WorkerMemoryWatermark;
 }
 
 interface TurnJob {
@@ -51,6 +57,11 @@ function positiveInteger(value: number, name: string): number {
 	return value;
 }
 
+function watermarkBytes(value: number, name: string): number {
+	if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be a non-negative safe integer`);
+	return value;
+}
+
 export class SubagentWorkerPool {
 	readonly coordinatorPid = process.pid;
 	readonly #options: Required<Omit<SubagentWorkerPoolOptions, "workerEntry">> & { workerEntry: string };
@@ -65,7 +76,8 @@ export class SubagentWorkerPool {
 		this.#options = {
 			width: positiveInteger(options.width, "width"),
 			maxTurnsPerWorker: positiveInteger(options.maxTurnsPerWorker, "maxTurnsPerWorker"),
-			maxWorkerRssBytes: positiveInteger(options.maxWorkerRssBytes, "maxWorkerRssBytes"),
+			softWorkerRssBytes: watermarkBytes(options.softWorkerRssBytes, "softWorkerRssBytes"),
+			hardWorkerRssBytes: watermarkBytes(options.hardWorkerRssBytes, "hardWorkerRssBytes"),
 			maxAttempts: positiveInteger(options.maxAttempts ?? 3, "maxAttempts"),
 			workerEntry: options.workerEntry ?? path.join(import.meta.dir, "subagent-worker-entry.ts"),
 		};
@@ -147,7 +159,8 @@ export class SubagentWorkerPool {
 			payload: job.payload,
 			limits: {
 				maxTurns: this.#options.maxTurnsPerWorker,
-				maxRssBytes: this.#options.maxWorkerRssBytes,
+				softRssBytes: this.#options.softWorkerRssBytes,
+				hardRssBytes: this.#options.hardWorkerRssBytes,
 			},
 		};
 		try {
@@ -211,6 +224,7 @@ export class SubagentWorkerPool {
 			workerPid: message.pid,
 			workerRssBytes: message.rssBytes,
 			workerTurnsCompleted: message.turnsCompleted,
+			...(message.memoryWatermark ? { workerMemoryWatermark: message.memoryWatermark } : {}),
 		};
 		this.#outcomes.set(job.sequence, { job, result });
 		worker.job = undefined;

@@ -8,11 +8,14 @@ describe("worker RSS sampling", () => {
 		const sample = await readCapped(new Blob([body]).stream(), 8);
 		expect(sample).toMatchObject({ keptBytes: 8, totalBytes: 14, truncated: true });
 
-		const exceeded: number[] = [];
+		const soft: number[] = [];
+		const hard: number[] = [];
 		const invalid: Array<{ pid: number; reason: string }> = [];
 		const watch = (pid: number) => ({
-			maxBytes: 1,
-			onExceeded: () => exceeded.push(pid),
+			softBytes: 1,
+			hardBytes: 2,
+			onSoftWatermark: () => soft.push(pid),
+			onHardWatermark: () => hard.push(pid),
 			onSampleInvalid: (reason: string) => invalid.push({ pid, reason }),
 		});
 		const watches = new Map([
@@ -22,7 +25,8 @@ describe("worker RSS sampling", () => {
 
 		spawnWorkerClient.enforceWorkerRssSample(sample, watches);
 
-		expect(exceeded).toEqual([]);
+		expect(soft).toEqual([]);
+		expect(hard).toEqual([]);
 		expect(invalid.map(entry => entry.pid)).toEqual([101, 202]);
 		expect(invalid[0]?.reason).toBe("ps output overflowed: kept 8 of 14 bytes");
 	});

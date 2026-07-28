@@ -118,7 +118,11 @@ describe("spawn-wave subprocess performance", () => {
 							markRunning();
 							const result = await runSyntheticSpawnWorkerWorkload(
 								{ spinMs: 15, allocateBytes: 1024 * 1024, ...(hung ? { hangMs: 1_200 } : {}) },
-								{ signal, timeoutMs: 5_000, maxRssBytes: 512 * 1024 * 1024 },
+								{
+									signal,
+									timeoutMs: 5_000,
+									memoryWatermarks: { softBytes: 0, hardBytes: 512 * 1024 * 1024 },
+								},
 							);
 							return `allocated ${result.allocatedBytes}`;
 						},
@@ -164,7 +168,7 @@ describe("spawn-wave subprocess performance", () => {
 			{ spinMs: 0, allocateBytes: 1024, hangMs: 10_000 },
 			{
 				signal: controller.signal,
-				maxRssBytes: 512 * 1024 * 1024,
+				memoryWatermarks: { softBytes: 0, hardBytes: 512 * 1024 * 1024 },
 				onPhase: phase => {
 					if (phase !== "run") return;
 					reachedRunPhase = true;

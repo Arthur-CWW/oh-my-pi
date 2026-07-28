@@ -18,6 +18,16 @@ import type { FileEntry } from "../session/session-entries";
 import { SessionManager } from "../session/session-manager";
 import type { EventBus } from "../utils/event-bus";
 import { type ExecutorOptions, finalizeSubprocessOutput, snapshotExecutorSettings } from "./executor";
+import {
+	DEFAULT_MEMORY_HARD_WATERMARK_BYTES,
+	DEFAULT_MEMORY_SOFT_WATERMARK_BYTES,
+	deliverMemoryPressureNotice,
+	memoryHardWatermarkMessage,
+	memorySoftWatermarkNotice,
+	memoryWatermarkSampleInvalidMessage,
+	type MemoryWatermarks,
+	resolveMemoryWatermarks,
+} from "./memory-watermarks";
 import { isTerminalChildLifecycleState, latestChildLifecycleRecord, type ChildLifecycleState } from "./child-lifecycle";
 import {
 	decodeSpawnWorkerRecord,
@@ -36,7 +46,6 @@ import {
 import { isTransientHostResourceFailure } from "./subagent-failure";
 import type { AgentProgress, SingleResult } from "./types";
 
-const DEFAULT_MAX_RSS_BYTES = 1536 * 1024 * 1024;
 const RSS_SAMPLE_INTERVAL_MS = 250;
 const RSS_SAMPLE_BYTES_PER_PID = 64;
 const SETUP_TIMEOUT_GRACE_MS = 60_000;
@@ -103,7 +112,10 @@ export class JournalRecoveryError extends Error {
 
 export interface SpawnWorkerClientOptions {
 	signal?: AbortSignal;
-	maxRssBytes?: number;
+	/** Graduated memory backpressure. Defaults to the shipped watermarks. */
+	memoryWatermarks?: MemoryWatermarks;
+	/** Sink for the soft-watermark notice; defaults to the child's external IRC peer. */
+	onMemoryPressureNotice?: (agentId: string, notice: string) => void;
 	timeoutMs?: number;
 	/** Delay before a no-token/no-journal-activity worker is probed for liveness. */
 	stallThresholdMs?: number;
@@ -273,8 +285,12 @@ function createProcessGroupTeardown(proc: Bun.Subprocess): (signalOwnedGroup: bo
 }
 
 export interface WorkerRssWatch {
-	maxBytes: number;
-	onExceeded(rssBytes: number): void;
+	/** Warn-only watermark. 0 disables the warning stage. */
+	softBytes: number;
+	/** Resumable-interrupt watermark. 0 disables the interrupt. */
+	hardBytes: number;
+	onSoftWatermark(rssBytes: number): void;
+	onHardWatermark(rssBytes: number): void;
 	onSampleInvalid(reason: string): void;
 }
 
@@ -283,10 +299,15 @@ let rssTimer: Timer | undefined;
 let rssSampling = false;
 
 function invalidateWorkerRssSample(watches: ReadonlyMap<number, WorkerRssWatch>, reason: string): void {
-	for (const watch of watches.values()) watch.onSampleInvalid(reason);
+	// A watch with no hard watermark has nothing to enforce conservatively.
+	for (const watch of watches.values()) if (watch.hardBytes > 0) watch.onSampleInvalid(reason);
 }
 
-/** Apply a complete RSS sample, or conservatively invalidate every watched worker on overflow. */
+/**
+ * Apply a complete RSS sample, or conservatively invalidate every watched worker
+ * on overflow. The hard watermark wins a sample that crosses both, so a soft
+ * watermark configured at or above the hard one simply has no warning stage.
+ */
 export function enforceWorkerRssSample(
 	sample: Pick<CappedStreamResult, "keptBytes" | "text" | "totalBytes" | "truncated">,
 	watches: ReadonlyMap<number, WorkerRssWatch>,
@@ -303,7 +324,9 @@ export function enforceWorkerRssSample(
 		const pid = Number.parseInt(pidText, 10);
 		const rssBytes = Number.parseInt(rssText, 10) * 1024;
 		const watch = watches.get(pid);
-		if (watch && Number.isFinite(rssBytes) && rssBytes > watch.maxBytes) watch.onExceeded(rssBytes);
+		if (!watch || !Number.isFinite(rssBytes)) continue;
+		if (watch.hardBytes > 0 && rssBytes > watch.hardBytes) watch.onHardWatermark(rssBytes);
+		else if (watch.softBytes > 0 && rssBytes > watch.softBytes) watch.onSoftWatermark(rssBytes);
 	}
 }
 
@@ -686,7 +709,10 @@ async function runRequest(
 	let lastTokenAdvanceAt = startedAt;
 	let probeInFlight = false;
 	let timeout: ReturnType<typeof setTimeout> | undefined;
-	const maxRssBytes = Math.max(1, Math.trunc(options.maxRssBytes ?? DEFAULT_MAX_RSS_BYTES));
+	const watermarks = options.memoryWatermarks ?? {
+		softBytes: DEFAULT_MEMORY_SOFT_WATERMARK_BYTES,
+		hardBytes: DEFAULT_MEMORY_HARD_WATERMARK_BYTES,
+	};
 	const stallThresholdMs = Math.max(1, Math.trunc(options.stallThresholdMs ?? DEFAULT_STALL_THRESHOLD_MS));
 	const probeIntervalMs = Math.max(10, Math.min(30_000, Math.trunc(stallThresholdMs / 4)));
 
@@ -767,19 +793,31 @@ async function runRequest(
 			void recoverOrFail(new SpawnWorkerError("timeout", `Subagent subprocess exceeded ${options.timeoutMs}ms`));
 		}, options.timeoutMs);
 	}
+	const watchedAgentId = request.type === "run" ? request.options.id : undefined;
+	const notifyMemoryPressure =
+		options.onMemoryPressureNotice ??
+		((agentId: string, notice: string): void => void deliverMemoryPressureNotice(agentId, notice));
+	let softNoticeSent = false;
 	const stopRssWatch = watchWorkerRss(proc.pid, {
-		maxBytes: maxRssBytes,
-		onExceeded: rssBytes => {
+		softBytes: watermarks.softBytes,
+		hardBytes: watermarks.hardBytes,
+		// Warn-only: the child is steered to shed footprint and keeps running.
+		onSoftWatermark: rssBytes => {
+			if (softNoticeSent || !watchedAgentId) return;
+			softNoticeSent = true;
+			notifyMemoryPressure(watchedAgentId, memorySoftWatermarkNotice(rssBytes, watermarks));
+		},
+		// Resumable interrupt: any completed turn is salvaged from the journal
+		// first, and the residual failure classifies as host pressure so
+		// `job resume` re-adopts the child instead of refusing it.
+		onHardWatermark: rssBytes => {
 			void recoverOrFail(
-				new SpawnWorkerError("rss-limit", `Subagent subprocess RSS ${rssBytes} exceeded ${maxRssBytes}`),
+				new SpawnWorkerError("memory-watermark", memoryHardWatermarkMessage(rssBytes, watermarks)),
 			);
 		},
 		onSampleInvalid: reason => {
 			void recoverOrFail(
-				new SpawnWorkerError(
-					"rss-limit",
-					`Subagent subprocess RSS sample was invalid (${reason}); conservatively enforcing ${maxRssBytes}-byte limit`,
-				),
+				new SpawnWorkerError("memory-watermark", memoryWatermarkSampleInvalidMessage(reason, watermarks)),
 			);
 		},
 	});
@@ -1033,6 +1071,7 @@ export function runSubagentSpawnProcess(
 		signal: clientOptions.signal ?? options.signal,
 		timeoutMs: clientOptions.timeoutMs ?? timeoutMs,
 		stallThresholdMs: clientOptions.stallThresholdMs ?? settings.get("task.stallThresholdMs"),
+		memoryWatermarks: clientOptions.memoryWatermarks ?? resolveMemoryWatermarks(settings),
 		onProgress: clientOptions.onProgress ?? options.onProgress,
 		eventBus: clientOptions.eventBus ?? options.eventBus,
 	}).then(result => result as SingleResult);

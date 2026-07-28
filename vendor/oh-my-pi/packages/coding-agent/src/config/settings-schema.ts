@@ -3913,6 +3913,42 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"task.memorySoftWatermarkBytes": {
+		type: "number",
+		default: 1_207_959_552,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Subagent Memory Soft Watermark",
+			description:
+				"Resident-set size (bytes) at which a live subagent receives one in-band notice asking it to shed footprint. Nothing is terminated. 0 disables the warning stage; values above the hard watermark are clamped to it.",
+			options: [
+				{ value: "0", label: "Disabled" },
+				{ value: "1207959552", label: "1.125 GiB", description: "Default" },
+				{ value: "6442450944", label: "6 GiB" },
+				{ value: "12884901888", label: "12 GiB" },
+			],
+		},
+	},
+
+	"task.memoryHardWatermarkBytes": {
+		type: "number",
+		default: 1_610_612_736,
+		ui: {
+			tab: "tasks",
+			group: "Subagents",
+			label: "Subagent Memory Hard Watermark",
+			description:
+				"Resident-set size (bytes) at which a subagent's current turn is interrupted. The interrupt is resumable: the journal is preserved and `job resume` accepts the outcome. 0 disables the interrupt entirely. Raise this on large-memory hosts.",
+			options: [
+				{ value: "0", label: "Disabled" },
+				{ value: "1610612736", label: "1.5 GiB", description: "Default" },
+				{ value: "8589934592", label: "8 GiB" },
+				{ value: "17179869184", label: "16 GiB" },
+			],
+		},
+	},
+
 	"task.agentIdleTtlMs": {
 		type: "number",
 		default: 420_000,

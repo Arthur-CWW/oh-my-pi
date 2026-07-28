@@ -67,6 +67,20 @@ export function isTransientHostResourceFailure(message: string): boolean {
 	]);
 }
 
+/**
+ * Marker embedded in every graduated memory-backpressure interrupt message.
+ *
+ * It is a protocol constant we emit, not a heuristic over foreign error text:
+ * a hard-watermark crossing stops the child's turn at a boundary and leaves the
+ * journal intact, so the outcome must classify as resumable host pressure
+ * rather than an unrecoverable fault.
+ */
+export const MEMORY_WATERMARK_MARKER = "memory watermark";
+
+export function isMemoryWatermarkInterrupt(message: string | undefined): boolean {
+	return containsFailureMarker(message, [MEMORY_WATERMARK_MARKER]);
+}
+
 function isSubagentFailureClass(value: unknown): value is SubagentFailureClass {
 	return (
 		value === "failed" ||
@@ -238,6 +252,9 @@ function classifyResultText(result: SingleResult): string {
 function classifySubagentFailure(result: SingleResult): SubagentFailureClass {
 	const failureText = classifyResultText(result);
 	if (result.timeoutPartial) return "timeout";
+	// Graduated memory backpressure stops a turn at a boundary with the journal
+	// intact, so it is resumable host pressure — never an unrecoverable fault.
+	if (isMemoryWatermarkInterrupt(failureText)) return "host-resource";
 	if (isTransientHostResourceFailure(failureText)) return "host-resource";
 	if (containsFailureMarker(failureText, ["died without terminal journal", "without a terminal journal record"]))
 		return "lost-transcript";
@@ -281,6 +298,7 @@ function classifySubagentFailure(result: SingleResult): SubagentFailureClass {
 }
 
 function classifyThrownSubagentFailure(message: string): SubagentFailureClass {
+	if (isMemoryWatermarkInterrupt(message)) return "host-resource";
 	if (isTransientHostResourceFailure(message)) return "host-resource";
 	if (containsFailureMarker(message, ["died without terminal journal", "without a terminal journal record"]))
 		return "lost-transcript";

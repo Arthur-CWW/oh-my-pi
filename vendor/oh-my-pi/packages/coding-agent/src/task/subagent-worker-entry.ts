@@ -1,6 +1,7 @@
 import {
 	decodeCoordinatorMessage,
 	type WorkerAckMessage,
+	type WorkerMemoryWatermark,
 	type WorkerResultMessage,
 	type WorkerRunMessage,
 	type WorkerToCoordinatorMessage,
@@ -41,10 +42,19 @@ async function runTurn(request: WorkerRunMessage): Promise<void> {
 
 	turnsCompleted += 1;
 	const rssBytes = process.memoryUsage().rss;
+	// Graduated backpressure, worker side: soft means "this is your last turn",
+	// hard means "retire now". Both finish the in-flight turn and exit on ACK —
+	// the coordinator never has to kill a worker for growing.
+	const memoryWatermark: WorkerMemoryWatermark | undefined =
+		request.limits.hardRssBytes > 0 && rssBytes >= request.limits.hardRssBytes
+			? "hard"
+			: request.limits.softRssBytes > 0 && rssBytes >= request.limits.softRssBytes
+				? "soft"
+				: undefined;
 	const recycle =
 		request.payload.crash === "after-result-before-ack" ||
 		turnsCompleted >= request.limits.maxTurns ||
-		rssBytes >= request.limits.maxRssBytes;
+		memoryWatermark !== undefined;
 	active = { request, allocation, recycle };
 	const result: WorkerResultMessage = {
 		type: "result",
@@ -56,6 +66,7 @@ async function runTurn(request: WorkerRunMessage): Promise<void> {
 		rssBytes,
 		turnsCompleted,
 		recycle,
+		...(memoryWatermark ? { memoryWatermark } : {}),
 	};
 	send(result);
 }

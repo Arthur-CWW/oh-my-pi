@@ -16,7 +16,7 @@ export const SPAWN_WORKER_MAX_QUEUED_BYTES = 4 * 1024 * 1024;
 export const SPAWN_WORKER_MAX_INPUT_BYTES = 8 * 1024 * 1024;
 export const SPAWN_WORKER_JOURNAL_START_MARKER = "spawn_worker_turn_start";
 
-export type SpawnWorkerErrorCode = "protocol" | "spawn" | "exit" | "timeout" | "rss-limit" | "aborted";
+export type SpawnWorkerErrorCode = "protocol" | "spawn" | "exit" | "timeout" | "memory-watermark" | "aborted";
 
 export interface SpawnWorkerRegistryRef {
 	id: string;
@@ -313,7 +313,7 @@ export function decodeSpawnWorkerRecord(value: unknown): SpawnWorkerRecord {
 				code !== "spawn" &&
 				code !== "exit" &&
 				code !== "timeout" &&
-				code !== "rss-limit" &&
+				code !== "memory-watermark" &&
 				code !== "aborted"
 			)
 				throw new Error("error code is invalid");

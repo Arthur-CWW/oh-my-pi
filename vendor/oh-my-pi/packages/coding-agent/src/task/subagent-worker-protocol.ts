@@ -15,9 +15,15 @@ export interface WorkerRunMessage {
 	payload: WorkerTurnPayload;
 	limits: {
 		maxTurns: number;
-		maxRssBytes: number;
+		/** Recycle the worker after this turn once its RSS crosses this. 0 disables. */
+		softRssBytes: number;
+		/** Retire the worker immediately at this RSS, before it can take another turn. 0 disables. */
+		hardRssBytes: number;
 	};
 }
+
+/** Which memory watermark, if any, the worker crossed while running a turn. */
+export type WorkerMemoryWatermark = "soft" | "hard";
 
 export interface WorkerAckMessage {
 	type: "ack";
@@ -43,6 +49,7 @@ export interface WorkerResultMessage {
 	rssBytes: number;
 	turnsCompleted: number;
 	recycle: boolean;
+	memoryWatermark?: WorkerMemoryWatermark;
 }
 
 export interface WorkerProtocolErrorMessage {
@@ -127,7 +134,8 @@ export function decodeCoordinatorMessage(value: unknown): CoordinatorToWorkerMes
 			payload: decodePayload(input.payload),
 			limits: {
 				maxTurns: integerField(limits.maxTurns, "limits.maxTurns", 1),
-				maxRssBytes: integerField(limits.maxRssBytes, "limits.maxRssBytes", 1),
+				softRssBytes: integerField(limits.softRssBytes, "limits.softRssBytes"),
+				hardRssBytes: integerField(limits.hardRssBytes, "limits.hardRssBytes"),
 			},
 		};
 	}
@@ -143,6 +151,13 @@ export function decodeWorkerMessage(value: unknown): WorkerToCoordinatorMessage 
 	}
 	if (input.type === "result") {
 		if (typeof input.recycle !== "boolean") throw new Error("recycle must be a boolean");
+		if (
+			input.memoryWatermark !== undefined &&
+			input.memoryWatermark !== "soft" &&
+			input.memoryWatermark !== "hard"
+		) {
+			throw new Error("memoryWatermark must be soft or hard");
+		}
 		return {
 			type: "result",
 			leaseId: stringField(input.leaseId, "leaseId"),
@@ -153,6 +168,7 @@ export function decodeWorkerMessage(value: unknown): WorkerToCoordinatorMessage 
 			rssBytes: integerField(input.rssBytes, "rssBytes"),
 			turnsCompleted: integerField(input.turnsCompleted, "turnsCompleted", 1),
 			recycle: input.recycle,
+			...(input.memoryWatermark ? { memoryWatermark: input.memoryWatermark } : {}),
 		};
 	}
 	throw new Error("unknown worker message type");
