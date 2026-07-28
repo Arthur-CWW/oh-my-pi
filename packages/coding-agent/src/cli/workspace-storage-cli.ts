@@ -90,7 +90,7 @@ export function resolveWorkspaceStoragePaths(
 	return {
 		...shared,
 		workspaceRoot,
-		workspaceLocalAlias: path.join(workspaceRoot, "vendor", "oh-my-pi", "local"),
+		workspaceLocalAlias: path.join(workspaceRoot, "oh-my-pi", "local"),
 	};
 }
 
@@ -585,7 +585,7 @@ export async function planWorkspaceStorageMigration(
 		sources.push(
 			await migrationSource(
 				"workspace-local",
-				path.join(workspaceRoot, "vendor", "oh-my-pi", "local"),
+				path.join(workspaceRoot, "oh-my-pi", "local"),
 				storagePaths.workspaceLocalDir,
 				workspaceRoot,
 			),
