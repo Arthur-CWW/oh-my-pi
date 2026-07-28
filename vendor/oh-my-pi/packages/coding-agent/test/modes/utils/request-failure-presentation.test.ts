@@ -111,5 +111,4 @@ describe("provider request failure notices", () => {
 
 		expect(shouldAwaitRetryDisposition(message)).toBe(true);
 	});
-
 });
