@@ -30,6 +30,14 @@
     "./check": {
       "types": "./src/check.ts",
       "import": "./src/check.ts"
+    },
+    "./validation-cell": {
+      "types": "./src/validation-cell.ts",
+      "import": "./src/validation-cell.ts"
+    },
+    "./validation-cell-runner": {
+      "types": "./src/validation-cell-runner.ts",
+      "import": "./src/validation-cell-runner.ts"
     }
   },
   "bin": {
@@ -42,6 +50,9 @@
     "analyze-audio": "bun scripts/analyze-audio.ts",
     "check": "bun src/check.ts",
     "test": "bun test",
+    "validate:cell": "bun run build:runtime && bun scripts/validate-cell.ts",
+    "validate:cell:bounded": "bun run build:runtime && bun scripts/validate-cell.ts --bounded",
+    "validate": "bun test test/validation-cell.test.ts test/validation-cell-runner.test.ts && bun run typecheck && bun run validate:cell:bounded",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

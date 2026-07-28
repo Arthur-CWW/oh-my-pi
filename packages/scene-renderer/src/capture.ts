@@ -5,7 +5,8 @@ import type { SceneSpec } from "./schema"
 
 export interface CaptureOptions {
   readonly publicDir: string
-  readonly runtimePath: string
+  /** Runtime bundle bytes, already read and verified by the caller: the server never reopens the file. */
+  readonly runtimeSource: Uint8Array<ArrayBuffer>
   readonly outDir: string
   readonly frameRange?: readonly [number, number]
 }
@@ -45,7 +46,8 @@ export async function captureFrames(spec: SceneSpec, options: CaptureOptions): P
   }
 
   const publicDir = resolve(options.publicDir)
-  const runtimePath = resolve(options.runtimePath)
+  // One snapshot of the verified bytes serves every request: the bundle is never reopened by path.
+  const runtimeBundle = new Blob([options.runtimeSource], { type: "application/javascript; charset=utf-8" })
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -54,7 +56,7 @@ export async function captureFrames(spec: SceneSpec, options: CaptureOptions): P
         return new Response(indexHtml(), { headers: { "content-type": "text/html; charset=utf-8" } })
       }
       if (url.pathname === "/runtime.js") {
-        return new Response(Bun.file(runtimePath), { headers: { "content-type": "application/javascript; charset=utf-8" } })
+        return new Response(runtimeBundle)
       }
       const filePath = resolve(publicDir, `.${decodeURIComponent(url.pathname)}`)
       if (filePath !== publicDir && !filePath.startsWith(`${publicDir}${sep}`)) {
@@ -67,13 +69,16 @@ export async function captureFrames(spec: SceneSpec, options: CaptureOptions): P
   })
 
   const origin = `http://127.0.0.1:${server.port}`
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--no-sandbox"],
-  })
-
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined
   try {
+    browser = await puppeteer.launch({
+      headless: true,
+      timeout: 15_000,
+      protocolTimeout: 30_000,
+      args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--no-sandbox"],
+    })
     const page = await browser.newPage()
+    page.setDefaultTimeout(30_000)
     await page.setViewport({ width: spec.width, height: spec.height, deviceScaleFactor: 1 })
     await page.goto(`${origin}/index.html`, { waitUntil: "load" })
     await page.evaluate(
@@ -95,7 +100,7 @@ export async function captureFrames(spec: SceneSpec, options: CaptureOptions): P
       await writePngDataUrl(join(framesDir, `${String(frame).padStart(6, "0")}.png`), dataUrl)
     }
   } finally {
-    await browser.close()
+    await browser?.close()
     server.stop(true)
   }
 

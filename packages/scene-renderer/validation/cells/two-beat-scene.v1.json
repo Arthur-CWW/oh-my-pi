@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "scene-renderer.validation-cell.manifest.v1",
+  "cellId": "two-beat-scene",
+  "requiredLayers": ["state", "process", "render"],
+  "scene": {
+    "path": "packages/scene-renderer/validation/scenes/two-beat.scene.json",
+    "schemaVersion": "scene.v1",
+    "width": 320,
+    "height": 180,
+    "fps": 12,
+    "durationSeconds": 1,
+    "frameCount": 12,
+    "beatDurationSeconds": 0.5,
+    "beatBoundaryFrame": 6,
+    "beatBoundariesSeconds": [0, 0.5, 1],
+    "secondBeatObjectIds": ["blue-clones-beat-2"]
+  },
+  "sources": {
+    "manifestPath": "packages/scene-renderer/validation/cells/two-beat-scene.v1.json",
+    "runtimePath": "packages/scene-renderer/dist/runtime.js",
+    "runtimeEntry": "packages/scene-renderer/src/runtime/index.ts",
+    "rendererRoot": "packages/scene-renderer/src",
+    "packagePath": "packages/scene-renderer/package.json",
+    "lockPath": "bun.lock",
+    "dependencies": [
+      { "name": "effect", "declared": "4.0.0-beta.98" },
+      { "name": "puppeteer", "declared": "^24.0.0" },
+      { "name": "three", "declared": "^0.166.1" }
+    ]
+  },
+  "host": {
+    "platform": "linux",
+    "hostname": "nixbox",
+    "cgroupVersion": 2,
+    "requiredControllers": ["memory", "pids"],
+    "requireDedicatedCgroup": true,
+    "minimumProcessTreeSize": 2
+  },
+  "assertions": {
+    "state": {
+      "deterministicEntropy": {
+        "required": true,
+        "cloneSeeds": [101, 202],
+        "cloneCounts": [3, 3],
+        "cloneLayouts": ["line", "line"],
+        "postPass": "halftone",
+        "postPassMutation": "post-pass-removed",
+        "cloneMutation": "clone-count-collapsed",
+        "collapsedCloneCount": 1
+      },
+      "motion": {
+        "blueMinimumPixels": 256,
+        "expectedLocalCentroidX": [100, 124, 148, 172, 196, 220],
+        "centroidTolerancePixels": 18,
+        "resetFrame": 6
+      },
+      "caption": {
+        "color": "#00ff44",
+        "visibleStartFrame": 3,
+        "visibleEndFrame": 8,
+        "greenMinimumPixels": 64,
+        "absentMaximumPixels": 0
+      },
+      "finiteMetricsRequired": true
+    },
+    "process": {
+      "cleanupRequired": true,
+      "errorsMustBeEmpty": true,
+      "nixboxEnvironment": "nixbox",
+      "renderPasses": 5
+    },
+    "render": {
+      "width": 320,
+      "height": 180,
+      "frameCount": 12,
+      "minimumMeanLuma": 1,
+      "maximumMeanLuma": 255,
+      "minimumNonBlankPixels": 256,
+      "minimumAlphaNonZeroPixels": 57600,
+      "deterministicFrameHashes": true,
+      "deterministicMp4Hash": true
+    }
+  },
+  "budgets": {
+    "maxRenderMilliseconds": 120000,
+    "maxPeakRssBytes": 1610612736,
+    "maxFrameBytes": 1048576,
+    "maxMp4Bytes": 16777216,
+    "maxArtifactCount": 20
+  },
+  "artifacts": {
+    "root": "workflows/scene-lab/reports/2026-07-16-renderer-gaps/playground-validation-cell",
+    "framesDirectory": "workflows/scene-lab/reports/2026-07-16-renderer-gaps/playground-validation-cell/frames",
+    "mp4Path": "workflows/scene-lab/reports/2026-07-16-renderer-gaps/playground-validation-cell/two-beat.mp4",
+    "gifPath": "workflows/scene-lab/reports/2026-07-16-renderer-gaps/playground-validation-cell/two-beat.gif",
+    "contactSheetPath": "workflows/scene-lab/reports/2026-07-16-renderer-gaps/playground-validation-cell/contact-sheet.png",
+    "metricsPath": "workflows/scene-lab/reports/2026-07-16-renderer-gaps/playground-validation-cell/frame-metrics.json",
+    "receiptPath": "workflows/scene-lab/reports/2026-07-16-renderer-gaps/playground-validation-cell/receipt.json",
+    "errorsPath": "workflows/scene-lab/reports/2026-07-16-renderer-gaps/playground-validation-cell/errors.log"
+  },
+  "negativeControl": {
+    "mutation": "double-offset-second-beat",
+    "shiftSeconds": 0.5,
+    "expectedFirstBadFrame": 6
+  }
+}

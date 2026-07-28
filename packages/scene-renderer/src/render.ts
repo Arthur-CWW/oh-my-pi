@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
+import { createHash } from "node:crypto"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { captureFrames } from "./capture"
@@ -13,6 +14,8 @@ interface RenderArgs {
   readonly frameRange?: readonly [number, number]
   readonly stillSeconds?: number
   readonly runtimePath: string
+  readonly sceneSha256?: string
+  readonly runtimeSha256?: string
   readonly keepFrames: boolean
 }
 
@@ -40,9 +43,17 @@ async function main(): Promise<void> {
 
     const scenePath = resolve(args.scenePath)
     const outDir = resolve(args.outDir)
-    await mkdir(outDir, { recursive: true })
 
-    const spec = decodeSceneSpec(parseJsonText(await Bun.file(scenePath).text()))
+    // Read each input exactly once and render from the bytes in hand. When the caller certifies a
+    // digest, the bytes this process renders are the bytes it verified: there is no second open for
+    // another process to slip different bytes through.
+    const sceneBytes = await Bun.file(scenePath).bytes()
+    assertCertifiedBytes(sceneBytes, args.sceneSha256, `scene ${scenePath}`)
+    const runtimeSource = await Bun.file(args.runtimePath).bytes()
+    assertCertifiedBytes(runtimeSource, args.runtimeSha256, `runtime bundle ${args.runtimePath}`)
+
+    await mkdir(outDir, { recursive: true })
+    const spec = decodeSceneSpec(parseJsonText(new TextDecoder().decode(sceneBytes)))
     const staged = await stageAssets(spec, { outDir, sceneDir: dirname(scenePath) })
 
     await rm(join(outDir, "frames"), { recursive: true, force: true })
@@ -51,7 +62,7 @@ async function main(): Promise<void> {
       const needsWarmup = staged.spec.post.some((p: { pass: string }) => p.pass === "feedback")
       const capture = await captureFrames(staged.spec, {
         publicDir: staged.publicDir,
-        runtimePath: args.runtimePath,
+        runtimeSource,
         outDir,
         frameRange: needsWarmup ? [0, frame] : [frame, frame],
       })
@@ -64,7 +75,7 @@ async function main(): Promise<void> {
 
     const capture = await captureFrames(staged.spec, {
       publicDir: staged.publicDir,
-      runtimePath: args.runtimePath,
+      runtimeSource,
       outDir,
       frameRange: args.frameRange,
     })
@@ -137,6 +148,8 @@ function parseArgs(argv: readonly string[]): RenderArgs {
   let frameRange: readonly [number, number] | undefined
   let stillSeconds: number | undefined
   let runtimePath = defaultRuntimePath()
+  let sceneSha256: string | undefined
+  let runtimeSha256: string | undefined
   let keepFrames = false
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -156,6 +169,12 @@ function parseArgs(argv: readonly string[]): RenderArgs {
     } else if (arg === "--runtime") {
       runtimePath = resolve(argv[index + 1] ?? "")
       index += 1
+    } else if (arg === "--scene-sha256") {
+      sceneSha256 = parseSha256(argv[index + 1] ?? "", "--scene-sha256")
+      index += 1
+    } else if (arg === "--runtime-sha256") {
+      runtimeSha256 = parseSha256(argv[index + 1] ?? "", "--runtime-sha256")
+      index += 1
     } else if (arg === "--keep-frames") {
       keepFrames = true
     } else {
@@ -165,7 +184,7 @@ function parseArgs(argv: readonly string[]): RenderArgs {
 
   if (!scenePath) throw new Error("missing required --scene <spec.json>")
   if (!outDir) throw new Error("missing required --out <dir>")
-  return { scenePath, outDir, frameRange, stillSeconds, runtimePath, keepFrames }
+  return { scenePath, outDir, frameRange, stillSeconds, runtimePath, sceneSha256, runtimeSha256, keepFrames }
 }
 
 function parseFrameRange(value: string): readonly [number, number] {
@@ -182,6 +201,22 @@ function parseNumber(value: string, flag: string): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) throw new Error(`${flag} must be a number`)
   return parsed
+}
+
+function parseSha256(value: string, flag: string): string {
+  if (!/^[0-9a-f]{64}$/.test(value)) throw new Error(`${flag} must be a lowercase hex sha-256 digest`)
+  return value
+}
+
+/**
+ * Binds the bytes this process is about to render to the digest its caller certified. The comparison
+ * runs on the buffer already in memory, so no replacement of the file on disk can reach the render.
+ */
+export function assertCertifiedBytes(bytes: Uint8Array, expected: string | undefined, label: string): void {
+  if (expected === undefined) return
+  const observed = createHash("sha256").update(bytes).digest("hex")
+  if (observed === expected) return
+  throw new Error(`${label} hashes ${observed}, not the certified ${expected}; refusing to render bytes the caller did not digest`)
 }
 
 function defaultRuntimePath(): string {
