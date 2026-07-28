@@ -67,16 +67,16 @@ describe("semantic tool-call headlines", () => {
 			"read",
 			{
 				_i: "Reading input controller",
-				path: "vendor/oh-my-pi/packages/coding-agent/src/modes/controllers/input-controller.ts",
+				path: "oh-my-pi/packages/coding-agent/src/modes/controllers/input-controller.ts",
 			},
-			"Reading input controller · vendor/oh-my-pi/packages/coding-agent/src/modes/controllers/input-controller.ts · ok",
+			"Reading input controller · oh-my-pi/packages/coding-agent/src/modes/controllers/input-controller.ts · ok",
 		],
 	] as const)("composes a %s headline", (toolName, args, expected) => {
 		expect(composeToolHeadline(toolName, args, "ok")).toBe(expected);
 	});
 
 	it("keeps long file paths whole so wide surfaces can render them in full", () => {
-		const longPath = "vendor/oh-my-pi/packages/coding-agent/src/modes/controllers/input-controller.ts";
+		const longPath = "oh-my-pi/packages/coding-agent/src/modes/controllers/input-controller.ts";
 		for (const tool of ["read", "write", "edit", "apply_patch"] as const) {
 			const headline = composeToolHeadline(tool, { _i: "Editing controller", path: longPath }, "ok");
 			expect(headline).toContain(longPath);

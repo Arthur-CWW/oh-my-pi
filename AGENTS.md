@@ -2,7 +2,7 @@
 
 ## What this is
 
-`vendor/oh-my-pi` is the local OMP fork. Default target is `packages/coding-agent/`, the CLI users call `omp`.
+`oh-my-pi` is the local OMP fork. Default target is `packages/coding-agent/`, the CLI users call `omp`.
 
 ## Build and verify
 

@@ -7,7 +7,7 @@ import { visibleWidth } from "@oh-my-pi/pi-tui";
 // The regression fixture: a real, deeply-nested source path whose length
 // exceeds a typical terminal column count. It must render in full when the
 // terminal is wide, and degrade path-aware (basename kept) when it is narrow.
-const LONG_PATH = "vendor/oh-my-pi/packages/coding-agent/src/modes/controllers/input-controller.ts";
+const LONG_PATH = "oh-my-pi/packages/coding-agent/src/modes/controllers/input-controller.ts";
 const BASENAME = "input-controller.ts";
 
 /** Plain (ANSI-stripped, right-trimmed) text of the heading row. */

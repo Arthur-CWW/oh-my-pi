@@ -7,7 +7,7 @@ import {
   ReplayTraceIntegrityError,
   runDifferentialReplay,
   type DifferentialReplayOptions,
-} from "../../../../../../packages/provider-testkit/src/index"
+} from "../../../../../packages/provider-testkit/src/index"
 import {
   canonicalizeOmpObservation,
   createOmpReplayCandidate,

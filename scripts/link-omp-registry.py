@@ -181,7 +181,7 @@ def prepare_storage(bin_dir, repo_root, root, registry_path, releases, workspace
     workspace_local.mkdir(parents=True, exist_ok=True)
     ensure_external_alias(bin_dir / ".omp-releases", releases, "immutable releases")
     ensure_external_alias(bin_dir / ".omp-release-registry.json", registry_path, "release registry")
-    ensure_external_alias(repo_local, workspace_local, "vendor/oh-my-pi/local")
+    ensure_external_alias(repo_local, workspace_local, "oh-my-pi/local")
 
 
 def empty_registry():

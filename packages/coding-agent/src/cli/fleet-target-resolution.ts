@@ -145,7 +145,7 @@ export async function readinessForDigest(digest: string, options: ReleaseRegistr
 	}
 	const roots = [
 		options.readinessDir ?? process.env.OMP_FLEET_READINESS_DIR,
-		path.resolve(process.cwd(), "vendor/oh-my-pi/local"),
+		path.resolve(process.cwd(), "oh-my-pi/local"),
 		path.resolve(process.cwd(), "local"),
 	].filter((value): value is string => typeof value === "string" && value.length > 0);
 	const filename = `readiness-receipt-${digest}.json`;
