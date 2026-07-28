@@ -14,12 +14,13 @@ import { gcAndSweep } from "bun:jsc";
 import { randomUUID } from "node:crypto";
 import { logger } from "@oh-my-pi/pi-utils";
 import { AsyncJobManager } from "../async/job-manager";
+import { resolveGlobalHostResourceAdmission } from "../resource/admission-bootstrap";
+import { HostAdmissionRejectedError, type HostResourceLease } from "../resource/host-resource-admission";
 import {
-	DEFAULT_ATTEMPT_RESERVATION_BYTES,
-	HostAdmissionRejectedError,
-	HostResourceAdmission,
-	type HostResourceLease,
-} from "../resource/host-resource-admission";
+	type LeaseReleaseTally,
+	leaseReleaseTally,
+	PendingHostLeaseReleases,
+} from "../resource/pending-lease-releases";
 import { readProcessIdentity } from "../resource/process-identity";
 import type { AgentSession } from "../session/agent-session";
 import {
@@ -70,6 +71,32 @@ export type StaleOrphanReconcileResult =
 				| "dispose_failed";
 	  };
 
+/**
+ * Raise what a teardown could not absorb, once the caller's own bookkeeping is
+ * done. Failures are collected instead of thrown in place so one damaged host
+ * database — or one park that died mid-flight — cannot leave half a teardown
+ * behind it.
+ */
+function throwCleanupFailures(failures: readonly unknown[], summary: string): void {
+	if (failures.length === 0) return;
+	if (failures.length === 1) throw failures[0];
+	throw new AggregateError(failures, summary);
+}
+
+const LEASE_CLEANUP_SUMMARY = "Failed to release one or more host resource leases";
+
+/**
+ * Where a refused handback lives. Retry ownership cannot sit on a manager: a
+ * reset or a controller handover replaces the manager while releases started
+ * under it are still in flight, and the durable row outlives the authority that
+ * granted it. The service takes ownership the moment a release begins and
+ * retries on its own asynchronous schedule, so every cleanup path here is a
+ * best-effort nudge rather than the row's last chance.
+ */
+function pendingLeases(): PendingHostLeaseReleases {
+	return PendingHostLeaseReleases.global();
+}
+
 export class AgentLifecycleManager {
 	static #global: AgentLifecycleManager | undefined;
 
@@ -83,21 +110,28 @@ export class AgentLifecycleManager {
 	/** Reset the global manager. Test-only. */
 	static resetGlobalForTests(): void {
 		const current = AgentLifecycleManager.#global;
-		if (current) {
-			current.#unsubscribe?.();
-			current.#unsubscribe = undefined;
-			for (const adopted of current.#adopted.values()) {
-				clearTimeout(adopted.timer);
-				adopted.sessionSubscription?.();
-				adopted.sessionSubscription = undefined;
-				current.#releaseResourceLease(adopted);
-			}
-			current.#adopted.clear();
-			current.#revivals.clear();
-			current.#parkings.clear();
-			current.#releasing.clear();
-		}
+		// Cleared first: a corrupt host authority must not be able to leave a
+		// half-torn-down manager installed for whatever runs next.
 		AgentLifecycleManager.#global = undefined;
+		if (!current) return;
+		current.#unsubscribe?.();
+		current.#unsubscribe = undefined;
+		const tally = leaseReleaseTally();
+		for (const [id, adopted] of current.#adopted) {
+			clearTimeout(adopted.timer);
+			adopted.sessionSubscription?.();
+			adopted.sessionSubscription = undefined;
+			current.#releaseResourceLease(id, adopted, tally);
+		}
+		// A nudge, not a last chance: what the authority still refuses stays owned
+		// by the process-global service, which keeps retrying it after this
+		// manager — and any release still in flight under it — is gone.
+		pendingLeases().sweep(undefined, tally);
+		current.#adopted.clear();
+		current.#revivals.clear();
+		current.#parkings.clear();
+		current.#releasing.clear();
+		throwCleanupFailures(tally.corruption, LEASE_CLEANUP_SUMMARY);
 	}
 
 	readonly #registry: AgentRegistry;
@@ -108,6 +142,8 @@ export class AgentLifecycleManager {
 	readonly #parkings = new Map<string, Promise<unknown>>();
 	/** In-flight revives, so concurrent {@link ensureLive} calls coalesce. */
 	readonly #revivals = new Map<string, Promise<AgentSession>>();
+	/** In-flight pressure reclaim, so concurrent doorbells share one invocation and one answer. */
+	#pressureReclaim: Promise<number> | undefined;
 	#unsubscribe: (() => void) | undefined;
 
 	constructor(registry: AgentRegistry = AgentRegistry.global()) {
@@ -171,6 +207,11 @@ export class AgentLifecycleManager {
 		return { liveSessions, subscriptions, timers };
 	}
 
+	/** Durable rows this process still owes the host authority. Test-only. */
+	pendingLeaseCountForTests(): number {
+		return pendingLeases().owed();
+	}
+
 	/** Immediately park every adopted idle child while leaving live work untouched. */
 	async parkIdleAgents(): Promise<number> {
 		const candidates = [...this.#adopted.keys()].filter(id => this.#registry.get(id)?.status === "idle");
@@ -193,15 +234,49 @@ export class AgentLifecycleManager {
 	}
 
 	/**
-	 * Cooperative host-pressure doorbell: force the Bun/JSC collector, then
-	 * park every currently idle child so its live session resources are disposed.
+	 * Cooperative host-pressure doorbell: force the Bun/JSC collector, then park
+	 * every currently idle child so its live session resources are disposed.
+	 *
+	 * Reports host slots this invocation actually handed back, not children
+	 * parked and not a level difference. The waiter that rang this doorbell is
+	 * queued behind durable rows, and a park whose lease release the authority
+	 * refused frees none of them: that row is still owned by this live process
+	 * and expiry reaping will not touch it.
+	 *
+	 * Concurrent doorbells share one invocation. Two runs racing over the same
+	 * rows would each subtract the same slot from their own before/after
+	 * snapshot and each claim it, telling one waiter twice over that capacity it
+	 * never got had arrived.
 	 */
-	async reclaimIdleChildrenForHostPressure(): Promise<number> {
+	reclaimIdleChildrenForHostPressure(): Promise<number> {
+		const inFlight = this.#pressureReclaim;
+		// The same promise, not a wrapper around it: a joining doorbell shares the
+		// invocation's answer rather than being a second claim on the same rows.
+		if (inFlight) return inFlight;
+		const reclaiming = this.#reclaimIdleChildrenForHostPressure().finally(() => {
+			if (this.#pressureReclaim === reclaiming) this.#pressureReclaim = undefined;
+		});
+		this.#pressureReclaim = reclaiming;
+		return reclaiming;
+	}
+
+	async #reclaimIdleChildrenForHostPressure(): Promise<number> {
 		Bun.gc(true);
 		gcAndSweep();
+		const tally = leaseReleaseTally();
 		const idleIds = [...this.#adopted.keys()].filter(id => this.#registry.get(id)?.status === "idle");
-		await Promise.all(idleIds.map(id => this.park(id)));
-		return idleIds.length;
+		// Every park settles first: relief that stops at the first damaged lease
+		// reclaims nothing from the children behind it. Each park counts into this
+		// invocation's tally, so what is reported is what it released.
+		const settled = await Promise.allSettled(idleIds.map(id => this.#parkCoalesced(id, tally)));
+		const failures: unknown[] = settled.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
+		// Unscoped: every owed row is capacity this process holds, and a blocked
+		// waiter cannot tell which child it is queued behind. Parks from an
+		// earlier doorbell left theirs owed here too.
+		pendingLeases().sweep(undefined, tally);
+		failures.push(...tally.corruption);
+		throwCleanupFailures(failures, "Failed to park one or more idle agents");
+		return tally.released;
 	}
 
 	/**
@@ -210,12 +285,23 @@ export class AgentLifecycleManager {
 	 * idle, and still owns the same live session.
 	 */
 	async park(id: string): Promise<void> {
+		return this.#parkCoalesced(id, undefined);
+	}
+
+	/**
+	 * One park per agent, however many callers ask for it. `counted` belongs to
+	 * the caller that started this park: it collects what the park released and
+	 * absorbs what it could not, so a pressure invocation reports its own work
+	 * instead of inferring it from a snapshot. A caller that merely joins an
+	 * in-flight park counts nothing — those releases are the starter's.
+	 */
+	async #parkCoalesced(id: string, counted: LeaseReleaseTally | undefined): Promise<void> {
 		const current = this.#parkings.get(id);
 		if (current) {
 			await current;
 			return;
 		}
-		const parking = this.#park(id);
+		const parking = this.#park(id, counted);
 		this.#parkings.set(id, parking);
 		try {
 			await parking;
@@ -327,7 +413,18 @@ export class AgentLifecycleManager {
 		adopted?.sessionSubscription?.();
 		if (adopted) adopted.sessionSubscription = undefined;
 		this.#adopted.delete(id);
-		await this.#parkings.get(id);
+		const failures: unknown[] = [];
+		// A park that died on a damaged authority has already detached the
+		// session. Its failure is carried, not propagated here: hard removal
+		// still has an agent to unregister.
+		const parking = this.#parkings.get(id);
+		if (parking) {
+			try {
+				await parking;
+			} catch (error) {
+				failures.push(error);
+			}
+		}
 		await revival?.catch(() => undefined);
 		const ref = this.#registry.get(id);
 		if (ref?.session) {
@@ -337,8 +434,12 @@ export class AgentLifecycleManager {
 				logger.warn("AgentLifecycleManager.release: session dispose failed", { id, error: String(error) });
 			}
 		}
-		this.#releaseResourceLease(adopted);
+		failures.push(...this.#releaseAgentLeases(id, adopted).corruption);
+		// Unregistering is what removes the agent. It runs before any failure
+		// escapes, so a damaged host database cannot leave a released agent
+		// still registered around a session that is already disposed.
 		this.#registry.unregister(id);
+		throwCleanupFailures(failures, `Failed to finish releasing agent "${id}"`);
 	}
 
 	/**
@@ -354,20 +455,31 @@ export class AgentLifecycleManager {
 			clearTimeout(adopted.timer);
 			adopted.timer = undefined;
 		}
-		await Promise.all([
+		// Settled, not raced. A park or release that dies on a damaged authority
+		// must not skip the rest of this teardown, and what it raised belongs in
+		// the aggregate reported once every map is clear.
+		const settled = await Promise.allSettled([
 			...this.#parkings.values(),
 			...[...this.#revivals.values()].map(revival => revival.catch(() => undefined)),
 			...this.#releasing.values(),
 		]);
-		for (const adopted of this.#adopted.values()) {
+		const failures: unknown[] = settled.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
+		const tally = leaseReleaseTally();
+		for (const [id, adopted] of this.#adopted) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
-			this.#releaseResourceLease(adopted);
+			this.#releaseResourceLease(id, adopted, tally);
 		}
+		pendingLeases().sweep(undefined, tally);
+		failures.push(...tally.corruption);
 		this.#adopted.clear();
 		this.#revivals.clear();
 		this.#parkings.clear();
 		this.#releasing.clear();
+		// Rows the authority still refuses stay owned by the process-global
+		// service: detach relinquishes bookkeeping, not the host slots this
+		// process holds and must keep offering back.
+		throwCleanupFailures(failures, LEASE_CLEANUP_SUMMARY);
 	}
 
 	/** Park child sessions after their supervised turns have soft-stopped, then relinquish lifecycle ownership. */
@@ -383,13 +495,16 @@ export class AgentLifecycleManager {
 		this.#unsubscribe?.();
 		this.#unsubscribe = undefined;
 		const ids = [...this.#adopted.keys()];
-		await Promise.all(ids.map(id => this.release(id)));
+		const settled = await Promise.allSettled(ids.map(id => this.release(id)));
+		const failures: unknown[] = settled.flatMap(result => (result.status === "rejected" ? [result.reason] : []));
+		failures.push(...pendingLeases().sweep().corruption);
 		this.#revivals.clear();
 		this.#parkings.clear();
 		this.#releasing.clear();
+		throwCleanupFailures(failures, "Failed to release one or more agents");
 	}
 
-	async #park(id: string): Promise<void> {
+	async #park(id: string, counted: LeaseReleaseTally | undefined): Promise<void> {
 		if (this.#releasing.has(id)) return;
 		const adopted = this.#adopted.get(id);
 		const ref = this.#registry.get(id);
@@ -445,7 +560,11 @@ export class AgentLifecycleManager {
 		// Only a replacement ref/session may take ownership away from this park.
 		if (this.#registry.get(id) !== ref || ref.session !== session) return;
 		this.#registry.detachSession(id);
-		this.#releaseResourceLease(adopted);
+		// A counted park belongs to a caller that reports the whole invocation:
+		// it collects the failures too, so one damaged lease cannot cancel the
+		// parks behind it before that caller has seen them all.
+		const tally = this.#releaseAgentLeases(id, adopted, counted);
+		if (!counted) throwCleanupFailures(tally.corruption, LEASE_CLEANUP_SUMMARY);
 	}
 
 	#hasLiveWork(id: string, session: AgentSession): "live_async_job" | "live_model_turn" | undefined {
@@ -522,7 +641,7 @@ export class AgentLifecycleManager {
 		}
 		this.#registry.detachSession(id);
 		this.#registry.setStatus(id, "parked");
-		this.#releaseResourceLease(adopted);
+		throwCleanupFailures(this.#releaseAgentLeases(id, adopted).corruption, LEASE_CLEANUP_SUMMARY);
 		return { reconciled: true };
 	}
 
@@ -535,6 +654,25 @@ export class AgentLifecycleManager {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = unsubscribe;
 		};
+		// A park this child lost to a contended authority leaves a row this
+		// process still owes. Nothing is acquired on top of it: two granted rows
+		// for one live child each consume a host slot only this process can
+		// return, and under a single-row budget the replacement would queue
+		// behind this child's own row, which expiry reaping refuses to reclaim
+		// while the holder is alive. So the revival nudges the handback service
+		// once — synchronously, because the uncontended case finishes in the same
+		// tick it always did — and refuses if anything is still owed. The service
+		// keeps retrying in the background; the caller can wake this child again
+		// once the writer that refused it lets go.
+		const owed = this.#releaseAgentLeases(id, adopted);
+		throwCleanupFailures(owed.corruption, LEASE_CLEANUP_SUMMARY);
+		const stillOwed = pendingLeases().owed(id);
+		if (stillOwed > 0) {
+			throw new HostAdmissionRejectedError(
+				"authority-unavailable",
+				`Cannot revive ${id}: the host authority refused ${stillOwed} lease release(s) this agent still owns`,
+			);
+		}
 		let resourceLease: HostResourceLease | undefined;
 		let session: AgentSession;
 		try {
@@ -547,7 +685,7 @@ export class AgentLifecycleManager {
 		} catch (error) {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
-			resourceLease?.release();
+			this.#releaseUnownedLease(resourceLease, id);
 			throw error;
 		}
 		if (!resourceLease) {
@@ -561,7 +699,7 @@ export class AgentLifecycleManager {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
 			await this.#disposeRevivedSession(id, session);
-			resourceLease.release();
+			this.#releaseUnownedLease(resourceLease, id);
 			throw new Error(`Agent "${id}" was released or replaced while reviving.`);
 		}
 		const sessionManager = session.sessionManager;
@@ -579,7 +717,7 @@ export class AgentLifecycleManager {
 			} catch (disposeError) {
 				logger.warn("AgentLifecycleManager.revive: session dispose failed", { id, error: String(disposeError) });
 			}
-			resourceLease.release();
+			this.#releaseUnownedLease(resourceLease, id);
 			throw error;
 		}
 		if (
@@ -590,11 +728,13 @@ export class AgentLifecycleManager {
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
 			await this.#disposeRevivedSession(id, session);
-			resourceLease.release();
+			this.#releaseUnownedLease(resourceLease, id);
 			throw new Error(`Agent "${id}" was released or replaced while reviving.`);
 		}
 		// A successful revive owns the host lease until cleanup parks, releases,
 		// or detaches this session. Every failure above releases after cleanup.
+		// Nothing is overwritten here: the sweep above emptied this record, and a
+		// row it could not hand back would have refused the revival outright.
 		adopted.resourceLease = resourceLease;
 		if (!ref.session) this.#registry.attachSession(id, session, parkedRef.sessionFile);
 		this.#registry.setStatus(id, "idle");
@@ -609,11 +749,56 @@ export class AgentLifecycleManager {
 		}
 	}
 
-	#releaseResourceLease(adopted: AdoptedAgent | undefined): void {
+	/**
+	 * Hand a host lease back to the service that owns refused releases, and
+	 * report what this cleanup could not absorb.
+	 *
+	 * The handle leaves the record before the attempt runs. A terminal release
+	 * is finished; anything else is already owned by the service, which then
+	 * holds the only reference — so no cleanup ever hits the authority twice for
+	 * the same lease, and deleting or replacing the record cannot drop the last
+	 * reference to a row this live process still holds.
+	 *
+	 * Corruption is returned to the caller, because nothing downstream repairs
+	 * it and swallowing it here is how a damaged host database goes unnoticed
+	 * for an entire session. Accumulated rather than thrown: every caller has
+	 * registry, session and map bookkeeping to finish first, and a half-torn-down
+	 * manager outlives the error that caused it.
+	 */
+	#releaseResourceLease(id: string, adopted: AdoptedAgent | undefined, tally: LeaseReleaseTally): void {
 		const lease = adopted?.resourceLease;
 		if (!lease) return;
-		lease.release();
 		adopted.resourceLease = undefined;
+		pendingLeases().handBack(id, lease, tally);
+	}
+
+	/**
+	 * Hand back everything this agent still owes the authority: the handle on
+	 * its record plus whatever earlier cleanups were refused. The two sets are
+	 * disjoint by construction — a handle the service owns is no longer on any
+	 * record — so this is one attempt per outstanding row.
+	 */
+	#releaseAgentLeases(id: string, adopted: AdoptedAgent | undefined, counted?: LeaseReleaseTally): LeaseReleaseTally {
+		const tally = pendingLeases().sweep(id, counted);
+		this.#releaseResourceLease(id, adopted, tally);
+		return tally;
+	}
+
+	/**
+	 * Release a lease no adopted record owns yet. Revive failure paths run this
+	 * while already unwinding, so it reports rather than replaces the error on
+	 * its way out — corruption included, which the next admission call raises
+	 * anyway rather than losing the failure that actually broke the revive.
+	 */
+	#releaseUnownedLease(lease: HostResourceLease | undefined, id: string): void {
+		if (!lease) return;
+		const tally = pendingLeases().handBack(id, lease);
+		for (const corruption of tally.corruption) {
+			logger.warn("AgentLifecycleManager.revive: host resource lease release failed", {
+				id,
+				error: String(corruption),
+			});
+		}
 	}
 
 	async #acquireDefaultReviveLease(id: string, ref: AgentRef): Promise<HostResourceLease> {
@@ -625,11 +810,12 @@ export class AgentLifecycleManager {
 			);
 		}
 		const attemptId = randomUUID();
-		return HostResourceAdmission.global({
+		const admission = resolveGlobalHostResourceAdmission({
 			onPressure: async () => {
 				await this.reclaimIdleChildrenForHostPressure();
 			},
-		}).acquire({
+		});
+		return admission.acquire({
 			attemptId,
 			kind: "revive",
 			sessionId: ref.parentId ?? MAIN_AGENT_ID,
@@ -638,7 +824,7 @@ export class AgentLifecycleManager {
 			agentId: id,
 			jobId: `revive:${attemptId}`,
 			holderProcess,
-			reservationBytes: DEFAULT_ATTEMPT_RESERVATION_BYTES,
+			reservationBytes: admission.childReservationBytes,
 		});
 	}
 
@@ -648,7 +834,11 @@ export class AgentLifecycleManager {
 		const timer = setTimeout(() => {
 			if (this.#adopted.get(id) !== adopted) return;
 			adopted.timer = undefined;
-			void this.park(id);
+			// Nothing awaits an idle park, so its failure has to be absorbed here
+			// or it becomes an unhandled rejection that fails an unrelated turn.
+			void this.park(id).catch(error => {
+				logger.warn("AgentLifecycleManager: idle park failed", { id, error: String(error) });
+			});
 		}, adopted.idleTtlMs);
 		timer.unref?.();
 		adopted.timer = timer;
@@ -661,8 +851,20 @@ export class AgentLifecycleManager {
 			clearTimeout(adopted.timer);
 			adopted.sessionSubscription?.();
 			adopted.sessionSubscription = undefined;
-			this.#releaseResourceLease(adopted);
 			this.#adopted.delete(event.ref.id);
+			// The record is gone, the lease is not abandoned: a row the authority
+			// refused stays owned by the handback service, which keeps retrying it
+			// on its own schedule.
+			const leaseFailures = this.#releaseAgentLeases(event.ref.id, adopted).corruption;
+			// A registry listener has no caller to raise this to: the dispatch loop
+			// swallows what a listener throws so one subscriber cannot break the
+			// rest. The log is the only place corruption found here is visible.
+			for (const failure of leaseFailures) {
+				logger.error("AgentLifecycleManager: host resource authority is corrupt", {
+					id: event.ref.id,
+					error: String(failure),
+				});
+			}
 			return;
 		}
 		if (event.type !== "status_changed") return;

@@ -52,9 +52,9 @@ import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
 import { AgentLifecycleManager, type ResourceLeaseAcquirer } from "../registry/agent-lifecycle";
 import type { AgentStatus } from "../registry/agent-registry";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import { resolveGlobalHostResourceAdmission } from "../resource/admission-bootstrap";
 import {
 	HostAdmissionRejectedError,
-	HostResourceAdmission,
 	type HostResourceLease,
 	type ResourceAttemptKind,
 } from "../resource/host-resource-admission";
@@ -969,10 +969,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			);
 		}
 		const childReservationBytes = this.session.settings.getGlobal("task.globalAdmission.attemptReservationBytes");
-		return HostResourceAdmission.global({
-			memoryBudgetBytes: this.session.settings.getGlobal("task.globalAdmission.memoryBudgetBytes"),
-			userCap: this.session.settings.getGlobal("task.globalAdmission.maxConcurrency"),
-			childReservationBytes,
+		return resolveGlobalHostResourceAdmission({
+			settings: this.session.settings,
 			onPressure: async () => {
 				await AgentLifecycleManager.global().reclaimIdleChildrenForHostPressure();
 			},

@@ -50,6 +50,36 @@ describe("host resource profile", () => {
 		});
 	});
 
+	it("bounds the current 128 GiB Nixbox guest to an explicit 96 GiB test budget", () => {
+		const profile = computeHostResourceProfile({
+			probe: probe({ systemMemoryBytes: 128 * GIB, systemCpuCount: 32 }),
+			memoryBudgetBytes: 96 * GIB,
+		});
+		expect(profile).toMatchObject({
+			mode: "resource-bounded",
+			memoryBudgetBytes: 96 * GIB,
+			memoryCapacity: 64,
+			cpuCapacity: 25,
+			effectiveLimit: 25,
+			limitingBounds: ["cpu"],
+		});
+	});
+
+	it("does not let a 240 GiB ceiling erase reserved headroom on a future 256 GiB guest", () => {
+		const derivedBudget = 256 * GIB - Math.ceil(256 * GIB * 0.2);
+		const profile = computeHostResourceProfile({
+			probe: probe({ systemMemoryBytes: 256 * GIB, systemCpuCount: 64 }),
+			memoryBudgetBytes: 240 * GIB,
+		});
+		expect(profile).toMatchObject({
+			mode: "resource-bounded",
+			memoryBudgetBytes: derivedBudget,
+			cpuCapacity: 51,
+			effectiveLimit: 51,
+			limitingBounds: ["cpu"],
+		});
+	});
+
 	it("honors cgroup memory, quota, and cpuset limits", () => {
 		const profile = computeHostResourceProfile({
 			probe: probe({

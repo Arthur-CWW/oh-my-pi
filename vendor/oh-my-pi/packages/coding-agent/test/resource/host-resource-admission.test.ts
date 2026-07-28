@@ -6,6 +6,7 @@ import * as path from "node:path";
 import {
 	HostAdmissionCorruptError,
 	HostAdmissionFencedError,
+	HostAdmissionRejectedError,
 	HostResourceAdmission,
 	type HostResourceAdmissionRequest,
 	type HostResourceLease,
@@ -19,6 +20,14 @@ async function pollUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<v
 		if (Date.now() >= deadline) throw new Error("pollUntil timed out");
 		await Bun.sleep(5);
 	}
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve!: () => void;
+	const promise = new Promise<void>(r => {
+		resolve = r;
+	});
+	return { promise, resolve };
 }
 
 describe("HostResourceAdmission memory budget", () => {
@@ -60,6 +69,7 @@ describe("HostResourceAdmission memory budget", () => {
 				systemCpuCount: 128,
 				warnings: [],
 			},
+			coordinatorRoots: () => [],
 			...options,
 		});
 		admissions.push(admission);
@@ -84,6 +94,18 @@ describe("HostResourceAdmission memory budget", () => {
 			reservationBytes,
 		};
 	}
+
+	it("accounts for coordinator RSS even when no child lease exists", async () => {
+		const admission = open({ memoryBudgetBytes: 1, coordinatorRoots: () => [holder] });
+		await admission.sampleNow();
+		const snapshot = admission.inspect();
+		expect(snapshot.leases).toHaveLength(0);
+		expect(snapshot.observedBytes).toBeGreaterThan(0);
+		expect(snapshot.processCount).toBeGreaterThan(0);
+		expect(snapshot.coordinatorRootCount).toBe(1);
+		expect(snapshot.sampleFresh).toBeTrue();
+		expect(snapshot.pressureState).toBe("hard");
+	});
 
 	it("admits by aggregate bytes rather than legacy count width", async () => {
 		const admission = open({ memoryBudgetBytes: 10_000 });
@@ -197,7 +219,10 @@ describe("HostResourceAdmission memory budget", () => {
 
 	it("reclaims an expired lease only after its exact holder dies", async () => {
 		const admission = open({ memoryBudgetBytes: 110, leaseTtlMs: 10 });
-		const processHandle = Bun.spawn(["/bin/sleep", "5"], { stdout: "ignore", stderr: "ignore" });
+		const processHandle = Bun.spawn([process.execPath, "-e", "setTimeout(() => {}, 5000)"], {
+			stdout: "ignore",
+			stderr: "ignore",
+		});
 		let shortLived: ProcessIdentity | null = null;
 		await pollUntil(() => {
 			shortLived = readProcessIdentity(processHandle.pid);
@@ -223,6 +248,264 @@ describe("HostResourceAdmission memory budget", () => {
 		audit.close();
 		expect(lease.renew()).toBe("fenced");
 		expect(() => lease.release()).toThrow(HostAdmissionFencedError);
+		// A newer fence owns that row now, so this handle never speaks for it
+		// again and reports the refusal exactly once.
+		expect(lease.state).toBe("revoked");
+		expect(lease.release()).toBe("released");
 		expect(admission.inspect().leases).toHaveLength(1);
+	});
+
+	it("settles a deferred acquire with a typed refusal the moment the authority closes", async () => {
+		// A five-second poll makes the back-off, not the test, the thing that has
+		// to be woken: settling quickly can only mean the close woke the waiter.
+		const admission = open({ memoryBudgetBytes: 110, queuePollMs: 5_000 });
+		const held = await admission.acquire(request("holder", "session-a", 100));
+		const queued = deferred();
+		const pending = admission.acquire(request("waiter", "session-b", 100), {
+			onDeferred: () => queued.resolve(),
+		});
+		await queued.promise;
+
+		const startedAt = Date.now();
+		admission.close();
+
+		await expect(pending).rejects.toThrow(/Host resource authority is clos/);
+		expect(Date.now() - startedAt).toBeLessThan(1_000);
+		// The close revoked this lease, so handing it back is a local no-op: the
+		// durable row survives for its TTL instead of a statement running against
+		// a connection that is already gone.
+		expect(held.release()).toBe("released");
+		expect(held.release()).toBe("released");
+		const audit = new Database(dbPath);
+		try {
+			expect(audit.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM resource_leases").get()).toEqual({
+				count: 1,
+			});
+		} finally {
+			audit.close();
+		}
+	});
+
+	it("withdraws the waiters it still owns so a peer never inherits a phantom queue", async () => {
+		const admission = open({ memoryBudgetBytes: 110, queuePollMs: 5_000 });
+		await admission.acquire(request("holder", "session-a", 100));
+		const firstQueued = deferred();
+		const secondQueued = deferred();
+		const first = admission.acquire(request("waiter-1", "session-b", 100), {
+			onDeferred: () => firstQueued.resolve(),
+		});
+		const second = admission.acquire(request("waiter-2", "session-c", 100), {
+			onDeferred: () => secondQueued.resolve(),
+		});
+		await Promise.all([firstQueued.promise, secondQueued.promise]);
+		expect(admission.inspect().waiters).toHaveLength(2);
+
+		// Both outcomes are observed before the close, so neither rejection can
+		// land on a promise nobody is holding yet.
+		const settled = Promise.allSettled([first, second]);
+		admission.close();
+		const outcomes = await settled;
+
+		expect(outcomes.map(outcome => outcome.status)).toEqual(["rejected", "rejected"]);
+		for (const outcome of outcomes) {
+			expect(String((outcome as PromiseRejectedResult).reason)).toMatch(/Host resource authority is clos/);
+		}
+
+		const peer = open({ memoryBudgetBytes: 110 });
+		expect(peer.inspect().waiters).toEqual([]);
+		expect(peer.inspect().leases.map(lease => lease.attemptId)).toEqual(["holder"]);
+	});
+
+	it("closes idempotently and refuses every later operation with a typed error", async () => {
+		const admission = open({ memoryBudgetBytes: 1_000 });
+		const lease = await admission.acquire(request("first", "session-a", 100));
+		admission.close();
+		admission.close();
+		admission.close();
+
+		await expect(admission.acquire(request("after-close", "session-b", 100))).rejects.toThrow(
+			/Host resource authority is clos/,
+		);
+		expect(() => admission.inspect()).toThrow(/Host resource authority is clos/);
+		// A closed authority cannot vouch for the lease it granted any more, which
+		// is exactly what a fence means to the holder.
+		expect(lease.renew()).toBe("fenced");
+		await admission.whenQuiesced();
+	});
+
+	it("settles a waiter whose own deferred hook closes the authority", async () => {
+		// The hook closes before the back-off has registered, so the wake-up set
+		// the close drains is still empty and only the re-check inside the sleep
+		// can end this wait. A five-second poll makes waiting it out unmistakable.
+		const admission = open({ memoryBudgetBytes: 110, queuePollMs: 5_000 });
+		const held = await admission.acquire(request("holder", "session-a", 100));
+		let deferrals = 0;
+		const startedAt = Date.now();
+		const pending = admission.acquire(request("reentrant-waiter", "session-b", 100), {
+			onDeferred: () => {
+				deferrals++;
+				admission.close();
+			},
+		});
+
+		await expect(pending).rejects.toThrow(/Host resource authority is clos/);
+		expect(Date.now() - startedAt).toBeLessThan(1_000);
+		expect(deferrals).toBe(1);
+		expect(held.release()).toBe("released");
+
+		// The close ran to completion from inside the hook: the waiter row it
+		// owned is withdrawn, so no peer inherits a queue head nobody is holding.
+		const peer = open({ memoryBudgetBytes: 110 });
+		expect(peer.inspect().waiters).toEqual([]);
+		expect(peer.inspect().leases.map(lease => lease.attemptId)).toEqual(["holder"]);
+	});
+
+	it("reports a corrupt database found while withdrawing instead of closing quietly", async () => {
+		const admission = open({ memoryBudgetBytes: 110, queuePollMs: 5_000 });
+		const held = await admission.acquire(request("holder", "session-a", 100));
+		const queued = deferred();
+		const pending = admission.acquire(request("doomed-waiter", "session-b", 100), {
+			onDeferred: () => queued.resolve(),
+		});
+		await queued.promise;
+
+		// SQLite raises the genuine corruption message itself, on the exact
+		// statement close uses to drain the waiter rows this process owns.
+		const saboteur = new Database(dbPath);
+		saboteur.run(
+			`CREATE TRIGGER corrupt_on_withdraw BEFORE DELETE ON resource_waiters
+			 BEGIN SELECT RAISE(ABORT, 'database disk image is malformed'); END`,
+		);
+		saboteur.close();
+
+		expect(() => admission.close()).toThrow(HostAdmissionCorruptError);
+		// Teardown still finished around the failure: the sleeper woke, the
+		// authority refuses every later call, and the handle is gone.
+		await expect(pending).rejects.toThrow(/Host resource authority is clos/);
+		expect(() => admission.inspect()).toThrow(/Host resource authority is clos/);
+		expect(held.release()).toBe("released");
+	});
+
+	it("stays idempotent across repeated close and reset with a lease outstanding", async () => {
+		const admission = open({ memoryBudgetBytes: 1_000 });
+		const lease = await admission.acquire(request("held", "session-a", 100));
+		for (let round = 0; round < 3; round++) {
+			admission.close();
+			HostResourceAdmission.resetGlobalForTests();
+		}
+
+		expect(lease.renew()).toBe("fenced");
+		expect(lease.release()).toBe("released");
+		expect(lease.state).toBe("revoked");
+		expect(lease.release()).toBe("released");
+
+		// The row the revoked lease never deleted stays durable, and a replacement
+		// authority on the same file keeps granting around it.
+		const replacement = open({ memoryBudgetBytes: 1_000 });
+		expect(replacement.inspect().leases.map(row => row.attemptId)).toEqual(["held"]);
+		const next = await replacement.acquire(request("after-reset", "session-b", 100));
+		expect(next.release()).toBe("released");
+		expect(replacement.inspect().leases.map(row => row.attemptId)).toEqual(["held"]);
+	});
+
+	it("keeps a lease retryable when contention refuses a release from an open authority", async () => {
+		const admission = open({ memoryBudgetBytes: 1_000 });
+		const lease = await admission.acquire(request("contended", "session-a", 100));
+
+		// A real peer connection holds the write lock, so the release fails the
+		// way contention actually fails: BEGIN IMMEDIATE waits out the authority's
+		// busy timeout and SQLite reports the database as locked.
+		const peer = new Database(dbPath);
+		peer.run("BEGIN IMMEDIATE");
+		let refused: unknown;
+		try {
+			lease.release();
+		} catch (error) {
+			refused = error;
+		}
+		peer.run("ROLLBACK");
+		peer.close();
+
+		expect(refused).toBeInstanceOf(HostAdmissionRejectedError);
+		expect((refused as HostAdmissionRejectedError).reason).toBe("authority-unavailable");
+		// The row is still this live process's to give back, and expiry reaping
+		// refuses to reclaim a lease whose holder is provably alive: a handle that
+		// gave up here would consume the slot for the rest of the process.
+		expect(lease.state).toBe("open");
+		expect(admission.inspect().leases.map(row => row.attemptId)).toEqual(["contended"]);
+
+		expect(lease.release()).toBe("released");
+		expect(lease.state).toBe("released");
+		expect(admission.inspect().leases).toEqual([]);
+	}, 20_000);
+
+	it("removes the row exactly once when concurrent callers release one lease", async () => {
+		const admission = open({ memoryBudgetBytes: 1_000 });
+		const lease = await admission.acquire(request("shared", "session-a", 100));
+		const audit = new Database(dbPath);
+		audit.run("CREATE TABLE release_audit (lease_id TEXT NOT NULL)");
+		audit.run(
+			`CREATE TRIGGER count_lease_deletes AFTER DELETE ON resource_leases
+			 BEGIN INSERT INTO release_audit (lease_id) VALUES (OLD.lease_id); END`,
+		);
+
+		const outcomes = await Promise.all(
+			Array.from({ length: 8 }, () => Promise.resolve().then(() => lease.release())),
+		);
+
+		expect(outcomes).toEqual(Array.from({ length: 8 }, () => "released"));
+		expect(lease.state).toBe("released");
+		const deletes = audit.query<{ lease_id: string }, []>("SELECT lease_id FROM release_audit").all();
+		audit.close();
+		expect(deletes.map(row => row.lease_id)).toEqual([lease.leaseId]);
+		expect(admission.inspect().leases).toEqual([]);
+	});
+
+	it("drops an in-flight process sample instead of writing through a closed handle", async () => {
+		const admission = open({ memoryBudgetBytes: 1_000, coordinatorRoots: () => [holder] });
+		// Closed in the same turn the sample starts, so the process walk is
+		// guaranteed to still be running when the connection goes away.
+		const sampling = admission.sampleNow();
+		admission.close();
+
+		await expect(sampling).resolves.toBeUndefined();
+		await admission.whenQuiesced();
+	});
+
+	it("stops the scheduled sampler at close so no timer callback runs against the closed handle", async () => {
+		const unhandled: unknown[] = [];
+		const record = (reason: unknown): void => {
+			unhandled.push(reason);
+		};
+		process.on("unhandledRejection", record);
+		try {
+			const admission = open({
+				memoryBudgetBytes: 1_000,
+				sampleIntervalMs: 50,
+				coordinatorRoots: () => [holder],
+			});
+			await pollUntil(() => admission.inspect().sampleFresh);
+			admission.close();
+			await admission.whenQuiesced();
+			// Several sampler periods with nothing left to fire.
+			await Bun.sleep(250);
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", record);
+		}
+	});
+
+	it("replaces a closed process-wide authority instead of handing it back out", async () => {
+		const first = HostResourceAdmission.global({ dbPath, memoryBudgetBytes: 1_000, sampleIntervalMs: 60_000 });
+		expect(HostResourceAdmission.hasGlobal()).toBeTrue();
+		HostResourceAdmission.resetGlobalForTests();
+		HostResourceAdmission.resetGlobalForTests();
+		expect(HostResourceAdmission.hasGlobal()).toBeFalse();
+
+		const second = HostResourceAdmission.global({ dbPath, memoryBudgetBytes: 1_000, sampleIntervalMs: 60_000 });
+		admissions.push(second);
+		expect(second).not.toBe(first);
+		expect(second.inspect().leases).toEqual([]);
+		HostResourceAdmission.resetGlobalForTests();
 	});
 });
