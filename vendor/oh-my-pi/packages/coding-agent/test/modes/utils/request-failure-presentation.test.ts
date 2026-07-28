@@ -101,4 +101,15 @@ describe("provider request failure notices", () => {
 		expect(diagnostic.message).toContain(endpointMessage);
 		expect(shouldAwaitRetryDisposition(message)).toBe(false);
 	});
+	test("waits for retry disposition for the canonical Anthropic overload stream error", () => {
+		const message = providerFailure({
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-fable-5",
+			errorMessage: "Anthropic stream error (overloaded_error): Overloaded",
+		});
+
+		expect(shouldAwaitRetryDisposition(message)).toBe(true);
+	});
+
 });

@@ -363,6 +363,65 @@ describe("AgentSession retry delay cap", () => {
 		expect(last.stopReason).toBe("stop");
 	});
 
+	it("retries the canonical Anthropic overload stream error at least twice by default", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) {
+			throw new Error("Expected bundled Anthropic test model to exist");
+		}
+
+		const overloadError = "Anthropic stream error (overloaded_error): Overloaded";
+		const mock = createMockModel({
+			responses: [{ throw: overloadError }, { throw: overloadError }, { content: ["recovered from overload"] }],
+		});
+		let attempts = 0;
+		const agent = new Agent({
+			getApiKey: provider => `${provider}-test-key`,
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: (requestedModel, context, options) => {
+				attempts++;
+				return mock.stream(requestedModel, context, options);
+			},
+		});
+
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 8,
+			"retry.maxDelayMs": 5_000,
+		});
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+
+		vi.spyOn(Math, "random").mockReturnValue(0.5);
+		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		const retryStartEvents: AutoRetryStartEvent[] = [];
+		const retryEndEvents: AutoRetryEndEvent[] = [];
+		session.subscribe(event => {
+			if (event.type === "auto_retry_start") retryStartEvents.push(event);
+			if (event.type === "auto_retry_end") retryEndEvents.push(event);
+		});
+
+		await session.prompt("Trigger canonical overload");
+		await session.waitForIdle();
+
+		expect(attempts).toBe(3);
+		expect(retryStartEvents.map(event => event.delayMs)).toEqual([7, 14]);
+		expect(retryStartEvents.every(event => event.maxAttempts >= 3)).toBe(true);
+		expect(retryEndEvents).toEqual([{ type: "auto_retry_end", success: true, attempt: 2 }]);
+		const last = lastAssistant(session);
+		expect(last.stopReason).toBe("stop");
+		expect(last.content).toContainEqual({ type: "text", text: "recovered from overload" });
+	});
+
 	it("retries a provider abort without a fired caller signal in the network window", async () => {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) {
