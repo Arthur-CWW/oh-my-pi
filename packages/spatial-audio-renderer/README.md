@@ -34,6 +34,51 @@ The test suite covers:
 - ASMR scene mapping for close-left whisper, close-right whisper, behind near/far movement, soft brush/tap loop, and heartbeat/room-tone bed.
 - WAV duration, stereo channel count, non-silent output, output manifest SHA-256, timing constraints, manifest path consistency, and unsafe artifact path rejection.
 
+## Validation cell
+
+`bun run validate:cell` runs the Companion instantiation of the portable validation cell
+(`src/validation-cell.ts`) against the real renderer: it synthesizes a deterministic 48 kHz
+voice/foley scene with a five-point x/z voice trajectory, renders it twice, decodes the emitted WAV
+back to Float32 stereo, and scores three invariants — exact stereo/48 kHz/frame structure with
+finite samples, left-to-right trajectory energy across eight fixed windows, and voice/foley
+temporal separation across a silent gap. Two negative controls (reversed trajectory, dropped foley
+stem) must each fail exactly one invariant at a declared first frame, or the cell throws.
+
+`bun run validate:cell` is a bounded wrapper, not a bare run. It reads the limits its own cgroup
+imposes and, unless `MemoryMax`, `CPUQuota` and `RuntimeMaxSec` are all at least as tight as the
+manifest's `execution.budget`, it re-executes itself under
+`systemd-run --user --scope -p MemoryMax=… -p CPUQuota=… -p RuntimeMaxSec=…` (argv derived from
+that budget) or refuses with exit 1. The receipt records the values the run observed, never the
+command that was supposed to impose them, so `budget.observed.enforced` is a check rather than a
+claim. On a host without a user systemd scope — macOS, for instance — the entry point always
+refuses; call `runCompanionValidationCell()` directly if you need an explicitly unbounded run, and
+read `budget.observed` in its receipt.
+
+Both roots are validated before the first filesystem call: each must be repo-relative, strictly
+below `packages/spatial-audio-renderer/test-output` or `local/proofs`, resolve to exactly where it
+lexically claims to be, and be disjoint from the other. The previous verdict is deleted before the
+run starts; the WAV and receipt are staged and published together only once the receipt decodes
+and the scratch tree is provably swept, so a failed run leaves neither artifact behind.
+
+One run owns a proof root at a time. Before it reads, clears, stages or publishes anything there,
+the run claims `.proof-lock` by hard-linking a file it has already written in full, so that
+well-known name is either absent or carries a complete holder identity (pid, that pid's start
+stamp, hostname, token). A second run does not wait: it throws `ProofRootBusyError` having touched
+nothing but its own token-named handle. A claim is stealable only once its holder is proven dead on
+this host — a recycled pid, or a claim written on another machine, counts as undecided rather than
+dead — and the takeover is serialised by renaming the dead holder's handle, so two runs burying one
+corpse cannot both unlink. Every later step re-reads the claim: a run that lost the root publishes
+nothing and clears nothing, and reports the paths it left to the new owner.
+
+The run keeps a playable WAV plus a replayable receipt (schema digest; renderer, cell, resolved
+`@wirebabel/media-contracts` source and version, `effect` version and the install-root `bun.lock`
+as one source binding digest; input/output digests, metrics, replay commands, observed budget,
+cleanup, errors) under `local/proofs/companion-validation-cell/`, which is self-ignored by git.
+`bun test test/validation-cell.test.ts` asserts the same properties plus receipt stability across
+two independent scratch roots, and covers the destructive-root, linked-root, stale-proof,
+post-copy-failure, live-holder, simultaneous-run, yanked-claim, unassessable-holder, malformed-WAV,
+quota-rounding and cross-field-schema negatives.
+
 ## Render-output manifest shape
 
 The CLI writes `spatial-audio-render-output.v1`:
