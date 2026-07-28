@@ -19,6 +19,7 @@ import type { EventBus } from "../utils/event-bus";
 import {
 	appendInterruptedChildLifecycleFile,
 	type ChildLifecycleState,
+	type InterruptedChildLifecycleFile,
 	isTerminalChildLifecycleState,
 	latestChildLifecycleRecord,
 } from "./child-lifecycle";
@@ -130,6 +131,8 @@ export interface SpawnWorkerClientOptions {
 	eventBus?: EventBus;
 	onPhase?: (phase: Extract<SpawnWorkerRecord, { type: "phase" }>["phase"]) => void;
 	onProcessStart?: (pid: number) => void | Promise<void>;
+	/** Dependency seam for durable parent-side interruption persistence. */
+	appendInterruptedLifecycle?: (child: InterruptedChildLifecycleFile) => Promise<void>;
 }
 
 export interface SyntheticSpawnWorkload {
@@ -844,11 +847,12 @@ async function runRequest(
 			void recoverOrFail(new SpawnWorkerError("timeout", `Subagent subprocess exceeded ${options.timeoutMs}ms`));
 		}, options.timeoutMs);
 	}
+	const appendInterruptedLifecycle = options.appendInterruptedLifecycle ?? appendInterruptedChildLifecycleFile;
 	const persistParentMemoryInterrupt = async (): Promise<boolean> => {
 		if (request.type !== "run" || !request.options.sessionFile || !request.options.parentSessionFile) {
 			return false;
 		}
-		await appendInterruptedChildLifecycleFile({
+		await appendInterruptedLifecycle({
 			agentId: request.options.id,
 			childSessionFile: request.options.sessionFile,
 			parentSessionFile: request.options.parentSessionFile,
@@ -861,37 +865,56 @@ async function runRequest(
 		disarmMemoryInterruptGrace();
 		const error =
 			memoryInterruptError ?? new SpawnWorkerError("memory-watermark", "Subagent memory interrupt grace expired");
-		let persisted = false;
-		if (!terminalClaimed) {
-			try {
-				persisted = await persistParentMemoryInterrupt();
-			} catch (journalError) {
-				beginTeardown(true);
-				claimError(
-					new JournalRecoveryError(
-						`Failed to persist resumable memory interruption: ${
-							journalError instanceof Error ? journalError.message : String(journalError)
-						}`,
-					),
-					false,
-				);
-				return;
-			}
-			await recoverOrFail(error, true);
+		if (terminalClaimed) {
+			beginTeardown(true);
+			return;
 		}
+		// Own the terminal decision before killing so natural pipe completion
+		// cannot settle the request while durable interruption is still in flight.
+		terminalPending = true;
+		// The allocator bound is independent of journal and recovery I/O. The
+		// escalation task keeps running after the owned process group is killed.
 		beginTeardown(true);
-		if (persisted) {
-			void proc.exited.then(async () => {
-				// A worker can finish its own abort record just as the grace
-				// expires. Reassert the parent's terminal record after exit so
-				// the last durable state remains resumable and interrupted.
-				try {
-					await persistParentMemoryInterrupt();
-				} catch {
-					// The pre-kill durable record remains authoritative.
-				}
-			});
+		await proc.exited.catch(() => undefined);
+		await stdoutPromise.catch(() => undefined);
+		if (terminalClaimed) return;
+
+		let recovered: SingleResult | undefined;
+		let recoveryError: JournalRecoveryError | undefined;
+		if (request.type === "run") {
+			try {
+				recovered = await recoverCurrentTurnResultFromJournal(request, journalCursor);
+			} catch (error) {
+				recoveryError =
+					error instanceof JournalRecoveryError
+						? error
+						: new JournalRecoveryError(error instanceof Error ? error.message : String(error));
+			}
 		}
+		if (terminalClaimed) return;
+		if (recovered?.exitCode === 0) {
+			claimRecoveredResult(recovered, false);
+			return;
+		}
+
+		try {
+			await persistParentMemoryInterrupt();
+		} catch (journalError) {
+			claimError(
+				new JournalRecoveryError(
+					`Failed to persist resumable memory interruption: ${
+						journalError instanceof Error ? journalError.message : String(journalError)
+					}`,
+				),
+				false,
+			);
+			return;
+		}
+		if (recovered) {
+			claimRecoveredResult(recovered, false);
+			return;
+		}
+		claimError(recoveryError ?? error, false);
 	};
 	const armMemoryInterruptGrace = (): void => {
 		if (memoryInterruptGraceTimer || memoryEscalationStarted) return;
@@ -913,32 +936,41 @@ async function runRequest(
 		softNoticeSent = true;
 		notifyMemoryPressure(watchedAgentId, memorySoftWatermarkNotice(rssBytes, watermarks));
 	};
-	const interruptForMemoryWatermark = (error: SpawnWorkerError): void => {
-		if (memoryInterruptRequested || terminalClaimed || terminalPending) return;
+	const requestMemoryInterrupt = (error: SpawnWorkerError): boolean => {
+		if (memoryInterruptRequested || terminalClaimed || terminalPending) return false;
 		memoryInterruptRequested = true;
 		memoryInterruptError = error;
 		armMemoryInterruptGrace();
-		// Before ready, SIGUSR2 may still have its default action because the
-		// worker entry module has not installed its handler. Defer the signal;
-		// the already-armed grace still bounds a worker that never becomes ready.
-		signalReadyWorkerForMemoryInterrupt();
+		return true;
 	};
 	const stopRssWatch = watchWorkerRss(proc.pid, {
 		softBytes: watermarks.softBytes,
 		hardBytes: watermarks.hardBytes,
 		onSoftWatermark: emitSoftNotice,
-		// A direct hard crossing may be the first observed sample. Persist the
-		// warning before asking the worker to abort its live turn gracefully.
+		// A direct hard crossing may be the first observed sample. Arm the
+		// deadline, persist the warning, then ask the worker to abort its turn.
 		onHardWatermark: rssBytes => {
+			if (
+				!requestMemoryInterrupt(
+					new SpawnWorkerError("memory-watermark", memoryHardWatermarkMessage(rssBytes, watermarks)),
+				)
+			) {
+				return;
+			}
 			emitSoftNotice(rssBytes);
-			interruptForMemoryWatermark(
-				new SpawnWorkerError("memory-watermark", memoryHardWatermarkMessage(rssBytes, watermarks)),
-			);
+			// Before ready, SIGUSR2 may still have its default action because the
+			// worker entry module has not installed its handler. Defer the signal;
+			// the already-armed grace still bounds a worker that never becomes ready.
+			signalReadyWorkerForMemoryInterrupt();
 		},
 		onSampleInvalid: reason => {
-			interruptForMemoryWatermark(
-				new SpawnWorkerError("memory-watermark", memoryWatermarkSampleInvalidMessage(reason, watermarks)),
-			);
+			if (
+				requestMemoryInterrupt(
+					new SpawnWorkerError("memory-watermark", memoryWatermarkSampleInvalidMessage(reason, watermarks)),
+				)
+			) {
+				signalReadyWorkerForMemoryInterrupt();
+			}
 		},
 	});
 
