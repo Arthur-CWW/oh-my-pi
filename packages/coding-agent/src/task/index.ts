@@ -41,6 +41,9 @@ import {
 	type TaskItem,
 	type TaskParams,
 	type TaskToolDetails,
+	type TaskStartupFailure,
+	type TaskStartupFailureCode,
+	type TaskStartupPhase,
 	type TaskToolSchemaInstance,
 } from "./types";
 // Import review tools for side effects (registers subagent tool handlers)
@@ -336,6 +339,53 @@ function renderDescription(
 		asyncEnabled,
 		ircEnabled,
 	});
+}
+
+export class TaskStartupError extends Error {
+	readonly causeTag: string;
+
+	constructor(
+		readonly phase: TaskStartupPhase,
+		cause: unknown,
+		readonly code: TaskStartupFailureCode = "TASK_PRE_REGISTRATION_FAILED",
+	) {
+		const tagged = cause && typeof cause === "object" && "_tag" in cause ? cause._tag : undefined;
+		const causeTag =
+			typeof tagged === "string" && tagged.trim()
+				? tagged.trim()
+				: cause instanceof Error && cause.name.trim()
+					? cause.name.trim()
+					: "UnknownError";
+		const errorMessage = cause instanceof Error ? cause.message.trim() : "";
+		const reason =
+			cause && typeof cause === "object" && "reason" in cause && typeof cause.reason === "string"
+				? cause.reason.trim()
+				: "";
+		const detail = errorMessage || reason || (typeof cause === "string" ? cause.trim() : "") || "No error message provided";
+		super(`[${code}] Task startup failed during ${phase}: ${causeTag}: ${detail}`);
+		this.name = "TaskStartupError";
+		this.causeTag = causeTag;
+		this.cause = cause;
+	}
+
+	toFailure(agentId?: string): TaskStartupFailure {
+		return {
+			code: this.code,
+			phase: this.phase,
+			message: this.message,
+			causeTag: this.causeTag,
+			...(agentId ? { agentId } : {}),
+		};
+	}
+}
+
+async function runTaskStartupPhase<T>(phase: TaskStartupPhase, operation: () => Promise<T>): Promise<T> {
+	try {
+		return await operation();
+	} catch (error) {
+		if (error instanceof Error && (error.name === "AbortError" || error.name === "ToolAbortError")) throw error;
+		throw error instanceof TaskStartupError ? error : new TaskStartupError(phase, error);
+	}
 }
 
 function createTaskModeError(text: string): AgentToolResult<TaskToolDetails> {
@@ -1059,10 +1109,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		if (!selectedAgent) return createUnknownTaskCapabilityError(params.agent ?? "", this.#capabilities);
 
 		if (batchEnabled) {
-			const context = await prepareSpawnContext(
-				this.session.cwd,
-				this.session.settings.get("task.spawnGuidePath"),
-				params.context,
+			const context = await runTaskStartupPhase("spawn-context", () =>
+				prepareSpawnContext(
+					this.session.cwd,
+					this.session.settings.get("task.spawnGuidePath"),
+					params.context,
+				),
 			);
 			params = { ...params, context };
 		}
@@ -1075,7 +1127,9 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			this.session.taskDepth ?? 0,
 		);
 		const ircEnabled = isIrcEnabled(this.session.settings, this.session.taskDepth ?? 0);
-		const identityCandidates = await this.#spawnIdentityCandidates();
+		const identityCandidates = await runTaskStartupPhase("identity-discovery", () =>
+			this.#spawnIdentityCandidates(),
+		);
 		const identityMatches = spawnItems
 			.map(item => findSpawnIdentityMatch(item, identityCandidates))
 			.filter((match): match is SpawnIdentityMatch => match !== undefined);
@@ -1086,10 +1140,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				details: { projectAgentsDir: null, results: [], totalDurationMs: 0 },
 			};
 		}
-		const diskAdmission = await checkDiskAdmission(taskDiskOperationKind(selectedAgent), {
-			targetPath: this.session.cwd,
-			notify: true,
-		});
+		const diskAdmission = await runTaskStartupPhase("disk-admission", () =>
+			checkDiskAdmission(taskDiskOperationKind(selectedAgent), {
+				targetPath: this.session.cwd,
+				notify: true,
+			}),
+		);
 		if (!diskAdmission.admitted) return createDiskPressureRefusal(diskAdmission);
 
 		const identityAdvisory =
@@ -1136,18 +1192,22 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 
 		const agentLabel = params.agent ?? "task";
 		const agentSource = selectedAgent?.source ?? "bundled";
-		const routeDecisions: Array<SpawnRouteDecision | undefined> = [];
+		const policySnapshot = await runTaskStartupPhase("route-policy", () => snapshotTaskSpawnPolicy(this.session));
+		const routeDecisions: SpawnRouteDecision[] = [];
 		for (const item of spawnItems) {
 			const spawnParams = spawnParamsFor(params, item);
-			const policySnapshot = selectedAgent ? await snapshotTaskSpawnPolicy(this.session) : undefined;
-			let routeDecision = selectedAgent
-				? resolveTaskSpawnRoute(this.session, agentLabel, selectedAgent, spawnParams, policySnapshot)
-				: undefined;
-			if (routeDecision && !routeDecision.invalid) {
-				routeDecision = await applyQuotaAdmission(this.session, routeDecision, signal);
+			let routeDecision = await runTaskStartupPhase("route-resolution", async () =>
+				resolveTaskSpawnRoute(this.session, agentLabel, selectedAgent, spawnParams, policySnapshot),
+			);
+			if (!routeDecision.invalid) {
+				routeDecision = await runTaskStartupPhase("quota-admission", () =>
+					applyQuotaAdmission(this.session, routeDecision, signal),
+				);
 			}
-			if (routeDecision && !routeDecision.invalid && !routeDecision.block) {
-				routeDecision = await applyTaskAuthFallback(this.session, routeDecision);
+			if (!routeDecision.invalid && !routeDecision.block) {
+				routeDecision = await runTaskStartupPhase("auth-fallback", () =>
+					applyTaskAuthFallback(this.session, routeDecision),
+				);
 			}
 			const routeError = routeDecision ? formatTaskRouteError(this.session, agentLabel, routeDecision) : undefined;
 			if (routeError) {
@@ -1176,9 +1236,11 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		for (let index = 0; index < spawnItems.length; index++) {
 			const item = spawnItems[index];
 			const routeDecision = routeDecisions[index];
-			const agentId = await outputManager.allocate(
-				item.id?.trim() || generateTaskName(),
-				candidate => AgentRegistry.global().get(candidate) !== undefined,
+			const agentId = await runTaskStartupPhase("identity-allocation", () =>
+				outputManager.allocate(
+					item.id?.trim() || generateTaskName(),
+					candidate => AgentRegistry.global().get(candidate) !== undefined,
+				),
 			);
 			const assignment = (item.assignment ?? "").trim();
 			spawns.push({
@@ -1220,11 +1282,13 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		let settledCount = 0;
 		let failedCount = 0;
 		let primaryJobId = spawns[0].agentId;
+		const startupFailures: TaskStartupFailure[] = [];
 		const buildAsyncDetails = (state: "running" | "completed" | "failed", jobId: string): TaskToolDetails => ({
 			projectAgentsDir: null,
 			results: [],
 			totalDurationMs: 0,
 			progress: spawns.map(spawn => ({ ...spawn.progress })),
+			...(startupFailures.length > 0 ? { startupFailures: startupFailures.slice() } : {}),
 			async: {
 				state: single ? state : settledCount < spawns.length ? "running" : failedCount > 0 ? "failed" : "completed",
 				jobId: single ? jobId : primaryJobId,
@@ -1233,7 +1297,6 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		});
 
 		const started: Array<{ agentId: string; jobId: string; description?: string; modelChain?: string }> = [];
-		const failedSchedules: string[] = [];
 		for (const spawn of spawns) {
 			try {
 				const spawnParams = spawnParamsFor(params, spawn.item);
@@ -1276,8 +1339,12 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				// finalize it as terminal so it stays inspectable but stops projecting
 				// as active queued work.
 				AgentRegistry.global().failStart(spawn.agentId);
-				const message = error instanceof Error ? error.message : String(error);
-				failedSchedules.push(`${spawn.agentId}: ${message}`);
+				const startupError = new TaskStartupError(
+					"job-registration",
+					error,
+					"TASK_JOB_REGISTRATION_FAILED",
+				);
+				startupFailures.push(startupError.toFailure(spawn.agentId));
 				spawn.progress.status = "failed";
 				settledCount += 1;
 				failedCount += 1;
@@ -1289,10 +1356,11 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				content: [
 					{
 						type: "text",
-						text: `Failed to start background task job${single ? "" : "s"}: ${failedSchedules.join("; ")}`,
+						text: `Failed to start background task job${single ? "" : "s"}: ${startupFailures.map(failure => failure.message).join("; ")}`,
 					},
 				],
-				details: { projectAgentsDir: null, results: [], totalDurationMs: 0 },
+				details: { projectAgentsDir: null, results: [], totalDurationMs: 0, startupFailures },
+				isError: true,
 			};
 		}
 
@@ -1322,8 +1390,8 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 			? `DM these ids via \`irc\` to coordinate while they run; use \`job\` only to inspect (\`list\`), wait (\`poll\`), or cancel a stuck task.`
 			: `Use \`job\` to inspect (\`list\`), wait (\`poll\`), or cancel a stuck task by id.`;
 		const scheduleFailureSummary =
-			failedSchedules.length > 0
-				? ` Failed to schedule ${failedSchedules.length} spawn${failedSchedules.length === 1 ? "" : "s"}: ${failedSchedules.join("; ")}.`
+			startupFailures.length > 0
+				? ` Failed to schedule ${startupFailures.length} spawn${startupFailures.length === 1 ? "" : "s"}: ${startupFailures.map(failure => failure.message).join("; ")}.`
 				: "";
 		const startedListing = started
 			.map(({ agentId, jobId, description, modelChain }) => {
@@ -1723,13 +1791,22 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 		const planModeState = this.session.getPlanModeState?.();
 		const effectiveAgent = resolveSubagentDefinition(agent, planModeState?.enabled === true);
 
-		const policySnapshot = preResolved ? undefined : await snapshotTaskSpawnPolicy(this.session);
+		const policySnapshot = preResolved
+			? undefined
+			: await runTaskStartupPhase("route-policy", () => snapshotTaskSpawnPolicy(this.session));
 		let routeDecision =
-			preResolved ?? resolveTaskSpawnRoute(this.session, agentName, effectiveAgent, params, policySnapshot);
+			preResolved ??
+			(await runTaskStartupPhase("route-resolution", async () =>
+				resolveTaskSpawnRoute(this.session, agentName, effectiveAgent, params, policySnapshot),
+			));
 		if (!preResolved && !routeDecision.invalid) {
-			routeDecision = await applyQuotaAdmission(this.session, routeDecision, signal);
+			routeDecision = await runTaskStartupPhase("quota-admission", () =>
+				applyQuotaAdmission(this.session, routeDecision, signal),
+			);
 		}
-		routeDecision = await applyTaskAuthFallback(this.session, routeDecision);
+		routeDecision = await runTaskStartupPhase("auth-fallback", () =>
+			applyTaskAuthFallback(this.session, routeDecision),
+		);
 		const routeError = formatTaskRouteError(this.session, agentName, routeDecision);
 		if (routeError) {
 			const blockedEntry: SingleResult = {

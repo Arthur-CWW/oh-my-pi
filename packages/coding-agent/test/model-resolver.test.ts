@@ -1380,6 +1380,19 @@ describe("parseModelString", () => {
 			}
 		});
 
+		test.each([
+			["med", Effort.Medium],
+			[Effort.Medium, Effort.Medium],
+			[Effort.High, Effort.High],
+			[Effort.XHigh, Effort.XHigh],
+		] as const)("normalizes selector effort %s to %s", (suffix, expected) => {
+			expect(parseModelString(`openai-codex/gpt-5.6-luna:${suffix}`)).toEqual({
+				provider: "openai-codex",
+				id: "gpt-5.6-luna",
+				thinkingLevel: expected,
+			});
+		});
+
 		test("does NOT strip invalid suffix — treats it as part of model ID", () => {
 			const result = parseModelString("openrouter/qwen/qwen3-coder:exacto");
 			expect(result).toEqual({ provider: "openrouter", id: "qwen/qwen3-coder:exacto" });

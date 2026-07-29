@@ -400,8 +400,12 @@ export const PolicySourceV1Schema = Schema.Struct({
 });
 export type PolicySourceV1 = typeof PolicySourceV1Schema.Type;
 
+const PolicyRegistryVersionSchema = PositiveIntSchema.pipe(
+	Schema.check(Schema.isLessThanOrEqualTo(POLICY_REGISTRY_VERSION)),
+);
+
 export const PolicyRegistryV1Schema = Schema.Struct({
-	version: Schema.Literals([1, 2, 3, POLICY_REGISTRY_VERSION]),
+	version: PolicyRegistryVersionSchema,
 	digest: SHA256DigestSchema,
 });
 export type PolicyRegistryV1 = typeof PolicyRegistryV1Schema.Type;

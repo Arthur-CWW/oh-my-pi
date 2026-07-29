@@ -179,6 +179,28 @@ describe("exact responsibility route admission", () => {
 		expect(decision.invalid?.kind).toBe("missing_route_effort");
 	});
 
+	it("canonicalizes med in responsibility defaults and per-task overrides", () => {
+		const responsibilityDefault = resolveSpawnRoute({
+			settings,
+			modelRegistry: registry,
+			responsibility: "reviewer",
+			responsibilityDefault: "openai-codex/gpt-5.6-luna:med",
+		});
+		expect(responsibilityDefault.invalid).toBeUndefined();
+		expect(responsibilityDefault.route?.selector).toBe("openai-codex/gpt-5.6-luna:medium");
+
+		const perTaskOverride = resolveSpawnRoute({
+			settings,
+			modelRegistry: registry,
+			responsibility: "reviewer",
+			responsibilityDefault: "openai-codex/gpt-5.6-luna:high",
+			spawnExplicit: "openai-codex/gpt-5.6-luna:med",
+		});
+		expect(perTaskOverride.invalid).toBeUndefined();
+		expect(perTaskOverride.source).toBe("spawn_explicit");
+		expect(perTaskOverride.route?.selector).toBe("openai-codex/gpt-5.6-luna:medium");
+	});
+
 	it("names packet-local escalation in the route receipt", () => {
 		const receipt = toSpawnRouteReceipt(
 			resolveSpawnRoute({

@@ -448,6 +448,27 @@ export interface SessionControlPauseRefusal {
 	readonly reason: "session paused by fleet control";
 }
 
+export type TaskStartupFailureCode = "TASK_PRE_REGISTRATION_FAILED" | "TASK_JOB_REGISTRATION_FAILED";
+
+export type TaskStartupPhase =
+	| "spawn-context"
+	| "identity-discovery"
+	| "disk-admission"
+	| "route-policy"
+	| "route-resolution"
+	| "quota-admission"
+	| "auth-fallback"
+	| "identity-allocation"
+	| "job-registration";
+
+export interface TaskStartupFailure {
+	readonly code: TaskStartupFailureCode;
+	readonly phase: TaskStartupPhase;
+	readonly message: string;
+	readonly causeTag: string;
+	readonly agentId?: string;
+}
+
 /** Tool details for TUI rendering */
 export interface TaskToolDetails {
 	projectAgentsDir: string | null;
@@ -459,6 +480,8 @@ export interface TaskToolDetails {
 	pauseRefusal?: SessionControlPauseRefusal;
 	/** Typed refusal for a new writable child under blocking disk pressure. */
 	diskPressureRefusal?: DiskAdmissionDecision;
+	/** Typed failures raised before a child process registered. */
+	startupFailures?: TaskStartupFailure[];
 	/** Aggregated usage across all subagents. */
 	usage?: Usage;
 	outputPaths?: string[];

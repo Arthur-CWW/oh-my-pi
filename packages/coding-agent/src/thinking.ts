@@ -62,6 +62,7 @@ export function parseEffort(value: string | null | undefined): Effort | undefine
  * Parses an agent-local thinking selector.
  */
 export function parseThinkingLevel(value: string | null | undefined): ThinkingLevel | undefined {
+	if (value === "med") return ThinkingLevel.Medium;
 	return value !== undefined && value !== null && THINKING_LEVELS.has(value) ? (value as ThinkingLevel) : undefined;
 }
 
