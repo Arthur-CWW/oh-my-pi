@@ -48,6 +48,24 @@ function compaction(id: string, parentId: string | null, summary: string, firstK
 	};
 }
 
+function remoteCompaction(): CompactionEntry {
+	return {
+		...compaction("3", "2", "Remote summary", "1"),
+		preserveData: {
+			openaiRemoteCompaction: {
+				api: "openai-responses",
+				provider: "openai",
+				model: "gpt-5.4",
+				replacementHistory: [
+					{ type: "message", role: "user", content: [{ type: "input_text", text: "Preserved user" }] },
+					{ type: "compaction", encrypted_content: "enc_123" },
+				],
+				compactionItem: { type: "compaction", encrypted_content: "enc_123" },
+			},
+		},
+	};
+}
+
 function branchSummary(id: string, parentId: string | null, summary: string, fromId: string): BranchSummaryEntry {
 	return { type: "branch_summary", id, parentId, timestamp: "2025-01-01T00:00:00Z", summary, fromId };
 }
@@ -196,38 +214,73 @@ describe("buildSessionContext", () => {
 		});
 
 		it("uses preserved OpenAI replacement history instead of kept raw messages", () => {
-			const remoteCompaction: CompactionEntry = {
-				...compaction("3", "2", "Remote summary", "1"),
-				preserveData: {
-					openaiRemoteCompaction: {
-						provider: "openai",
-						replacementHistory: [
-							{ type: "message", role: "user", content: [{ type: "input_text", text: "Preserved user" }] },
-							{ type: "compaction", encrypted_content: "enc_123" },
-						],
-						compactionItem: { type: "compaction", encrypted_content: "enc_123" },
-					},
-				},
-			};
+			const remoteCompactionEntry = remoteCompaction();
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "first"),
 				msg("2", "1", "assistant", "response"),
-				remoteCompaction,
+				remoteCompactionEntry,
 				msg("4", "3", "user", "after compact"),
 			];
-			const ctx = buildSessionContext(entries);
+			const ctx = buildSessionContext(entries, undefined, undefined, {
+				activeRoute: { api: "openai-responses", provider: "openai", model: "gpt-5.4" },
+			});
 			expect(ctx.messages).toHaveLength(2);
 			expect(ctx.messages[0]?.role).toBe("compactionSummary");
 			if (ctx.messages[0]?.role !== "compactionSummary") throw new Error("Expected compaction summary message");
 			expect(ctx.messages[0].providerPayload).toEqual({
 				type: "openaiResponsesHistory",
+				api: "openai-responses",
 				provider: "openai",
+				model: "gpt-5.4",
 				items: [
 					{ type: "message", role: "user", content: [{ type: "input_text", text: "Preserved user" }] },
 					{ type: "compaction", encrypted_content: "enc_123" },
 				],
 			});
 			expect((ctx.messages[1] as { content: string }).content).toBe("after compact");
+		});
+
+		it("emits kept raw messages when any active route component differs", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "first"),
+				msg("2", "1", "assistant", "response"),
+				remoteCompaction(),
+				msg("4", "3", "user", "after compact"),
+			];
+			const mismatchedRoutes = [
+				{ api: "openai-codex-responses", provider: "openai", model: "gpt-5.4" },
+				{ api: "openai-responses", provider: "openai-codex", model: "gpt-5.4" },
+				{ api: "openai-responses", provider: "openai", model: "gpt-5-mini" },
+			];
+
+			for (const activeRoute of mismatchedRoutes) {
+				const ctx = buildSessionContext(entries, undefined, undefined, { activeRoute });
+
+				expect(ctx.messages.map(message => message.role)).toEqual([
+					"compactionSummary",
+					"user",
+					"assistant",
+					"user",
+				]);
+				if (ctx.messages[0]?.role !== "compactionSummary") throw new Error("Expected compaction summary message");
+				expect(ctx.messages[0].providerPayload).toBeUndefined();
+				expect((ctx.messages[2] as { content: Array<{ text: string }> }).content[0]?.text).toBe("response");
+			}
+		});
+
+		it("emits kept raw messages when no active route is available", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "first"),
+				msg("2", "1", "assistant", "response"),
+				remoteCompaction(),
+				msg("4", "3", "user", "after compact"),
+			];
+
+			const ctx = buildSessionContext(entries);
+
+			expect(ctx.messages.map(message => message.role)).toEqual(["compactionSummary", "user", "assistant", "user"]);
+			if (ctx.messages[0]?.role !== "compactionSummary") throw new Error("Expected compaction summary message");
+			expect(ctx.messages[0].providerPayload).toBeUndefined();
 		});
 
 		it("multiple compactions uses latest", () => {

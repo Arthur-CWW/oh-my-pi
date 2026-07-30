@@ -61,7 +61,13 @@ const preservedHistoryContext: Context = {
 		{
 			role: "user",
 			content: "summary that should be ignored",
-			providerPayload: createOpenAIResponsesHistoryPayload("openai", preservedHistoryItems, false),
+			providerPayload: createOpenAIResponsesHistoryPayload(
+				"openai-responses",
+				"openai",
+				"gpt-5-mini",
+				preservedHistoryItems,
+				false,
+			),
 			timestamp: Date.now(),
 		},
 	],
@@ -89,10 +95,12 @@ const codexToCopilotContext: Context = {
 		{
 			...makeAssistantMessage([], false, "openai-codex", "gpt-5.2-codex"),
 			content: [{ type: "text", text: "generic assistant that should be rebuilt" }],
-			providerPayload: createOpenAIResponsesHistoryPayload("openai-codex", [
-				{ type: "reasoning", encrypted_content: "enc_123" },
-				...snapshotHistoryItems,
-			]),
+			providerPayload: createOpenAIResponsesHistoryPayload(
+				"openai-codex-responses",
+				"openai-codex",
+				"gpt-5.2-codex",
+				[{ type: "reasoning", encrypted_content: "enc_123" }, ...snapshotHistoryItems],
+			),
 		},
 		{ role: "user", content: "follow-up user", timestamp: Date.now() },
 	],
@@ -103,7 +111,13 @@ const resumedSameProviderContext: Context = {
 		{
 			role: "user",
 			content: "summary that should be preserved",
-			providerPayload: createOpenAIResponsesHistoryPayload("openai", fallbackHistoryItems, false),
+			providerPayload: createOpenAIResponsesHistoryPayload(
+				"openai-responses",
+				"openai",
+				"gpt-5-mini",
+				fallbackHistoryItems,
+				false,
+			),
 			timestamp: Date.now(),
 		},
 		{
@@ -119,7 +133,13 @@ const resumedCopilotSameProviderContext: Context = {
 		{
 			role: "user",
 			content: "summary that should be preserved",
-			providerPayload: createOpenAIResponsesHistoryPayload("github-copilot", fallbackHistoryItems, false),
+			providerPayload: createOpenAIResponsesHistoryPayload(
+				"openai-responses",
+				"github-copilot",
+				"gpt-5.4",
+				fallbackHistoryItems,
+				false,
+			),
 			timestamp: Date.now(),
 		},
 		{
@@ -140,7 +160,13 @@ const resumedSameProviderWithRemoteCompactionPayloadContext: Context = {
 		{
 			role: "user",
 			content: "summary that should be preserved",
-			providerPayload: createOpenAIResponsesHistoryPayload("openai", preservedHistoryItems, false),
+			providerPayload: createOpenAIResponsesHistoryPayload(
+				"openai-responses",
+				"openai",
+				"gpt-5-mini",
+				preservedHistoryItems,
+				false,
+			),
 			timestamp: Date.now(),
 		},
 		{
@@ -168,7 +194,7 @@ const resumedSameProviderWithStaleThinkingContext: Context = {
 				},
 				{ type: "text", text: "generic assistant that should be rebuilt" },
 			],
-			providerPayload: createOpenAIResponsesHistoryPayload("openai", [
+			providerPayload: createOpenAIResponsesHistoryPayload("openai-responses", "openai", "gpt-5-mini", [
 				{ type: "reasoning", encrypted_content: "enc_snapshot" },
 			]),
 		},
@@ -237,10 +263,11 @@ function makeAssistantMessage(
 	provider: "openai" | "openai-codex" | "github-copilot" = "openai",
 	model = provider === "openai-codex" ? "gpt-5.2-codex" : provider === "github-copilot" ? "gpt-5.4" : "gpt-5-mini",
 ) {
+	const api = provider === "openai-codex" ? ("openai-codex-responses" as const) : ("openai-responses" as const);
 	return {
 		role: "assistant" as const,
 		content: [{ type: "text" as const, text: "ignored" }],
-		api: provider === "openai-codex" ? ("openai-codex-responses" as const) : ("openai-responses" as const),
+		api,
 		provider,
 		model,
 		usage: {
@@ -252,7 +279,7 @@ function makeAssistantMessage(
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		},
 		stopReason: "stop" as const,
-		providerPayload: createOpenAIResponsesHistoryPayload(provider, items, incremental),
+		providerPayload: createOpenAIResponsesHistoryPayload(api, provider, model, items, incremental),
 		timestamp: Date.now(),
 	};
 }
@@ -476,6 +503,90 @@ describe("OpenAI responses history payload", () => {
 		expect(containsAssistantOutputText(payload.input, "generic assistant that should be rebuilt")).toBe(true);
 	});
 
+	it("re-encodes visible Codex history across model changes without native reasoning or item ids", async () => {
+		const callId = "call_model_switch";
+		const nativeItemIds = ["rs_old_model", "msg_old_model", "fc_old_model"];
+		const context: Context = {
+			messages: [
+				{ role: "user", content: "before model switch", timestamp: Date.now() },
+				{
+					...makeAssistantMessage(
+						[
+							{
+								type: "reasoning",
+								id: nativeItemIds[0],
+								encrypted_content: "enc_old_model",
+							},
+							{
+								type: "message",
+								role: "assistant",
+								id: nativeItemIds[1],
+								content: [{ type: "output_text", text: "Native answer that must not be replayed" }],
+							},
+							{
+								type: "function_call",
+								id: nativeItemIds[2],
+								call_id: callId,
+								name: "read",
+								arguments: '{"path":"old-native.md"}',
+							},
+						],
+						false,
+						"openai-codex",
+						"gpt-5.2-codex",
+					),
+					content: [
+						{
+							type: "thinking",
+							thinking: "",
+							thinkingSignature: JSON.stringify({
+								type: "reasoning",
+								id: nativeItemIds[0],
+								encrypted_content: "enc_old_model",
+							}),
+						},
+						{ type: "text", text: "Visible answer after the old reasoning" },
+						{ type: "toolCall", id: callId, name: "read", arguments: { path: "visible.md" } },
+					],
+					stopReason: "toolUse",
+				},
+				{
+					role: "toolResult",
+					toolCallId: callId,
+					toolName: "read",
+					content: [{ type: "text", text: "visible tool result" }],
+					isError: false,
+					timestamp: Date.now(),
+				},
+				{ role: "user", content: "after model switch", timestamp: Date.now() },
+			],
+		};
+		const model = getBundledModel("openai-codex", "gpt-5.3-codex") as Model<"openai-codex-responses">;
+		const payload = (await captureCodexPayload(model, context)) as { input?: unknown[] };
+
+		expect(containsEncryptedReasoning(payload.input)).toBe(false);
+		expect(containsAssistantOutputText(payload.input, "Visible answer after the old reasoning")).toBe(true);
+		expect(containsAssistantOutputText(payload.input, "Native answer that must not be replayed")).toBe(false);
+		expect(findResponsesInputItem(payload.input, "function_call")).toMatchObject({
+			type: "function_call",
+			call_id: callId,
+			name: "read",
+			arguments: '{"path":"visible.md"}',
+		});
+		expect(findResponsesInputItem(payload.input, "function_call_output")).toMatchObject({
+			type: "function_call_output",
+			call_id: callId,
+			output: "visible tool result",
+		});
+		for (const nativeItemId of nativeItemIds) {
+			expect(
+				(payload.input ?? []).some(
+					item => !!item && typeof item === "object" && (item as Record<string, unknown>).id === nativeItemId,
+				),
+			).toBe(false);
+		}
+	});
+
 	it("builds up history incrementally from multiple assistant messages", async () => {
 		const model = getOpenAIReasoningModel("openai", "gpt-5-mini");
 		const payload = (await captureResponsesPayload(model, incrementalContext)) as { input?: unknown[] };
@@ -642,7 +753,7 @@ describe("OpenAI responses history payload", () => {
 		expect(replayHistoryItems[4]?.id).toBe(opaqueMessageId);
 	});
 
-	it("backward compat: old full-snapshot payloads still replace history for legacy same-provider assistant turns", async () => {
+	it("full-snapshot payloads replace history for exact-route assistant turns", async () => {
 		const fullSnapshotItems = [
 			{ type: "message", role: "user", content: [{ type: "input_text", text: "Canonical user" }] },
 			{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Canonical assistant" }] },
@@ -652,7 +763,13 @@ describe("OpenAI responses history payload", () => {
 				{ role: "user", content: "old user message that gets replaced", timestamp: Date.now() },
 				{
 					...makeAssistantMessage(fullSnapshotItems, false),
-					providerPayload: { type: "openaiResponsesHistory", items: fullSnapshotItems },
+					providerPayload: {
+						type: "openaiResponsesHistory",
+						api: "openai-responses",
+						provider: "openai",
+						model: "gpt-5-mini",
+						items: fullSnapshotItems,
+					},
 				},
 				{ role: "user", content: "follow-up", timestamp: Date.now() },
 			],
@@ -782,7 +899,7 @@ describe("OpenAI responses history payload", () => {
 				{
 					role: "user",
 					content: "follow-up after aborted turn",
-					providerPayload: createOpenAIResponsesHistoryPayload("openai", [
+					providerPayload: createOpenAIResponsesHistoryPayload("openai-responses", "openai", "gpt-5-mini", [
 						{
 							type: "function_call",
 							call_id: pairedCallId,

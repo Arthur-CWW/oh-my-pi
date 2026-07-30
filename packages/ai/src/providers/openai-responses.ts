@@ -553,7 +553,12 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (
 				throw new Error(output.errorMessage ?? "An unknown error occurred");
 			}
 
-			output.providerPayload = createOpenAIResponsesHistoryPayload(model.provider, nativeOutputItems);
+			output.providerPayload = createOpenAIResponsesHistoryPayload(
+				model.api,
+				model.provider,
+				model.id,
+				nativeOutputItems,
+			);
 			if (providerSessionState) providerSessionState.nativeHistoryReplayWarmed = true;
 			if (chainState) {
 				chainState.lastParams = structuredCloneJSON(stripTrailingScaffolding(params, trailingScaffoldingItems));
@@ -766,7 +771,7 @@ function convertConversationMessages(
 	for (const msg of transformedMessages) {
 		if (msg.role === "user" || msg.role === "developer") {
 			const providerPayload = (msg as { providerPayload?: AssistantMessage["providerPayload"] }).providerPayload;
-			const historyItems = getOpenAIResponsesHistoryItems(providerPayload, model.provider);
+			const historyItems = getOpenAIResponsesHistoryItems(providerPayload, model.api, model.provider, model.id);
 			const shouldReplayPayloadItems =
 				shouldReplayNativeHistory ||
 				(historyItems?.some(item => {
@@ -790,10 +795,9 @@ function convertConversationMessages(
 			// Native items are model-bound (reasoning carries encrypted content minted
 			// by the producing model); after a mid-session model switch fall back to
 			// block re-encode, which strips foreign signatures.
-			const providerPayload =
-				shouldReplayNativeHistory && assistantMsg.api === model.api && assistantMsg.model === model.id
-					? getOpenAIResponsesHistoryPayload(assistantMsg.providerPayload, model.provider, assistantMsg.provider)
-					: undefined;
+			const providerPayload = shouldReplayNativeHistory
+				? getOpenAIResponsesHistoryPayload(assistantMsg.providerPayload, model.api, model.provider, model.id)
+				: undefined;
 			const historyItems = providerPayload?.items;
 			if (historyItems) {
 				const sanitizedHistoryItems = sanitizeOpenAIResponsesHistoryItemsForReplay(filterReasoning(historyItems));

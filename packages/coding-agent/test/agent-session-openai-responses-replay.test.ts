@@ -32,15 +32,21 @@ function createUsage(): Usage {
 	};
 }
 
-function createUserHistoryPayload(provider = "openai"): ProviderPayload {
-	return createOpenAIResponsesHistoryPayload(provider, [
-		{ type: "message", role: "user", content: [{ type: "input_text", text: "Preserved user history" }] },
-		{ type: "compaction", encrypted_content: "enc_preserved" },
-	]);
+function createUserHistoryPayload(incremental = true): ProviderPayload {
+	return createOpenAIResponsesHistoryPayload(
+		"openai-responses",
+		"openai",
+		"gpt-5-mini",
+		[
+			{ type: "message", role: "user", content: [{ type: "input_text", text: "Preserved user history" }] },
+			{ type: "compaction", encrypted_content: "enc_preserved" },
+		],
+		incremental,
+	);
 }
 
-function createStaleAssistantHistoryPayload(provider = "openai"): ProviderPayload {
-	return createOpenAIResponsesHistoryPayload(provider, [
+function createStaleAssistantHistoryPayload(api: string, provider: string, model: string): ProviderPayload {
+	return createOpenAIResponsesHistoryPayload(api, provider, model, [
 		{ type: "reasoning", encrypted_content: "enc_stale" },
 		{
 			type: "message",
@@ -57,6 +63,12 @@ function createStaleAssistantMessage(
 	options: { api?: AssistantMessage["api"]; provider?: string; model?: string } = {},
 ): AssistantMessage {
 	const { api = "openai-responses", provider = "openai", model = "gpt-5-mini" } = options;
+	// Codex cases in this file exercise foreign stale-state sanitization. Give
+	// those payloads explicit foreign provenance rather than legacy omissions.
+	const historyRoute =
+		provider === "openai-codex"
+			? { api: "openai-responses", provider: "openai", model: "gpt-5-mini" }
+			: { api, provider, model };
 	return {
 		role: "assistant",
 		content: [
@@ -83,7 +95,7 @@ function createStaleAssistantMessage(
 		model,
 		usage: createUsage(),
 		stopReason: "stop",
-		providerPayload: createStaleAssistantHistoryPayload(provider),
+		providerPayload: createStaleAssistantHistoryPayload(historyRoute.api, historyRoute.provider, historyRoute.model),
 		timestamp: Date.now(),
 	};
 }
@@ -118,6 +130,37 @@ function appendStaleAssistantTurn(
 	const assistantId = sessionManager.appendMessage(createStaleAssistantMessage(text, options));
 	const toolResultId = sessionManager.appendMessage(createPairedToolResult());
 	return { assistantId, toolResultId };
+}
+
+function appendRemoteCompaction(sessionManager: SessionManager): void {
+	const firstKeptEntryId = sessionManager.appendMessage({
+		role: "user",
+		content: "Raw kept history",
+		timestamp: Date.now() - 2,
+	});
+	sessionManager.appendCompaction("Remote summary", undefined, firstKeptEntryId, 1000, undefined, undefined, {
+		openaiRemoteCompaction: {
+			api: "openai-responses",
+			provider: "openai",
+			model: "gpt-5-mini",
+			replacementHistory: [
+				{ type: "message", role: "user", content: [{ type: "input_text", text: "Preserved user history" }] },
+				{ type: "compaction", encrypted_content: "enc_preserved" },
+			],
+			compactionItem: { type: "compaction", encrypted_content: "enc_preserved" },
+		},
+	});
+	sessionManager.appendMessage({ role: "user", content: "After remote compaction", timestamp: Date.now() - 1 });
+}
+
+function expectNativeCompactionContext(session: AgentSession): void {
+	expect(session.messages.map(message => message.role)).toEqual(["compactionSummary", "user"]);
+	const summary = session.messages[0];
+	if (summary?.role !== "compactionSummary") throw new Error("Expected compaction summary");
+	expect(summary.providerPayload).toEqual(createUserHistoryPayload(false));
+	expect(
+		session.messages.some(message => message.role === "user" && getTextContent(message) === "Raw kept history"),
+	).toBe(false);
 }
 
 function isSessionMessageEntry(entry: SessionEntry): entry is SessionMessageEntry {
@@ -200,7 +243,7 @@ async function createPersistedSession(
 ): Promise<{ sessionFile: string; treeTargetId?: string }> {
 	const sessionManager = SessionManager.create(tempDir, tempDir);
 	const result = populate(sessionManager);
-	await sessionManager.flush();
+	await sessionManager.ensureOnDisk();
 	const sessionFile = sessionManager.getSessionFile();
 	if (!sessionFile) {
 		throw new Error("Expected persisted session file");
@@ -330,6 +373,28 @@ describe("AgentSession OpenAI Responses replay boundaries", () => {
 			throw new Error("Expected runtime user message");
 		}
 		expect(runtimeUser.providerPayload).toEqual(preservedUserPayload);
+	});
+
+	it("uses the active route for remote compaction on cold startup and AgentSession reload", async () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-remote-compaction-route-${Snowflake.next()}-`));
+		tempDirs.push(tempDir);
+
+		const { sessionFile } = await createPersistedSession(tempDir, sessionManager => {
+			sessionManager.appendModelChange("openai/gpt-5-mini");
+			appendRemoteCompaction(sessionManager);
+		});
+
+		const reloadedSessionManager = await SessionManager.open(sessionFile, tempDir);
+		const rebuilt = reloadedSessionManager.buildSessionContext({
+			activeRoute: { api: "openai-responses", provider: "openai", model: "gpt-5-mini" },
+		});
+		expect(rebuilt.messages.map(message => message.role)).toEqual(["compactionSummary", "user"]);
+		const { session } = await createSessionHarness(tempDir, reloadedSessionManager);
+		sessions.push(session);
+
+		expectNativeCompactionContext(session);
+		await session.reload();
+		expectNativeCompactionContext(session);
 	});
 
 	it("sanitizes stale Responses-family assistant replay metadata for direct SessionManager.open consumers", async () => {

@@ -53,15 +53,41 @@ function withRequestTimeout(signal: AbortSignal | undefined, timeoutMs: number):
 }
 
 export type OpenAiRemoteCompactionItem = {
+	id?: string;
 	type: "compaction" | "compaction_summary";
 	encrypted_content?: string;
 	summary?: string;
 };
 
+/** Audit-only provider identifiers; the compact endpoint has no recovery operation. */
+export interface OpenAiRemoteCompactionAuditMetadata {
+	responseId?: string;
+	compactionItemId?: string;
+	clientRequestId?: string;
+}
+
+export interface OpenAiRemoteCompactionAttempt {
+	attemptId: string;
+	sourceDigest: string;
+	sourceLeafId?: string;
+	firstKeptEntryId: string;
+	startedAt: string;
+}
+
+export interface OpenAiRemoteCompactionCompletedAttempt extends OpenAiRemoteCompactionAttempt {
+	status: "completed";
+	completedAt: string;
+	retryMode: "recompute_from_local_source";
+}
+
 export interface OpenAiRemoteCompactionPreserveData {
-	provider?: string;
+	api: string;
+	provider: string;
+	model: string;
 	replacementHistory: Array<Record<string, unknown>>;
 	compactionItem: OpenAiRemoteCompactionItem;
+	auditMetadata?: OpenAiRemoteCompactionAuditMetadata;
+	attempt?: OpenAiRemoteCompactionCompletedAttempt;
 }
 
 export interface OpenAiRemoteCompactionRequest {
@@ -118,26 +144,82 @@ function normalizeOpenAiCompactionToolCallId(id: string): string {
 // Preserve-data helpers
 // ============================================================================
 
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+	const value = record[key];
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 export function getPreservedOpenAiRemoteCompactionData(
 	preserveData: Record<string, unknown> | undefined,
 ): OpenAiRemoteCompactionPreserveData | undefined {
 	const candidate = preserveData?.[OPENAI_REMOTE_COMPACTION_PRESERVE_KEY];
 	if (!candidate || typeof candidate !== "object") return undefined;
-	const maybeData = candidate as { provider?: unknown; replacementHistory?: unknown; compactionItem?: unknown };
-	if (!Array.isArray(maybeData.replacementHistory)) return undefined;
-	const maybeItem = maybeData.compactionItem;
+	const data = candidate as Record<string, unknown>;
+	const api = stringField(data, "api");
+	const provider = stringField(data, "provider");
+	const model = stringField(data, "model");
+	if (!api || !provider || !model || !Array.isArray(data.replacementHistory)) return undefined;
+	const maybeItem = data.compactionItem;
 	if (!maybeItem || typeof maybeItem !== "object") return undefined;
-	const compactionItem = maybeItem as { type?: unknown; encrypted_content?: unknown; summary?: unknown };
+	const compactionItem = maybeItem as Record<string, unknown>;
 	const isClassicCompaction =
 		compactionItem.type === "compaction" && typeof compactionItem.encrypted_content === "string";
 	const isSummaryCompaction = compactionItem.type === "compaction_summary";
-	if (!isClassicCompaction && !isSummaryCompaction) {
-		return undefined;
+	if (!isClassicCompaction && !isSummaryCompaction) return undefined;
+
+	let auditMetadata: OpenAiRemoteCompactionAuditMetadata | undefined;
+	if (data.auditMetadata && typeof data.auditMetadata === "object") {
+		const audit = data.auditMetadata as Record<string, unknown>;
+		const responseId = stringField(audit, "responseId");
+		const compactionItemId = stringField(audit, "compactionItemId");
+		const clientRequestId = stringField(audit, "clientRequestId");
+		if (responseId || compactionItemId || clientRequestId) {
+			auditMetadata = {
+				...(responseId ? { responseId } : {}),
+				...(compactionItemId ? { compactionItemId } : {}),
+				...(clientRequestId ? { clientRequestId } : {}),
+			};
+		}
 	}
+
+	let attempt: OpenAiRemoteCompactionCompletedAttempt | undefined;
+	if (data.attempt && typeof data.attempt === "object") {
+		const value = data.attempt as Record<string, unknown>;
+		const attemptId = stringField(value, "attemptId");
+		const sourceDigest = stringField(value, "sourceDigest");
+		const firstKeptEntryId = stringField(value, "firstKeptEntryId");
+		const startedAt = stringField(value, "startedAt");
+		const completedAt = stringField(value, "completedAt");
+		if (
+			value.status === "completed" &&
+			value.retryMode === "recompute_from_local_source" &&
+			attemptId &&
+			sourceDigest &&
+			firstKeptEntryId &&
+			startedAt &&
+			completedAt
+		) {
+			attempt = {
+				attemptId,
+				sourceDigest,
+				...(stringField(value, "sourceLeafId") ? { sourceLeafId: stringField(value, "sourceLeafId") } : {}),
+				firstKeptEntryId,
+				startedAt,
+				status: "completed",
+				completedAt,
+				retryMode: "recompute_from_local_source",
+			};
+		}
+	}
+
 	return {
-		provider: typeof maybeData.provider === "string" ? maybeData.provider : undefined,
-		replacementHistory: maybeData.replacementHistory as Array<Record<string, unknown>>,
-		compactionItem: compactionItem as unknown as OpenAiRemoteCompactionItem,
+		api,
+		provider,
+		model,
+		replacementHistory: data.replacementHistory as Array<Record<string, unknown>>,
+		compactionItem: compactionItem as OpenAiRemoteCompactionItem,
+		...(auditMetadata ? { auditMetadata } : {}),
+		...(attempt ? { attempt } : {}),
 	};
 }
 
@@ -269,7 +351,7 @@ export function buildOpenAiNativeHistory(
 	for (const message of transformedMessages) {
 		if (message.role === "user" || message.role === "developer") {
 			const providerPayload = (message as { providerPayload?: AssistantMessage["providerPayload"] }).providerPayload;
-			const historyItems = getOpenAIResponsesHistoryItems(providerPayload, model.provider);
+			const historyItems = getOpenAIResponsesHistoryItems(providerPayload, model.api, model.provider, model.id);
 			if (historyItems) {
 				input.push(...historyItems);
 				addOpenAiCallIds(historyItems, knownCallIds, customCallIds);
@@ -307,11 +389,11 @@ export function buildOpenAiNativeHistory(
 
 		if (message.role === "assistant") {
 			const assistant = message as AssistantMessage;
-			const providerPayload = getOpenAIResponsesHistoryPayload(
-				assistant.providerPayload,
-				model.provider,
-				assistant.provider,
-			);
+			const isExactNativePayloadOrigin =
+				assistant.api === model.api && assistant.provider === model.provider && assistant.model === model.id;
+			const providerPayload = isExactNativePayloadOrigin
+				? getOpenAIResponsesHistoryPayload(assistant.providerPayload, model.api, model.provider, model.id)
+				: undefined;
 			if (providerPayload) {
 				if (providerPayload.dt) {
 					input.push(...providerPayload.items);
@@ -325,11 +407,15 @@ export function buildOpenAiNativeHistory(
 				msgIndex++;
 				continue;
 			}
-			const isDifferentModel =
-				assistant.model !== model.id && assistant.provider === model.provider && assistant.api === model.api;
+			const isDifferentModel = !isExactNativePayloadOrigin;
 
 			for (const block of assistant.content) {
-				if (block.type === "thinking" && assistant.stopReason !== "error" && block.thinkingSignature) {
+				if (
+					block.type === "thinking" &&
+					isExactNativePayloadOrigin &&
+					assistant.stopReason !== "error" &&
+					block.thinkingSignature
+				) {
 					try {
 						const reasoningItem = JSON.parse(block.thinkingSignature) as Record<string, unknown>;
 						if (reasoningItem && typeof reasoningItem === "object") {
@@ -499,7 +585,7 @@ export async function requestOpenAiRemoteCompaction(
 		);
 	}
 
-	const data = (await response.json()) as { output?: unknown[] } | undefined;
+	const data = (await response.json()) as { id?: unknown; output?: unknown[] } | undefined;
 	const rawOutput = data?.output ?? [];
 	const replacementHistory = rawOutput.filter(
 		(item): item is Record<string, unknown> =>
@@ -524,7 +610,30 @@ export async function requestOpenAiRemoteCompaction(
 		});
 		throw new Error("Remote compaction response missing compaction item");
 	}
-	return { provider: model.provider, replacementHistory, compactionItem };
+	const responseId = typeof data?.id === "string" && data.id.length > 0 ? data.id : undefined;
+	const compactionItemId =
+		typeof compactionItem.id === "string" && compactionItem.id.length > 0 ? compactionItem.id : undefined;
+	const clientRequestId =
+		response.headers.get("x-client-request-id") ??
+		response.headers.get("x-request-id") ??
+		response.headers.get("request-id") ??
+		undefined;
+	const auditMetadata =
+		responseId || compactionItemId || clientRequestId
+			? {
+					...(responseId ? { responseId } : {}),
+					...(compactionItemId ? { compactionItemId } : {}),
+					...(clientRequestId ? { clientRequestId } : {}),
+				}
+			: undefined;
+	return {
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		replacementHistory,
+		compactionItem,
+		...(auditMetadata ? { auditMetadata } : {}),
+	};
 }
 
 export async function requestRemoteCompaction(

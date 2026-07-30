@@ -7,8 +7,8 @@
 
 import {
 	type ApiKey,
-	contextHasVideo,
 	type AssistantMessage,
+	contextHasVideo,
 	type FetchImpl,
 	type Message,
 	type MessageAttribution,
@@ -19,8 +19,8 @@ import {
 	type Usage,
 	withAuth,
 } from "@oh-my-pi/pi-ai";
-import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import type { ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
+import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { countTokens } from "@oh-my-pi/pi-natives";
 import { logger, parseImageMetadata, prompt } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
@@ -32,6 +32,7 @@ import { type ConvertToLlm, createBranchSummaryMessage, createCustomMessage, def
 import {
 	buildOpenAiNativeHistory,
 	getPreservedOpenAiRemoteCompactionData,
+	type OpenAiRemoteCompactionAttempt,
 	requestOpenAiRemoteCompaction,
 	requestRemoteCompaction,
 	shouldUseOpenAiRemoteCompaction,
@@ -50,9 +51,9 @@ import {
 	createFileOps,
 	extractFileOpsFromMessage,
 	type FileOperations,
+	SUMMARIZATION_SYSTEM_PROMPT,
 	serializeConversationWithVideos,
 	stripReadSelector,
-	SUMMARIZATION_SYSTEM_PROMPT,
 	upsertFileOperations,
 } from "./utils";
 
@@ -304,7 +305,6 @@ function imageElisionPlaceholder(data: string): string {
 }
 
 type ContentArrayMessage = AgentMessage & { content: Array<Record<string, unknown>> };
-
 
 export interface ImageElisionResult {
 	messages: AgentMessage[];
@@ -681,6 +681,12 @@ function createSummarizationError(prefix: string, response: AssistantMessage): E
  * Generate a summary of the conversation using the LLM.
  * If previousSummary is provided, uses the update prompt to merge.
  */
+export interface RemoteCompactionAttemptLifecycle {
+	attempt: OpenAiRemoteCompactionAttempt;
+	onStarted: (attempt: OpenAiRemoteCompactionAttempt) => Promise<void>;
+	onSettled: (attempt: OpenAiRemoteCompactionAttempt, status: "interrupted" | "failed") => Promise<void>;
+}
+
 export interface SummaryOptions {
 	promptOverride?: string;
 	extraContext?: string[];
@@ -705,6 +711,8 @@ export interface SummaryOptions {
 	thinkingLevel?: ThinkingLevel;
 	/** Optional fetch implementation threaded into remote compaction calls. */
 	fetch?: FetchImpl;
+	/** Journal hook whose start must flush before the remote POST. */
+	remoteCompactionAttempt?: RemoteCompactionAttemptLifecycle;
 }
 
 export async function generateSummary(
@@ -1112,6 +1120,7 @@ export async function compact(
 		// dropping this field would silently change the session's wire effort.
 		thinkingLevel: options?.thinkingLevel,
 		fetch: options?.fetch,
+		remoteCompactionAttempt: options?.remoteCompactionAttempt,
 	};
 	const summaryHistory = [...messagesToSummarize, ...turnPrefixMessages, ...recentMessages];
 	const llmSummaryHistory = (summaryOptions.convertToLlm ?? defaultConvertToLlm)(summaryHistory);
@@ -1122,48 +1131,6 @@ export async function compact(
 		);
 	}
 	if (summaryHasVideo) summaryOptions.remoteEndpoint = undefined;
-
-	let preserveData = withOpenAiRemoteCompactionPreserveData(previousPreserveData, undefined);
-	if (!summaryHasVideo && settings.remoteEnabled !== false && shouldUseOpenAiRemoteCompaction(model)) {
-		const previousRemoteCompaction = getPreservedOpenAiRemoteCompactionData(previousPreserveData);
-		const previousReplacementHistory =
-			previousRemoteCompaction?.provider === model.provider
-				? previousRemoteCompaction.replacementHistory
-				: undefined;
-		const remoteHistory = buildOpenAiNativeHistory(
-			llmSummaryHistory,
-			model,
-			previousReplacementHistory,
-		);
-		if (remoteHistory.length > 0) {
-			try {
-				const remote = await withAuth(
-					apiKey,
-					key =>
-						requestOpenAiRemoteCompaction(
-							model,
-							key,
-							remoteHistory,
-							summaryOptions.remoteInstructions ?? SUMMARIZATION_SYSTEM_PROMPT,
-							signal,
-							{ fetch: summaryOptions.fetch },
-						),
-					{ signal },
-				);
-				preserveData = withOpenAiRemoteCompactionPreserveData(previousPreserveData, remote);
-			} catch (err) {
-				// A user/session abort is a cancellation, not a remote failure —
-				// swallowing it here would downgrade Esc into "fall back to local
-				// summarization" and keep compaction running on an aborted signal.
-				if (signal?.aborted) throw err;
-				logger.warn("OpenAI remote compaction failed, falling back to local summarization", {
-					error: err instanceof Error ? err.message : String(err),
-					model: model.id,
-					provider: model.provider,
-				});
-			}
-		}
-	}
 
 	// Generate summaries (can be parallel if both needed) and merge into one
 	let summary: string;
@@ -1234,6 +1201,62 @@ export async function compact(
 
 	if (!firstKeptEntryId) {
 		throw new Error("First kept entry has no ID - session may need migration");
+	}
+
+	// Finish the local summary fields before starting the remote attempt. The
+	// compact endpoint has no retrieval API, so a completed response must be
+	// immediately committable even if cancellation arrives while it is decoded.
+	let preserveData = withOpenAiRemoteCompactionPreserveData(previousPreserveData, undefined);
+	if (!summaryHasVideo && settings.remoteEnabled !== false && shouldUseOpenAiRemoteCompaction(model)) {
+		const previousRemoteCompaction = getPreservedOpenAiRemoteCompactionData(previousPreserveData);
+		const previousReplacementHistory =
+			previousRemoteCompaction?.api === model.api &&
+			previousRemoteCompaction.provider === model.provider &&
+			previousRemoteCompaction.model === model.id
+				? previousRemoteCompaction.replacementHistory
+				: undefined;
+		const remoteHistory = buildOpenAiNativeHistory(llmSummaryHistory, model, previousReplacementHistory);
+		if (remoteHistory.length > 0) {
+			const lifecycle = summaryOptions.remoteCompactionAttempt;
+			if (lifecycle) await lifecycle.onStarted(lifecycle.attempt);
+			try {
+				const remote = await withAuth(
+					apiKey,
+					key =>
+						requestOpenAiRemoteCompaction(
+							model,
+							key,
+							remoteHistory,
+							summaryOptions.remoteInstructions ?? SUMMARIZATION_SYSTEM_PROMPT,
+							signal,
+							{ fetch: summaryOptions.fetch },
+						),
+					{ signal },
+				);
+				const completedRemote = lifecycle
+					? {
+							...remote,
+							attempt: {
+								...lifecycle.attempt,
+								status: "completed" as const,
+								completedAt: new Date().toISOString(),
+								retryMode: "recompute_from_local_source" as const,
+							},
+						}
+					: remote;
+				preserveData = withOpenAiRemoteCompactionPreserveData(previousPreserveData, completedRemote);
+			} catch (err) {
+				if (lifecycle) {
+					await lifecycle.onSettled(lifecycle.attempt, signal?.aborted ? "interrupted" : "failed");
+				}
+				if (signal?.aborted) throw err;
+				logger.warn("OpenAI remote compaction failed, using local summary", {
+					error: err instanceof Error ? err.message : String(err),
+					model: model.id,
+					provider: model.provider,
+				});
+			}
+		}
 	}
 
 	return {

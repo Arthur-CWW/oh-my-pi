@@ -1,12 +1,49 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { getPreservedOpenAiRemoteCompactionData } from "@oh-my-pi/pi-agent-core/compaction/openai";
 import { Schema } from "effect";
-import type { SessionEntry, SessionMessageEntry } from "./session-entries";
+import type { CustomEntry, SessionEntry, SessionMessageEntry } from "./session-entries";
 
 export const CompactionTriggerSchema = Schema.Literals(["manual", "token_threshold", "auto"]);
 export type CompactionTrigger = typeof CompactionTriggerSchema.Type;
 export const AutoCompactionReasonSchema = Schema.Literals(["threshold", "overflow", "idle", "incomplete"]);
 export type AutoCompactionReason = typeof AutoCompactionReasonSchema.Type;
 export type CompactionMessageClass = string;
+
+export const OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE = "openai_remote_compaction_attempt";
+export const OPENAI_REMOTE_COMPACTION_ATTEMPT_VERSION = 1 as const;
+export const OpenAiRemoteCompactionAttemptTerminalStatusSchema = Schema.Literals(["interrupted", "failed"]);
+export type OpenAiRemoteCompactionAttemptTerminalStatus = typeof OpenAiRemoteCompactionAttemptTerminalStatusSchema.Type;
+
+const OpenAiRemoteCompactionAttemptSourceSchema = Schema.Struct({
+	sessionId: Schema.String,
+	sourceLeafId: Schema.optional(Schema.String),
+	firstKeptEntryId: Schema.String,
+	digest: Schema.String,
+});
+
+export const OpenAiRemoteCompactionAttemptStartedSchema = Schema.Struct({
+	version: Schema.Literal(OPENAI_REMOTE_COMPACTION_ATTEMPT_VERSION),
+	attemptId: Schema.String,
+	status: Schema.Literal("started"),
+	provider: Schema.String,
+	model: Schema.String,
+	source: OpenAiRemoteCompactionAttemptSourceSchema,
+	startedAt: Schema.String,
+	retryMode: Schema.Literal("recompute_from_local_source"),
+});
+export type OpenAiRemoteCompactionAttemptStarted = typeof OpenAiRemoteCompactionAttemptStartedSchema.Type;
+
+export const OpenAiRemoteCompactionAttemptSettlementSchema = Schema.Struct({
+	version: Schema.Literal(OPENAI_REMOTE_COMPACTION_ATTEMPT_VERSION),
+	attemptId: Schema.String,
+	status: OpenAiRemoteCompactionAttemptTerminalStatusSchema,
+	settledAt: Schema.String,
+	retryMode: Schema.Literal("recompute_from_local_source"),
+});
+export type OpenAiRemoteCompactionAttemptSettlement = typeof OpenAiRemoteCompactionAttemptSettlementSchema.Type;
+export type OpenAiRemoteCompactionAttemptRecord =
+	| OpenAiRemoteCompactionAttemptStarted
+	| OpenAiRemoteCompactionAttemptSettlement;
 
 const NonNegativeIntSchema = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
 export const CompactionMessageClassCountSchema = Schema.Struct({
@@ -47,6 +84,101 @@ export type CompactionReceipt = typeof CompactionReceiptSchema.Type;
 
 export function decodeCompactionReceipt(input: unknown): CompactionReceipt {
 	return Schema.decodeUnknownSync(CompactionReceiptSchema)(input, { onExcessProperty: "error" });
+}
+
+const OpenAiRemoteCompactionAttemptRecordSchema = Schema.Union([
+	OpenAiRemoteCompactionAttemptStartedSchema,
+	OpenAiRemoteCompactionAttemptSettlementSchema,
+]);
+
+export function decodeOpenAiRemoteCompactionAttemptRecord(
+	input: unknown,
+): OpenAiRemoteCompactionAttemptRecord | undefined {
+	try {
+		return Schema.decodeUnknownSync(OpenAiRemoteCompactionAttemptRecordSchema)(input, {
+			onExcessProperty: "error",
+		});
+	} catch {
+		return undefined;
+	}
+}
+
+function isOpenAiRemoteCompactionAuditEntry(entry: SessionEntry): entry is CustomEntry {
+	return entry.type === "custom" && entry.customType === OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE;
+}
+
+/** Digest the immutable conversation branch without duplicating it in attempt receipts. */
+export function digestOpenAiRemoteCompactionSource(
+	pathEntries: readonly SessionEntry[],
+	firstKeptEntryId: string,
+): string {
+	const hasher = new Bun.CryptoHasher("sha256");
+	hasher.update(`${firstKeptEntryId.length}:${firstKeptEntryId}`);
+	for (const entry of pathEntries) {
+		if (isOpenAiRemoteCompactionAuditEntry(entry)) continue;
+		const encoded = JSON.stringify(entry);
+		hasher.update(`${encoded.length}:${encoded}`);
+	}
+	return hasher.digest("hex");
+}
+
+export function createOpenAiRemoteCompactionAttemptStarted(options: {
+	sessionId: string;
+	pathEntries: readonly SessionEntry[];
+	firstKeptEntryId: string;
+	provider: string;
+	model: string;
+}): OpenAiRemoteCompactionAttemptStarted {
+	const sourceLeafId = options.pathEntries.findLast(entry => !isOpenAiRemoteCompactionAuditEntry(entry))?.id;
+	return {
+		version: OPENAI_REMOTE_COMPACTION_ATTEMPT_VERSION,
+		attemptId: Bun.randomUUIDv7(),
+		status: "started",
+		provider: options.provider,
+		model: options.model,
+		source: {
+			sessionId: options.sessionId,
+			...(sourceLeafId ? { sourceLeafId } : {}),
+			firstKeptEntryId: options.firstKeptEntryId,
+			digest: digestOpenAiRemoteCompactionSource(options.pathEntries, options.firstKeptEntryId),
+		},
+		startedAt: new Date().toISOString(),
+		retryMode: "recompute_from_local_source",
+	};
+}
+
+export function createOpenAiRemoteCompactionAttemptSettlement(
+	attemptId: string,
+	status: OpenAiRemoteCompactionAttemptTerminalStatus,
+): OpenAiRemoteCompactionAttemptSettlement {
+	return {
+		version: OPENAI_REMOTE_COMPACTION_ATTEMPT_VERSION,
+		attemptId,
+		status,
+		settledAt: new Date().toISOString(),
+		retryMode: "recompute_from_local_source",
+	};
+}
+
+/** Started attempts lacking either a terminal record or a completed compaction. */
+export function findUnsettledOpenAiRemoteCompactionAttempts(
+	entries: readonly SessionEntry[],
+): OpenAiRemoteCompactionAttemptStarted[] {
+	const started = new Map<string, OpenAiRemoteCompactionAttemptStarted>();
+	const settled = new Set<string>();
+	for (const entry of entries) {
+		if (isOpenAiRemoteCompactionAuditEntry(entry)) {
+			const record = decodeOpenAiRemoteCompactionAttemptRecord(entry.data);
+			if (!record) continue;
+			if (record.status === "started") started.set(record.attemptId, record);
+			else settled.add(record.attemptId);
+			continue;
+		}
+		if (entry.type !== "compaction") continue;
+		const completedAttempt = getPreservedOpenAiRemoteCompactionData(entry.preserveData)?.attempt;
+		if (completedAttempt) settled.add(completedAttempt.attemptId);
+	}
+	return [...started.values()].filter(attempt => !settled.has(attempt.attemptId));
 }
 
 export interface CreateCompactionReceiptOptions {

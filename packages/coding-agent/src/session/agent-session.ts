@@ -54,8 +54,10 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	generateHandoff,
+	getPreservedOpenAiRemoteCompactionData,
 	prepareBranchEntries,
 	prepareCompaction,
+	type RemoteCompactionAttemptLifecycle,
 	resolveThresholdTokens,
 	type SessionEntry,
 	type SessionMessageEntry,
@@ -100,8 +102,8 @@ import {
 	clearAnthropicFastModeFallback,
 	deriveClaudeDeviceId,
 	Effort,
-	isContextOverflow,
 	isAuthenticationInvalidError,
+	isContextOverflow,
 	isUsageLimitError,
 	parseRateLimitReason,
 	resolveServiceTier,
@@ -312,7 +314,13 @@ import {
 	runCodexAutoRedeem,
 } from "./codex-auto-reset";
 import { ensureCodexExpiryResetScheduler } from "./codex-expiry-reset";
-import { createCompactionReceipt, estimateCompactedContextTokens } from "./compaction-receipt";
+import {
+	createCompactionReceipt,
+	createOpenAiRemoteCompactionAttemptSettlement,
+	createOpenAiRemoteCompactionAttemptStarted,
+	estimateCompactedContextTokens,
+	OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE,
+} from "./compaction-receipt";
 import {
 	type CustomInputPayload,
 	type DurableInputAdmissionReceipt,
@@ -353,11 +361,15 @@ import {
 	USER_INTERRUPT_LABEL,
 } from "./messages";
 import { OversizedPromptRecoveryGuard, recoverOversizedPrompt } from "./oversized-prompt-recovery";
-import { digestRefusalPrompt, RefusalStore } from "./refusal-corpus";
 import {
-	decideSemanticRefusalRecovery,
-	type SemanticRefusalRecoveryDecision,
-} from "./refusal-reroute-policy";
+	appendProviderRecoveryRecord,
+	createProviderRecoveryRecord,
+	latestProviderRecoveryRecord,
+	transitionProviderRecoveryRecord,
+	waitForProviderRecovery,
+} from "./provider-recovery";
+import { digestRefusalPrompt, RefusalStore } from "./refusal-corpus";
+import { decideSemanticRefusalRecovery, type SemanticRefusalRecoveryDecision } from "./refusal-reroute-policy";
 import {
 	SCRAPING_DESKTOP_REMINDER,
 	SCRAPING_DESKTOP_REMINDER_MESSAGE_TYPE,
@@ -365,7 +377,7 @@ import {
 	type ScrapingDesktopActivity,
 	shouldInjectScrapingDesktopReminder,
 } from "./scraping-desktop-reminder";
-import type { SessionContext } from "./session-context";
+import type { SessionContext, SessionContextRoute } from "./session-context";
 import {
 	getLatestCompactionEntry,
 	getRestorableSessionModels,
@@ -390,13 +402,6 @@ import type {
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
 import { type SessionManager, SessionStateCommandInFlightError } from "./session-manager";
-import {
-	appendProviderRecoveryRecord,
-	createProviderRecoveryRecord,
-	latestProviderRecoveryRecord,
-	transitionProviderRecoveryRecord,
-	waitForProviderRecovery,
-} from "./provider-recovery";
 import {
 	type ActiveRetryFallbackState,
 	compactionPreparationHasVideo,
@@ -5747,6 +5752,17 @@ export class AgentSession {
 		return deobfuscateSessionContext(this.sessionManager.buildSessionContext(), this.#obfuscator);
 	}
 
+	#buildCurrentSessionContext(): SessionContext {
+		const model = this.model;
+		const activeRoute: SessionContextRoute | undefined = model
+			? { api: model.api, provider: model.provider, model: model.id }
+			: undefined;
+		return deobfuscateSessionContext(
+			this.sessionManager.buildSessionContext(activeRoute ? { activeRoute } : undefined),
+			this.#obfuscator,
+		);
+	}
+
 	/**
 	 * Full-history transcript for TUI display: every path entry in
 	 * chronological order with compactions rendered inline at the point they
@@ -9485,7 +9501,7 @@ export class AgentSession {
 		}
 
 		await this.sessionManager.rewriteEntries();
-		const sessionContext = this.buildDisplaySessionContext();
+		const sessionContext = this.#buildCurrentSessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
 		this.#restartAdvisorRuntime();
 		this.#syncTodoPhasesFromBranch();
@@ -9517,7 +9533,7 @@ export class AgentSession {
 			return undefined;
 		}
 
-		const sessionContext = this.buildDisplaySessionContext();
+		const sessionContext = this.#buildCurrentSessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
 		this.#restartAdvisorRuntime();
 		this.#syncTodoPhasesFromBranch();
@@ -9544,7 +9560,7 @@ export class AgentSession {
 			return { removed: 0 };
 		}
 		await this.sessionManager.rewriteEntries();
-		const sessionContext = this.buildDisplaySessionContext();
+		const sessionContext = this.#buildCurrentSessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
 		this.#restartAdvisorRuntime();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
@@ -9595,7 +9611,7 @@ export class AgentSession {
 		applyShakeRegions(items);
 
 		await this.sessionManager.rewriteEntries();
-		const sessionContext = this.buildDisplaySessionContext();
+		const sessionContext = this.#buildCurrentSessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
 		this.#restartAdvisorRuntime();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
@@ -9787,6 +9803,7 @@ export class AgentSession {
 				try {
 					const compacted = await this.#compactWithFallbackModel(
 						preparation,
+						pathEntries,
 						customInstructions,
 						compactionAbortController.signal,
 						{
@@ -9815,7 +9832,10 @@ export class AgentSession {
 				}
 			}
 
-			if (compactionAbortController.signal.aborted) {
+			if (
+				compactionAbortController.signal.aborted &&
+				!getPreservedOpenAiRemoteCompactionData(preserveData)?.attempt
+			) {
 				throw new CompactionCancelledError();
 			}
 
@@ -9849,7 +9869,7 @@ export class AgentSession {
 			);
 			await this.sessionManager.flush();
 			const newEntries = this.sessionManager.getEntries();
-			const sessionContext = this.buildDisplaySessionContext();
+			const sessionContext = this.#buildCurrentSessionContext();
 			this.agent.replaceMessages(sessionContext.messages);
 			this.#restartAdvisorRuntime();
 			this.#syncTodoPhasesFromBranch();
@@ -10184,7 +10204,7 @@ export class AgentSession {
 		}
 
 		// Rebuild agent messages from session
-		const sessionContext = this.buildDisplaySessionContext();
+		const sessionContext = this.#buildCurrentSessionContext();
 		this.agent.replaceMessages(sessionContext.messages);
 		this.#restartAdvisorRuntime();
 		this.#syncTodoPhasesFromBranch();
@@ -11317,8 +11337,43 @@ export class AgentSession {
 		);
 	}
 
+	#createOpenAiRemoteCompactionLifecycle(
+		preparation: CompactionPreparation,
+		sourcePathEntries: readonly SessionEntry[],
+		model: Model,
+	): RemoteCompactionAttemptLifecycle {
+		const started = createOpenAiRemoteCompactionAttemptStarted({
+			sessionId: this.sessionId,
+			pathEntries: sourcePathEntries,
+			firstKeptEntryId: preparation.firstKeptEntryId,
+			provider: model.provider,
+			model: model.id,
+		});
+		return {
+			attempt: {
+				attemptId: started.attemptId,
+				sourceDigest: started.source.digest,
+				...(started.source.sourceLeafId ? { sourceLeafId: started.source.sourceLeafId } : {}),
+				firstKeptEntryId: started.source.firstKeptEntryId,
+				startedAt: started.startedAt,
+			},
+			onStarted: async () => {
+				this.sessionManager.appendCustomEntry(OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE, started);
+				await this.sessionManager.flush();
+			},
+			onSettled: async (_attempt, status) => {
+				this.sessionManager.appendCustomEntry(
+					OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE,
+					createOpenAiRemoteCompactionAttemptSettlement(started.attemptId, status),
+				);
+				await this.sessionManager.flush();
+			},
+		};
+	}
+
 	async #compactWithFallbackModel(
 		preparation: CompactionPreparation,
+		sourcePathEntries: readonly SessionEntry[],
 		customInstructions: string | undefined,
 		signal: AbortSignal,
 		options?: SummaryOptions,
@@ -11344,6 +11399,11 @@ export class AgentSession {
 						metadata: this.agent.metadataForProvider(candidate.provider),
 						convertToLlm: messages => this.#convertToLlmForSideRequest(messages),
 						telemetry,
+						remoteCompactionAttempt: this.#createOpenAiRemoteCompactionLifecycle(
+							preparation,
+							sourcePathEntries,
+							candidate,
+						),
 						// Honor the user's /model thinking selection (incl. `off`) on
 						// the manual `/compact` path. Clamped per-model inside compact()
 						// via resolveCompactionEffort so unsupported-effort models
@@ -11766,6 +11826,11 @@ export class AgentSession {
 									initiatorOverride: "agent",
 									convertToLlm: messages => this.#convertToLlmForSideRequest(messages),
 									telemetry,
+									remoteCompactionAttempt: this.#createOpenAiRemoteCompactionLifecycle(
+										preparation,
+										pathEntries,
+										candidate,
+									),
 									// Honor the user's /model thinking selection on the
 									// auto-compaction path — the most-fired compaction
 									// site. Clamped per-model inside compact() via
@@ -11858,7 +11923,7 @@ export class AgentSession {
 				preserveData = { ...(compactionPrep.preserveData ?? {}), ...(compactResult.preserveData ?? {}) };
 			}
 
-			if (autoCompactionSignal.aborted) {
+			if (autoCompactionSignal.aborted && !getPreservedOpenAiRemoteCompactionData(preserveData)?.attempt) {
 				await this.#emitSessionEvent({
 					type: "auto_compaction_end",
 					action,
@@ -11900,7 +11965,7 @@ export class AgentSession {
 			);
 			await this.sessionManager.flush();
 			const newEntries = this.sessionManager.getEntries();
-			const sessionContext = this.buildDisplaySessionContext();
+			const sessionContext = this.#buildCurrentSessionContext();
 			this.agent.replaceMessages(sessionContext.messages);
 			this.#restartAdvisorRuntime();
 			this.#syncTodoPhasesFromBranch();
@@ -11927,7 +11992,15 @@ export class AgentSession {
 				details,
 				preserveData,
 			};
-			await this.#emitSessionEvent({ type: "auto_compaction_end", action, result, aborted: false, willRetry });
+			const abortedAfterCommit = autoCompactionSignal.aborted;
+			await this.#emitSessionEvent({
+				type: "auto_compaction_end",
+				action,
+				result,
+				aborted: abortedAfterCommit,
+				willRetry: abortedAfterCommit ? false : willRetry,
+			});
+			if (abortedAfterCommit) return false;
 
 			if (!willRetry && reason !== "idle" && shouldAutoContinue) {
 				this.#scheduleAutoContinuePrompt(generation);
@@ -14078,7 +14151,6 @@ export class AgentSession {
 				});
 			}
 
-			this.agent.replaceMessages(sessionContext.messages);
 			this.#syncTodoPhasesFromBranch();
 			if (switchingToDifferentSession) {
 				this.#closeAllProviderSessions("session switch");
@@ -14117,6 +14189,8 @@ export class AgentSession {
 					}
 				}
 			}
+
+			this.agent.replaceMessages(this.#buildCurrentSessionContext().messages);
 
 			const branch = this.sessionManager.getBranch();
 			const hasThinkingEntry = branch.some(entry => entry.type === "thinking_level_change");
@@ -14282,7 +14356,7 @@ export class AgentSession {
 		this.#resetMnemopiConversationTrackingIfMnemopi();
 
 		// Reload messages from entries (works for both file and in-memory mode)
-		const sessionContext = this.buildDisplaySessionContext();
+		const sessionContext = this.#buildCurrentSessionContext();
 
 		await this.#restoreMCPSelectionsForSessionContext(sessionContext);
 
@@ -14478,11 +14552,12 @@ export class AgentSession {
 			this.sessionManager.branch(newLeafId);
 		}
 
-		// Update agent state — build display context to populate agent messages.
+		// Update agent state from the active provider route while retaining a
+		// route-less context for display metadata and extension results.
 		const stateContext = this.sessionManager.buildSessionContext();
 		const displayContext = deobfuscateSessionContext(stateContext, this.#obfuscator);
 		await this.#restoreMCPSelectionsForSessionContext(displayContext);
-		this.agent.replaceMessages(displayContext.messages);
+		this.agent.replaceMessages(this.#buildCurrentSessionContext().messages);
 		this.#restartAdvisorRuntime();
 		this.#syncTodoPhasesFromBranch();
 		this.#closeCodexProviderSessionsForHistoryRewrite();

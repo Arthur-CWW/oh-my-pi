@@ -459,7 +459,9 @@ export type StopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
 
 export interface OpenAIResponsesHistoryPayload {
 	type: "openaiResponsesHistory";
-	provider?: string;
+	api: string;
+	provider: string;
+	model: string;
 	dt?: boolean;
 	items: Array<Record<string, unknown>>;
 }

@@ -1,8 +1,9 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ProviderPayload, ServiceTier } from "@oh-my-pi/pi-ai";
+import { getPreservedOpenAiRemoteCompactionData } from "@oh-my-pi/pi-agent-core/compaction/openai";
+import type { Api, ProviderPayload, ServiceTier } from "@oh-my-pi/pi-ai";
 import * as snapcompact from "@oh-my-pi/snapcompact";
-import { AUTO_THINKING, type ConfiguredThinkingLevel, parseThinkingLevel } from "../thinking";
 import { decodeGoalModeState, type GoalModeState } from "../goals/state";
+import { AUTO_THINKING, type ConfiguredThinkingLevel, parseThinkingLevel } from "../thinking";
 import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage } from "./messages";
 import {
 	type CompactionEntry,
@@ -88,6 +89,12 @@ export interface ContextRepairMessageProjection {
 	readonly project: (messages: readonly AgentMessage[]) => readonly AgentMessage[];
 }
 
+export interface SessionContextRoute {
+	readonly api: Api;
+	readonly provider: string;
+	readonly model: string;
+}
+
 export interface BuildSessionContextOptions {
 	/**
 	 * Build the full-history display transcript instead of the LLM context:
@@ -99,6 +106,8 @@ export interface BuildSessionContextOptions {
 	transcript?: boolean;
 	/** Optional append-only repair overlay projection for provider-bound retry context. */
 	contextRepairProjection?: ContextRepairMessageProjection;
+	/** Active provider route that will consume the rebuilt messages. */
+	activeRoute?: SessionContextRoute;
 }
 
 export function resolveLeafIdAfterSessionEntry(
@@ -352,19 +361,25 @@ export function buildSessionContext(
 			}
 		}
 	} else if (compaction) {
-		const providerPayload: ProviderPayload | undefined = (() => {
-			const candidate = compaction.preserveData?.openaiRemoteCompaction;
-			if (!candidate || typeof candidate !== "object") return undefined;
-			const remote = candidate as { provider?: unknown; replacementHistory?: unknown };
-			if (typeof remote.provider !== "string" || remote.provider.length === 0) return undefined;
-			if (!Array.isArray(remote.replacementHistory)) return undefined;
-			return {
-				type: "openaiResponsesHistory",
-				provider: remote.provider,
-				items: remote.replacementHistory as Array<Record<string, unknown>>,
-			};
-		})();
-		const remoteReplacementHistory = providerPayload?.items;
+		const remote = getPreservedOpenAiRemoteCompactionData(compaction.preserveData);
+		const activeRoute = options?.activeRoute;
+		const acceptedRemote =
+			remote &&
+			activeRoute &&
+			remote.api === activeRoute.api &&
+			remote.provider === activeRoute.provider &&
+			remote.model === activeRoute.model
+				? remote
+				: undefined;
+		const providerPayload: ProviderPayload | undefined = acceptedRemote
+			? {
+					type: "openaiResponsesHistory",
+					api: acceptedRemote.api,
+					provider: acceptedRemote.provider,
+					model: acceptedRemote.model,
+					items: acceptedRemote.replacementHistory,
+				}
+			: undefined;
 
 		// Emit summary first; re-attach any archived snapcompact frames so the
 		// model can keep reading the archived history after every context rebuild.
@@ -383,7 +398,7 @@ export function buildSessionContext(
 		// Find compaction index in path
 		const compactionIdx = path.findIndex(e => e.type === "compaction" && e.id === compaction.id);
 
-		if (!remoteReplacementHistory) {
+		if (!providerPayload) {
 			// Emit kept messages (before compaction, starting from firstKeptEntryId)
 			let foundFirstKept = false;
 			for (let i = 0; i < compactionIdx; i++) {

@@ -9,7 +9,12 @@ import {
 } from "../plan-mode/plan-artifact";
 import { ArtifactManager } from "./artifacts";
 import { type BlobPutOptions, type BlobPutResult, BlobStore } from "./blob-store";
-import type { CompactionReceipt } from "./compaction-receipt";
+import {
+	type CompactionReceipt,
+	createOpenAiRemoteCompactionAttemptSettlement,
+	findUnsettledOpenAiRemoteCompactionAttempts,
+	OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE,
+} from "./compaction-receipt";
 import { SessionOwnershipLostError } from "./durable-input-queue";
 import {
 	type BashExecutionMessage,
@@ -1192,6 +1197,7 @@ export class SessionManager {
 		this.#artifactManagerSessionFile = null;
 
 		if (this.sanitizeLoadedOpenAIResponsesReplayMetadata()) this.#rewriteRequired = true;
+		await this.#settleRecoveredOpenAiRemoteCompactionAttempts();
 	}
 
 	/** Start a new session. Drains and closes any existing writer first. */
@@ -2315,6 +2321,18 @@ export class SessionManager {
 		return buildSessionContext(this.#entries, this.#index.leafId(), this.#index.entriesById(), options);
 	}
 
+	async #settleRecoveredOpenAiRemoteCompactionAttempts(): Promise<void> {
+		const unmatched = findUnsettledOpenAiRemoteCompactionAttempts(this.#entries);
+		if (unmatched.length === 0) return;
+		for (const attempt of unmatched) {
+			this.appendCustomEntry(
+				OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE,
+				createOpenAiRemoteCompactionAttemptSettlement(attempt.attemptId, "interrupted"),
+			);
+		}
+		await this.flush();
+	}
+
 	/** Strip stale OpenAI Responses assistant replay metadata from loaded entries. */
 	sanitizeLoadedOpenAIResponsesReplayMetadata(): boolean {
 		let changed = false;
@@ -2511,6 +2529,7 @@ export class SessionManager {
 		manager.#index.rebuild(history);
 		manager.#rebuildSessionCommandIndex();
 		manager.sanitizeLoadedOpenAIResponsesReplayMetadata();
+		await manager.#settleRecoveredOpenAiRemoteCompactionAttempts();
 		manager.#forceFileCreation = true;
 		await manager.#rewriteAtomically();
 		return manager;

@@ -152,7 +152,14 @@ function codexAssistant(calls: Array<{ callId: string; custom?: boolean }>, dt: 
 		api: "openai-responses",
 		usage: ZERO_USAGE,
 		stopReason: "toolUse",
-		providerPayload: { type: "openaiResponsesHistory", provider: "openai-codex", ...(dt ? { dt: true } : {}), items },
+		providerPayload: {
+			type: "openaiResponsesHistory",
+			api: "openai-responses",
+			provider: "openai-codex",
+			model: "gpt-5",
+			...(dt ? { dt: true } : {}),
+			items,
+		},
 	} as unknown as AssistantMessage;
 }
 
@@ -228,6 +235,77 @@ describe("remote compaction input trimming", () => {
 
 		expect(requestInput?.some(item => item.type === "custom_tool_call")).toBe(false);
 		expect(requestInput?.some(item => item.type === "custom_tool_call_output")).toBe(false);
+	});
+});
+
+describe("requestOpenAiRemoteCompaction completed response", () => {
+	test("preserves route provenance, audit ids, and the complete retained replacement history", async () => {
+		const model = makeOpenAiModel({ id: "gpt-5-mini" });
+		const replacementHistory = [
+			{
+				type: "message",
+				role: "user",
+				id: "msg_retained_user",
+				content: [{ type: "input_text", text: "Retained user context" }],
+			},
+			{
+				type: "compaction",
+				id: "cmp_item_456",
+				encrypted_content: "enc_compacted_history",
+				status: "completed",
+			},
+			{
+				type: "message",
+				role: "assistant",
+				id: "msg_retained_assistant",
+				content: [{ type: "output_text", text: "Retained assistant context" }],
+				status: "completed",
+			},
+		];
+		const fetchBoundary: FetchImpl = async (input, init) => {
+			expect(String(input)).toBe("https://api.openai.com/v1/responses/compact");
+			expect(JSON.parse(String(init?.body))).toMatchObject({
+				model: "gpt-5-mini",
+				instructions: "compact deterministically",
+			});
+			return Response.json(
+				{
+					id: "resp_compact_123",
+					status: "completed",
+					output: [
+						...replacementHistory,
+						{ type: "reasoning", id: "rs_not_retained", encrypted_content: "enc_not_retained" },
+					],
+				},
+				{ headers: { "x-client-request-id": "client_req_789" } },
+			);
+		};
+
+		const result = await requestOpenAiRemoteCompaction(
+			model,
+			"test-key",
+			[{ type: "message", role: "user", content: [{ type: "input_text", text: "source" }] }],
+			"compact deterministically",
+			undefined,
+			{ fetch: fetchBoundary },
+		);
+
+		expect(result).toMatchObject({
+			api: "openai-responses",
+			provider: "openai",
+			model: "gpt-5-mini",
+			replacementHistory,
+			compactionItem: {
+				type: "compaction",
+				id: "cmp_item_456",
+				encrypted_content: "enc_compacted_history",
+			},
+			auditMetadata: {
+				responseId: "resp_compact_123",
+				compactionItemId: "cmp_item_456",
+				clientRequestId: "client_req_789",
+			},
+		});
 	});
 });
 
@@ -319,13 +397,14 @@ describe("compact() remote compaction failure handling", () => {
 		};
 	}
 
-	test("user abort during the remote compact request rejects without falling back to local summarization", async () => {
-		// Contract: Esc is a cancellation, not a remote failure. Before the fix
-		// the AbortError was swallowed by the fallback catch and compaction kept
-		// running local summarization on an already-aborted signal.
+	test("user abort during the remote compact request rejects without additional fallback work", async () => {
+		// Local summary generation precedes the compact POST. Esc must reject the
+		// in-flight POST without starting any further summarization work.
 		const completeSpy = vi.spyOn(ai, "completeSimple").mockResolvedValue(localSummaryMessage("local summary"));
+		let summaryCallsWhenPosted = 0;
 		const controller = new AbortController();
 		const fetchMock: FetchImpl = (_input, init) => {
+			summaryCallsWhenPosted = completeSpy.mock.calls.length;
 			const signal = init?.signal as AbortSignal | undefined;
 			const { promise, reject } = Promise.withResolvers<Response>();
 			const fail = () =>
@@ -342,7 +421,7 @@ describe("compact() remote compaction failure handling", () => {
 				fetch: fetchMock,
 			}),
 		).rejects.toThrow();
-		expect(completeSpy).not.toHaveBeenCalled();
+		expect(completeSpy).toHaveBeenCalledTimes(summaryCallsWhenPosted);
 	});
 
 	test("remote compact server failure without abort still falls back to local summarization", async () => {

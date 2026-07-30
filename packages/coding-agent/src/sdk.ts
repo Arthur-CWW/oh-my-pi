@@ -2640,7 +2640,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		// Restore messages if session has existing data
 		if (hasExistingSession) {
-			agent.replaceMessages(existingSession.messages);
+			const resumedSession = deobfuscateSessionContext(
+				sessionManager.buildSessionContext(
+					model ? { activeRoute: { api: model.api, provider: model.provider, model: model.id } } : undefined,
+				),
+				obfuscator,
+			);
+			agent.replaceMessages(resumedSession.messages);
 		} else {
 			// Save initial model, thinking level, and service tier for new sessions so they can be restored on resume.
 			if (model) {

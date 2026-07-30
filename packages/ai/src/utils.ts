@@ -96,13 +96,17 @@ function normalizeReplayedResponsesHistoryCallId(value: string, normalizedValues
 }
 
 export function createOpenAIResponsesHistoryPayload(
+	api: string,
 	provider: string,
+	model: string,
 	items: Array<Record<string, unknown>>,
 	incremental = true,
 ): OpenAIResponsesHistoryPayload {
 	return {
 		type: "openaiResponsesHistory",
+		api,
 		provider,
+		model,
 		...(incremental ? { dt: true } : {}),
 		items,
 	};
@@ -110,25 +114,29 @@ export function createOpenAIResponsesHistoryPayload(
 
 export function getOpenAIResponsesHistoryPayload(
 	providerPayload: ProviderPayload | undefined,
+	currentApi: string,
 	currentProvider: string,
-	fallbackProvider?: string,
+	currentModel: string,
 ): OpenAIResponsesHistoryPayload | undefined {
-	if (providerPayload?.type !== "openaiResponsesHistory" || !Array.isArray(providerPayload.items)) {
+	if (
+		providerPayload?.type !== "openaiResponsesHistory" ||
+		!Array.isArray(providerPayload.items) ||
+		providerPayload.api !== currentApi ||
+		providerPayload.provider !== currentProvider ||
+		providerPayload.model !== currentModel
+	) {
 		return undefined;
 	}
-	const payloadProvider = providerPayload.provider ?? fallbackProvider;
-	if (!payloadProvider || payloadProvider !== currentProvider) {
-		return undefined;
-	}
-	return { ...providerPayload, provider: payloadProvider };
+	return providerPayload;
 }
 
 export function getOpenAIResponsesHistoryItems(
 	providerPayload: ProviderPayload | undefined,
+	currentApi: string,
 	currentProvider: string,
-	fallbackProvider?: string,
+	currentModel: string,
 ): Array<Record<string, unknown>> | undefined {
-	return getOpenAIResponsesHistoryPayload(providerPayload, currentProvider, fallbackProvider)?.items;
+	return getOpenAIResponsesHistoryPayload(providerPayload, currentApi, currentProvider, currentModel)?.items;
 }
 
 /**

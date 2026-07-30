@@ -457,7 +457,9 @@ describe("remote compaction setting", () => {
 		const previousCompaction = createCompactionEntry("Previous summary", oldAssistant.id);
 		previousCompaction.preserveData = {
 			openaiRemoteCompaction: {
-				provider: "openai",
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
 				replacementHistory: [
 					{ type: "message", role: "user", content: [{ type: "input_text", text: "Previous preserved user" }] },
 					{ type: "compaction", encrypted_content: "prior_encrypted" },
@@ -540,7 +542,9 @@ describe("remote compaction setting", () => {
 		expect(result.summary).toContain("History summary");
 		expect(result.preserveData).toEqual({
 			openaiRemoteCompaction: {
-				provider: "openai",
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
 				replacementHistory: remoteOutput,
 				compactionItem: { type: "compaction", encrypted_content: "new_encrypted" },
 			},
@@ -562,7 +566,13 @@ describe("remote compaction setting", () => {
 					model,
 					createMockUsage(0, 100, 9000, 0),
 					"encrypted_reasoning_turn_1",
-					{ type: "openaiResponsesHistory", provider: "openai", items: assistantHistory },
+					{
+						type: "openaiResponsesHistory",
+						api: model.api,
+						provider: model.provider,
+						model: model.id,
+						items: assistantHistory,
+					},
 				),
 			),
 			createMessageEntry(createUserMessage("follow-up user")),
@@ -593,6 +603,75 @@ describe("remote compaction setting", () => {
 			...assistantHistory,
 			{ type: "message", role: "user", content: [{ type: "input_text", text: "follow-up user" }] },
 		]);
+	});
+
+	it("rejects reconstructed remote compaction history from the same provider on a different model", async () => {
+		const model = getBundledModel("openai", "gpt-5.1");
+		if (!model) throw new Error("Expected openai/gpt-5.1 model to exist");
+		const foreignHistory = [
+			{ type: "message", role: "user", content: [{ type: "input_text", text: "Foreign preserved user" }] },
+			{ type: "compaction", id: "cmp_foreign_model", encrypted_content: "foreign_encrypted_compaction" },
+		];
+		const oldUser = createMessageEntry(createUserMessage("Older turn"));
+		const oldAssistant = createMessageEntry(createAssistantMessage("Older answer"));
+		const previousCompaction = createCompactionEntry("Visible previous summary", oldAssistant.id);
+		previousCompaction.preserveData = {
+			openaiRemoteCompaction: {
+				api: model.api,
+				provider: model.provider,
+				model: "gpt-5.2",
+				replacementHistory: foreignHistory,
+				compactionItem: foreignHistory[1],
+			},
+		};
+		const entries: SessionEntry[] = [
+			oldUser,
+			oldAssistant,
+			previousCompaction,
+			createMessageEntry(createUserMessage("Current model turn")),
+			createMessageEntry(
+				createOpenAiAssistantMessage(
+					"Current model answer",
+					model,
+					createMockUsage(0, 100, 9000, 0),
+					"current_model_encrypted_reasoning",
+				),
+			),
+		];
+		const preparation = prepareCompaction(entries, {
+			...DEFAULT_COMPACTION_SETTINGS,
+			keepRecentTokens: 1,
+			remoteEnabled: true,
+		});
+		if (!preparation) throw new Error("Expected compaction preparation");
+
+		const fetchHandler = vi.fn(
+			async (_input, _init) =>
+				new Response(JSON.stringify({ output: [{ type: "compaction", encrypted_content: "new_encrypted" }] }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+		);
+		const fetchSpy = mockFetch(fetchHandler);
+		vi.spyOn(ai, "completeSimple").mockResolvedValue(createAssistantMessage("Short summary"));
+
+		await compact(preparation, model, "test-api-key", undefined, undefined, { fetch: fetchSpy });
+		const requestBody = JSON.parse(String(fetchHandler.mock.calls[0]?.[1]?.body)) as {
+			input: Array<Record<string, unknown>>;
+		};
+
+		expect(requestBody.input).not.toContainEqual(foreignHistory[0]);
+		expect(requestBody.input).not.toContainEqual(foreignHistory[1]);
+		expect(
+			requestBody.input.some(
+				item => item.type === "compaction" && item.encrypted_content === "foreign_encrypted_compaction",
+			),
+		).toBe(false);
+		expect(
+			requestBody.input.some(
+				item => item.type === "reasoning" && item.encrypted_content === "current_model_encrypted_reasoning",
+			),
+		).toBe(true);
 	});
 
 	it("uses the ChatGPT Codex compact endpoint for openai-codex models", async () => {
@@ -736,7 +815,9 @@ describe("remote compaction setting", () => {
 		expect(requestBody.instructions).toBe("BASE INSTRUCTIONS");
 		expect(result.preserveData).toEqual({
 			openaiRemoteCompaction: {
-				provider: "openai",
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
 				replacementHistory: [
 					{ type: "message", role: "user", content: [{ type: "input_text", text: "Real preserved user" }] },
 					{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Kept assistant" }] },
@@ -757,6 +838,9 @@ describe("remote compaction setting", () => {
 		previousCompaction.preserveData = {
 			otherState: "keep-me",
 			openaiRemoteCompaction: {
+				api: "openai-responses",
+				provider: "openai",
+				model: "gpt-5.1",
 				replacementHistory: [{ type: "compaction", encrypted_content: "stale_encrypted" }],
 				compactionItem: { type: "compaction", encrypted_content: "stale_encrypted" },
 			},
@@ -885,6 +969,43 @@ describe("buildSessionContext", () => {
 		expect(loaded.messages.length).toBe(5);
 		expect(loaded.messages[0].role).toBe("compactionSummary");
 		expect((loaded.messages[0] as any).summary).toContain("Summary of 1,a,2,b");
+	});
+
+	it("reconstructs remote compaction history with its exact API, provider, and model route", () => {
+		const user = createMessageEntry(createUserMessage("source turn"));
+		const replacementHistory = [
+			{ type: "message", role: "user", content: [{ type: "input_text", text: "Preserved source turn" }] },
+			{ type: "compaction", encrypted_content: "preserved_compaction" },
+		];
+		const compaction: CompactionEntry = {
+			...createCompactionEntry("Remote summary", user.id),
+			preserveData: {
+				openaiRemoteCompaction: {
+					api: "openai-responses",
+					provider: "openai",
+					model: "gpt-5.1",
+					replacementHistory,
+					compactionItem: { type: "compaction", encrypted_content: "preserved_compaction" },
+				},
+			},
+		};
+		const followUp = createMessageEntry(createUserMessage("follow-up turn"));
+
+		const loaded = buildSessionContext([user, compaction, followUp], undefined, undefined, {
+			activeRoute: { api: "openai-responses", provider: "openai", model: "gpt-5.1" },
+		});
+
+		expect(loaded.messages.map(message => message.role)).toEqual(["compactionSummary", "user"]);
+		expect(loaded.messages[0]).toMatchObject({
+			role: "compactionSummary",
+			providerPayload: {
+				type: "openaiResponsesHistory",
+				api: "openai-responses",
+				provider: "openai",
+				model: "gpt-5.1",
+				items: replacementHistory,
+			},
+		});
 	});
 
 	it("re-attaches snapcompact frames from preserveData as compaction summary images", () => {

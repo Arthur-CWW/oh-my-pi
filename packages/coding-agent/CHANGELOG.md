@@ -88,6 +88,7 @@
 - Eval `agent()`/`agentType` defaults, gallery fixtures, and the task tool prompt now use named responsibility templates; catch-all `task` is documented as a deprecated migration alias.
 - `Enter` on an empty prompt during streaming now aborts and delivers the next queued durable follow-up exactly once (removing it from the queue); with an empty queue it remains abort-only.
 ### Fixed
+- Interrupted OpenAI remote-compaction calls are durably marked; because the provider exposes no retrieve, poll, or idempotency API, a later retry can recompute from the intact local encrypted source.
 - Anthropic `overloaded_error` stream failures now remain visibly in automatic retry state instead of being mislabeled “gave up after 1”; retries use the configured exponential backoff and delay cap, and cap failures report both requested and allowed waits.
 - `:id`/`:whoami` now opens a persistent Esc-dismissed identity panel, copies the focused session/agent handle once with confirmation, includes authoritative host/project context, and keeps the current IRC peer id visible in the default HUD without widening narrow layouts.
 - Subagent HUD rows now budget against the padded block's inner width, preventing the throughput number and its `t/s` unit from soft-wrapping past the terminal border.

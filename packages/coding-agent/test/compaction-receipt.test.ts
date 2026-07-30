@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import {
 	createCompactionSummaryMessage,
@@ -9,9 +11,12 @@ import {
 import { projectJournalEntries } from "@oh-my-pi/pi-coding-agent/journal/projection";
 import {
 	createCompactionReceipt,
+	createOpenAiRemoteCompactionAttemptStarted,
+	decodeOpenAiRemoteCompactionAttemptRecord,
 	estimateCompactedContextTokens,
 	formatCompactionReceipt,
 	getLatestCompactionReceipt,
+	OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE,
 } from "@oh-my-pi/pi-coding-agent/session/compaction-receipt";
 import type {
 	CompactionEntry,
@@ -19,6 +24,8 @@ import type {
 	SessionHeader,
 	SessionMessageEntry,
 } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { TempDir } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 
 const timestamp = "2026-07-15T00:00:00.000Z";
@@ -151,5 +158,100 @@ describe("compaction visibility receipt", () => {
 		expect(notice).toContain("kept 2");
 		expect(notice).toContain("dropped 6");
 		expect(notice).toContain("model anthropic/claude-sonnet-4-5");
+	});
+
+	it("durably settles interrupted remote compaction attempts without changing retry source identity", async () => {
+		using tempDir = TempDir.createSync("@omp-compaction-attempt-");
+		const previousConfigRoot = process.env.OMP_CONFIG_ROOT;
+		const previousSessionControlDb = process.env.OMP_SESSION_CONTROL_DB;
+		process.env.OMP_CONFIG_ROOT = path.join(tempDir.path(), "config");
+		process.env.OMP_SESSION_CONTROL_DB = path.join(tempDir.path(), "session-control.db");
+		try {
+			const sessionDir = path.join(tempDir.path(), "sessions");
+			const manager = SessionManager.create(tempDir.path(), sessionDir);
+			await manager.ensureOnDisk();
+			const firstKeptEntryId = manager.appendMessage({
+				role: "user",
+				content: "source turn",
+				timestamp: Date.now(),
+			});
+			const started = createOpenAiRemoteCompactionAttemptStarted({
+				sessionId: manager.getSessionId(),
+				pathEntries: manager.getBranch(),
+				firstKeptEntryId,
+				provider: "openai",
+				model: "gpt-5.1",
+			});
+			manager.appendCustomEntry(OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE, started);
+			await manager.flush();
+
+			const sessionFile = manager.getSessionFile();
+			if (!sessionFile) throw new Error("expected persisted session file");
+			const persistedBeforeClose = fs
+				.readFileSync(sessionFile, "utf8")
+				.trimEnd()
+				.split("\n")
+				.map(line => JSON.parse(line) as Record<string, unknown>);
+			expect(
+				persistedBeforeClose.some(
+					entry =>
+						entry.type === "custom" &&
+						entry.customType === OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE &&
+						decodeOpenAiRemoteCompactionAttemptRecord(entry.data)?.status === "started",
+				),
+			).toBe(true);
+			expect(
+				persistedBeforeClose.some(
+					entry =>
+						entry.type === "custom" &&
+						entry.customType === OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE &&
+						decodeOpenAiRemoteCompactionAttemptRecord(entry.data)?.status === "interrupted",
+				),
+			).toBe(false);
+			await manager.close();
+
+			const reopened = await SessionManager.open(sessionFile, sessionDir);
+			const attempts = reopened.getEntries().flatMap(entry => {
+				if (entry.type !== "custom" || entry.customType !== OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE) {
+					return [];
+				}
+				return [decodeOpenAiRemoteCompactionAttemptRecord(entry.data)];
+			});
+			expect(attempts).toEqual([
+				expect.objectContaining({ attemptId: started.attemptId, status: "started" }),
+				expect.objectContaining({ attemptId: started.attemptId, status: "interrupted" }),
+			]);
+			const persistedAfterOpen = fs
+				.readFileSync(sessionFile, "utf8")
+				.trimEnd()
+				.split("\n")
+				.map(line => JSON.parse(line) as Record<string, unknown>);
+			expect(
+				persistedAfterOpen.some(
+					entry =>
+						entry.type === "custom" &&
+						entry.customType === OPENAI_REMOTE_COMPACTION_ATTEMPT_CUSTOM_TYPE &&
+						decodeOpenAiRemoteCompactionAttemptRecord(entry.data)?.attemptId === started.attemptId &&
+						decodeOpenAiRemoteCompactionAttemptRecord(entry.data)?.status === "interrupted",
+				),
+			).toBe(true);
+
+			const retry = createOpenAiRemoteCompactionAttemptStarted({
+				sessionId: reopened.getSessionId(),
+				pathEntries: reopened.getBranch(),
+				firstKeptEntryId,
+				provider: "openai",
+				model: "gpt-5.1",
+			});
+			expect(retry.source.digest).toBe(started.source.digest);
+			expect(retry.source.sourceLeafId).toBe(started.source.sourceLeafId);
+			expect(retry.source.sourceLeafId).toBe(firstKeptEntryId);
+			await reopened.close();
+		} finally {
+			if (previousConfigRoot === undefined) delete process.env.OMP_CONFIG_ROOT;
+			else process.env.OMP_CONFIG_ROOT = previousConfigRoot;
+			if (previousSessionControlDb === undefined) delete process.env.OMP_SESSION_CONTROL_DB;
+			else process.env.OMP_SESSION_CONTROL_DB = previousSessionControlDb;
+		}
 	});
 });

@@ -1,6 +1,6 @@
-import type { ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import * as os from "node:os";
 import { scheduler } from "node:timers/promises";
+import type { ReasoningEffort } from "@oh-my-pi/pi-catalog/effort";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import {
 	CODEX_BASE_URL,
@@ -2116,7 +2116,12 @@ function finalizeCodexResponse(
 		throw new Error("Codex response failed");
 	}
 
-	output.providerPayload = createOpenAIResponsesHistoryPayload(context.model.provider, runtime.nativeOutputItems);
+	output.providerPayload = createOpenAIResponsesHistoryPayload(
+		context.model.api,
+		context.model.provider,
+		context.model.id,
+		runtime.nativeOutputItems,
+	);
 	output.duration = Date.now() - context.startTime;
 	if (completion.firstTokenTime) {
 		output.ttft = completion.firstTokenTime - context.startTime;
@@ -3322,7 +3327,7 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 	for (const msg of transformedMessages) {
 		if (msg.role === "user" || msg.role === "developer") {
 			const providerPayload = (msg as { providerPayload?: AssistantMessage["providerPayload"] }).providerPayload;
-			const historyItems = getOpenAIResponsesHistoryItems(providerPayload, model.provider) as
+			const historyItems = getOpenAIResponsesHistoryItems(providerPayload, model.api, model.provider, model.id) as
 				| Array<ResponseInput[number]>
 				| undefined;
 			if (historyItems) {
@@ -3349,10 +3354,12 @@ function convertMessages(model: Model<"openai-codex-responses">, context: Contex
 			// Native items are model-bound (reasoning carries encrypted content
 			// minted by the producing model); after a mid-session model switch fall
 			// back to block re-encode, which strips foreign signatures.
-			const providerPayload =
-				assistantMsg.api === model.api && assistantMsg.model === model.id
-					? getOpenAIResponsesHistoryPayload(assistantMsg.providerPayload, model.provider, assistantMsg.provider)
-					: undefined;
+			const providerPayload = getOpenAIResponsesHistoryPayload(
+				assistantMsg.providerPayload,
+				model.api,
+				model.provider,
+				model.id,
+			);
 			const historyItems = providerPayload?.items as Array<ResponseInput[number]> | undefined;
 			if (historyItems) {
 				for (const item of historyItems) {

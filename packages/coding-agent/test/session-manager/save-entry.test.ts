@@ -32,7 +32,13 @@ describe("SessionManager.saveCustomEntry", () => {
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			stopReason: "stop",
-			providerPayload: { type: "openaiResponsesHistory", provider: "openai", items: nativeHistory },
+			providerPayload: {
+				type: "openaiResponsesHistory",
+				api: "openai-responses",
+				provider: "openai",
+				model: "gpt-5-mini",
+				items: nativeHistory,
+			},
 			timestamp: 2,
 		});
 
@@ -60,7 +66,9 @@ describe("SessionManager.saveCustomEntry", () => {
 		if (ctx.messages[1]?.role !== "assistant") throw new Error("Expected assistant message");
 		expect(ctx.messages[1].providerPayload).toEqual({
 			type: "openaiResponsesHistory",
+			api: "openai-responses",
 			provider: "openai",
+			model: "gpt-5-mini",
 			items: nativeHistory,
 		});
 	});

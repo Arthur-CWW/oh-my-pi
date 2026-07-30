@@ -17,8 +17,8 @@ import type {
 	Message,
 	MessageAttribution,
 	TextContent,
-	UserMessage,
 	UserContent,
+	UserMessage,
 } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import userInterjectionTemplate from "../prompts/steering/user-interjection.md" with { type: "text" };
@@ -461,6 +461,30 @@ export function sanitizeRehydratedOpenAIResponsesAssistantMessage(message: Assis
 		return message;
 	}
 
+	// Codex OAuth uses store:false, so its encrypted native items are the only
+	// durable continuation state. Legacy payloads are stamped from the immutable
+	// producing assistant message during cold-load rewrite.
+	if (
+		message.api === "openai-codex-responses" &&
+		message.provider === "openai-codex" &&
+		message.providerPayload.provider === message.provider
+	) {
+		if (message.providerPayload.api === message.api && message.providerPayload.model === message.model) {
+			return message;
+		}
+		if (message.providerPayload.api === undefined && message.providerPayload.model === undefined) {
+			return {
+				...message,
+				providerPayload: {
+					...message.providerPayload,
+					api: message.api,
+					provider: message.provider,
+					model: message.model,
+				},
+			};
+		}
+	}
+
 	let didSanitizeContent = false;
 	const sanitizedContent = message.content.map(block => {
 		if (block.type !== "thinking" || block.thinkingSignature === undefined) {
@@ -471,10 +495,8 @@ export function sanitizeRehydratedOpenAIResponsesAssistantMessage(message: Assis
 		return { ...block, thinkingSignature: undefined };
 	});
 
-	// Strip the assistant-side native replay payload entirely.
-	// After rehydration it belongs to a previous live provider connection and
-	// replaying it on a warmed session causes 401 rejections from GitHub Copilot.
-	// User/developer payloads are preserved separately by the caller.
+	// Keep the issue-594 safety boundary: Copilot and every other Responses
+	// provider may reject replay payloads minted by a previous live connection.
 	return {
 		...message,
 		...(didSanitizeContent ? { content: sanitizedContent } : {}),
