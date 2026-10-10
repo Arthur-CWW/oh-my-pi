@@ -228,6 +228,7 @@ import {
 	loadProjectContextFiles as loadContextFilesInternal,
 	projectSystemPromptToolMetadata,
 } from "./system-prompt";
+import { createMCPProxyTools } from "./task/executor";
 import type { AgentDefinition } from "./task/types";
 import { AgentOutputManager } from "./task/output-manager";
 import { wrapStreamFnWithProviderConcurrency } from "./task/provider-concurrency";
@@ -5237,6 +5238,21 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					capture: content => session.runAutolearnCapture(signal => runAutoLearnCapture(content, signal)),
 				});
 			}
+		}
+
+		if (mcpManager) {
+			const refreshManager = mcpManager;
+			toolSession.refreshMCPServerTools = async server => {
+				await refreshManager.refreshServerTools(server);
+				// The owner callback logs rebind failures, and shared-manager followers
+				// schedule theirs separately. Await this caller's own registry mutation.
+				const managerTools = options.mcpManager ? createMCPProxyTools(refreshManager) : refreshManager.getTools();
+				const tools =
+					options.mcpManager && explicitCustomToolNames.size > 0
+						? managerTools.filter(tool => !explicitCustomToolNames.has(tool.name))
+						: managerTools;
+				await session.refreshMCPTools(tools);
+			};
 		}
 
 		// MCP manager wiring has two ownership models:

@@ -62,6 +62,7 @@ import { isIrcEnabled } from "../irc/messaging";
 import { FindTool, isFindEnabled } from "./jfind";
 import { LearnTool } from "./learn";
 import { ManageSkillTool } from "./manage-skill";
+import { MCPRefreshTool } from "./mcp-refresh";
 import { MemoryEditTool } from "./memory-edit";
 import { MemoryRecallTool } from "./memory-recall";
 import { MemoryReflectTool } from "./memory-reflect";
@@ -139,6 +140,7 @@ export type { AgentActivitySnapshot, CoordinationDetails, JobSnapshot } from "@o
 export * from "./image-gen";
 export * from "./learn";
 export * from "./manage-skill";
+export * from "./mcp-refresh";
 export * from "./memory-edit";
 export * from "./memory-recall";
 export * from "./memory-reflect";
@@ -448,6 +450,8 @@ export interface ToolSession {
 	asyncJobManager?: AsyncJobManager;
 	/** MCP manager visible to subagents without relying on the process-global singleton. */
 	mcpManager?: MCPManager;
+	/** Refresh one connected MCP server and await this session's tool-catalog visibility. */
+	refreshMCPServerTools?: (server: string) => Promise<void>;
 	/** Local protocol root to propagate to nested subagents and eval-created agents. */
 	localProtocolOptions?: LocalProtocolOptions;
 	/** Settings instance for passing to subagents */
@@ -592,6 +596,7 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
 	reflect: MemoryReflectTool.createIf,
 	learn: LearnTool.createIf,
 	manage_skill: ManageSkillTool.createIf,
+	mcp_refresh: s => new MCPRefreshTool(s),
 };
 
 export const HIDDEN_TOOLS: Record<HiddenToolName, ToolFactory> = {

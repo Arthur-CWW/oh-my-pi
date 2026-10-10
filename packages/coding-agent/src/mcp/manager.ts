@@ -1742,11 +1742,7 @@ export class MCPManager {
 		const connection = this.#connections.get(name);
 		if (!connection) return;
 
-		// Clear cached tools
-		connection.tools = undefined;
-
-		// Reload tools
-		const serverTools = await listTools(connection);
+		const serverTools = await listTools(connection, { refresh: true });
 		const reconnect = () => this.reconnectServer(name);
 		const customTools = MCPTool.fromTools(connection, serverTools, reconnect);
 		void this.toolCache?.set(name, connection.config, serverTools);

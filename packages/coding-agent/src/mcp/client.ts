@@ -217,7 +217,7 @@ export async function connectToServer(
  */
 export async function listTools(
 	connection: MCPServerConnection,
-	options?: { signal?: AbortSignal },
+	options?: { signal?: AbortSignal; refresh?: boolean },
 ): Promise<MCPToolDefinition[]> {
 	// Check if server supports tools
 	if (!connection.capabilities.tools) {
@@ -225,7 +225,7 @@ export async function listTools(
 	}
 
 	// Return cached tools if available
-	if (connection.tools) {
+	if (connection.tools && !options?.refresh) {
 		return connection.tools;
 	}
 

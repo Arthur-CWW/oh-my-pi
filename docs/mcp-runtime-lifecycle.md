@@ -170,6 +170,18 @@ Both preserve MCP content and metadata; `structuredContent` is retained in `deta
 
 `session.refreshMCPTools()` delegates to `src/session/session-tools.ts`, which serializes registry mutations, reconciles manager and extension-owned MCP tools, re-wraps the latest tools, and reapplies availability/presentation without restarting. Connected manager tools become enabled; extension-owned MCP tools preserve their previous selection. A failed refresh restores the previous MCP registry. The owning SDK session also installs `setOnToolsChanged`, so late initial connections, server `tools/list_changed` notifications, reconnects, and disconnects can trigger the same rebinding. Explicit `/mcp reconnect <name>` performs one final refresh after the manager reconnect completes.
 
+
+### Scoped single-server tool refresh (`mcp_refresh`)
+
+When an agent needs to refresh tools from an already connected MCP server without tearing down or reconnecting other servers, it dispatches the `mcp_refresh` tool (discoverable as `xd://mcp_refresh` or directly via explicit tool selection):
+
+1. **Validation & State Check**: Verifies that the requested server is configured, currently connected, advertises tools capability, and the session is active with a valid MCP manager and `refreshMCPServerTools` callback. Disconnected, unconfigured, or tool-unsupported servers fail with a normal `ToolError`; `mcp_refresh` never reconnects or configures servers.
+2. **Catalog Fetch**: Awaits `MCPManager.refreshServerTools(server)`, which issues `tools/list` with `{ refresh: true }` over the existing transport. Cached tools are preserved intact until a new list succeeds completely; if listing fails, the previous cache remains active and the raw error propagates to the tool layer.
+3. **Session Rebind Barrier & Cancellation**: The calling session awaits `session.refreshMCPTools(...)` to serialize registry mutation and guarantee that refreshed tools are bound into the session dispatch table before `mcp_refresh` returns. An aborted turn (`untilAborted`) stops the caller from waiting immediately, while the shared manager refresh continues in the background and may complete independently.
+4. **Delta Calculation**: Compares the pre-refresh descriptor snapshot (including annotations, descriptions, and schemas) against the new descriptors using normalized OMP dispatch names via deep structural equality (`Bun.deepEquals`), reporting `{ server, status: "refreshed", added, changed, removed, visibility: "available_for_subsequent_tool_calls" }`.
+5. **Dispatch Isolation**: Calls already running or awaiting approval maintain their captured dispatch contracts; subsequent calls dispatch against the newly bound tool descriptors.
+6. **Scope Boundaries**: Scoped exclusively to the specified server's tool catalog. It does not perform full server reload, transport reconnect, configuration re-read, or native extension / arbitrary JS/TS extension module hot reloads (reloading plugins does not reimport arbitrary native or extension modules).
+
 ### Live settings reconciliation
 
 The owning SDK session listens for `mcp.enableProjectConfig` changes: it disconnects affected project entries, restores user definitions they shadowed, or loads newly allowed project entries without `/mcp reload`. Browser-MCP reconciliation is serialized and follows whether the built-in browser prelude is actually callable. Borrowed managers keep the parent's single-slot tools/prompts/resources callbacks; each session still installs its own notification listener.
