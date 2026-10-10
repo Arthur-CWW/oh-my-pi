@@ -15,6 +15,30 @@
 - Execution is single-shot and emits no streaming progress updates.
 - Availability requires an active session with an `MCPManager` and a session-bound `refreshMCPServerTools` callback. Disposed sessions or sessions without MCP management fail execution immediately.
 
+## Installed Feature Runtime
+
+The scoped-refresh candidate is installed in a dedicated user-owned Nix profile,
+separate from the official-release `omp` profile:
+
+```sh
+~/.local/state/nix/profiles/omp-scoped-refresh/bin/omp --config ~/.omp/agent/testing.yml
+```
+
+Its rooted package is `/nix/store/shjw242535xmlrzzy9rfw3h949pclivk-omp-18.8.7-scoped-refresh-81f76019`.
+The executable reports `18.8.7`; its SHA-256 is
+`b486b62425e7f89d1f5ef06638dfaa383e96baf240f4d92f29174181c7546911`,
+built from source `81f76019d2221bd53b2c0b65a57de9cd25d0af5c`.
+The repository's `bun --cwd=packages/coding-agent run build` produced the binary;
+the maintained dotfiles `packages/agent-tools` OMP derivation packaged it with
+only its source/version attributes overridden, then `nix-env --profile` selected it.
+
+The ordinary default `omp` currently selects the official release without this
+patch; its updater was not paused or modified. Existing running sessions do not
+gain a newly compiled builtin automatically. Use the dedicated entrypoint for a
+new session; upstream adoption and official-release installation remain separate.
+The installed no-model proof and exact rebuild/install recipe are retained in
+`~/.local/state/omp-mcp-refresh-20261010/installation-receipt.json`.
+
 ## Inputs
 
 | Field | Type | Required | Description |
