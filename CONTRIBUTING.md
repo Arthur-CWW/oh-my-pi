@@ -75,6 +75,27 @@ result in the pull request:
 development commands and repository structure, see
 [`packages/coding-agent/DEVELOPMENT.md`](packages/coding-agent/DEVELOPMENT.md).
 
+### CI and local verification
+
+Automated CI runs via `ci-linux.yml` on self-hosted nixbox runners for pushes to `main` and same-repository pull requests. All 11 validation jobs plus the `gate` check must succeed. Native addons are compiled directly from the checkout.
+
+Common local commands matching CI checks:
+
+- **Type check & linting:**
+  - `bun check` — workspace TypeScript lint (`oxlint`/`oxfmt`) and workspace checks.
+  - `bun run ci:check:full` — runs `check:ts` across the workspace.
+  - `cargo deny --locked --offline check licenses sources` — offline dependency license and source policy check.
+- **TypeScript tests:**
+  - `bun test` — local fast suite.
+  - `bun run ci:test:ts` — full workspace TS tests.
+- **Rust tests & validation:**
+  - `bun run test:rs` / `bazelisk test //crates/...` — run Rust tests.
+  - `bazelisk build --config=clippy //crates/...` — workspace Clippy checks.
+  - `bazelisk build --config=rustfmt //crates/...` — workspace rustfmt formatting.
+- **Web & install checks:**
+  - `bun run collab:web:build` — build collab web bundle.
+  - `bun run ci:test:smoke` — smoke test the coding agent CLI.
+
 Keep each pull request to one logical change. Avoid unrelated cleanup,
 drive-by refactors, generated noise, or features that were not part of the
 agreed scope.

@@ -1,61 +1,6 @@
-name: CI
+name: Manual release and platform validation
 
 on:
-   push:
-      branches: [main]
-      paths:
-         - "packages/**"
-         - "crates/**"
-         - "scripts/**"
-         - "bazel/**"
-         - "MODULE.bazel"
-         - "MODULE.bazel.lock"
-         - "BUILD.bazel"
-         - ".bazelrc"
-         - ".bazelignore"
-         - ".bazelversion"
-         - "Cargo.toml"
-         - "Cargo.lock"
-         - "deny.toml"
-         - "about.toml"
-         - "LICENSE"
-         - "THIRD-PARTY-NOTICES.txt"
-         - "rust-toolchain.toml"
-         - "rustfmt.toml"
-         # A root dependency change (lockfile/catalog/patches) affects every
-         # job; without these a lockfile-only push shipped untested — and a
-         # release retagged onto such a commit never triggered its run.
-         - "bun.lock"
-         - "bunfig.toml"
-         - "package.json"
-         - "patches/**"
-         - ".github/**"
-   pull_request:
-      branches: [main]
-      paths:
-         - "packages/**"
-         - "crates/**"
-         - "scripts/**"
-         - "bazel/**"
-         - "MODULE.bazel"
-         - "MODULE.bazel.lock"
-         - "BUILD.bazel"
-         - ".bazelrc"
-         - ".bazelignore"
-         - ".bazelversion"
-         - "Cargo.toml"
-         - "Cargo.lock"
-         - "deny.toml"
-         - "about.toml"
-         - "LICENSE"
-         - "THIRD-PARTY-NOTICES.txt"
-         - "rust-toolchain.toml"
-         - "rustfmt.toml"
-         - "bun.lock"
-         - "bunfig.toml"
-         - "package.json"
-         - "patches/**"
-         - ".github/**"
    workflow_dispatch:
       inputs:
          skip_npm:
@@ -63,17 +8,12 @@ on:
             type: boolean
             default: false
 
-# Release runs publish a `v*` tag pushed atomically with main HEAD; sharing
-# the cheap branch-wide `CI-refs/heads/main` group meant a later main push
-# silently cancelled the in-flight release and left the tag without a GitHub
-# Release or npm publish (#2564). Detect release runs at workflow-scheduling
-# time via the release-script commit subject (`chore: bump version to vX.Y.Z`),
-# via `v*` tag-ref dispatches, and via manual dispatches whose tag-on-HEAD
-# status is only known after checkout; scope them to a per-sha group with no
-# cancellation. Every other event keeps branch-wide cancellation for PR/main churn.
+# Concurrency: manual workflow_dispatch runs scope to per-SHA groups with no
+# cancellation so multiple dispatches or concurrent tag/commit runs do not abort
+# each other.
 concurrency:
-   group: "${{ github.workflow }}-${{ (startsWith(github.event.head_commit.message, 'chore: bump version to ') || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && format('release-{0}', github.sha) || github.ref }}"
-   cancel-in-progress: "${{ !(startsWith(github.event.head_commit.message, 'chore: bump version to ') || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') }}"
+   group: "${{ github.workflow }}-${{ github.sha }}"
+   cancel-in-progress: false
 
 env:
    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -82,22 +22,13 @@ permissions:
    contents: read
 
 jobs:
-   # scripts/release.ts pushes the version-bump commit and its `v*` tag
-   # atomically (`git push --atomic origin refs/heads/main:refs/heads/main
-   # <sha>:refs/tags/v<version>`), so a release now arrives as a single `push` to
-   # `refs/heads/main` — we no longer trigger on the tag ref at all (see
-   # `on.push`). This one branch-push run is therefore authoritative: it runs the
-   # full build AND, when HEAD carries a release tag, the release/publish jobs.
-   # `release_metadata` resolves that tag once so downstream jobs switch on
-   # `is-release` and address the tag by name — `github.ref` is
-   # `refs/heads/main` here, not the tag. A `workflow_dispatch` from a `v*` tag
-   # ref (or from a tagged main HEAD) is also treated as a release.
+   # Resolves release metadata for manual dispatches. A workflow_dispatch from
+   # a `v*` tag ref (or from a tagged main HEAD) is treated as a release run,
+   # causing downstream jobs to switch on `is-release` and address the tag by name.
    release_metadata:
       name: Resolve release metadata
-      # Hosted, not omp-kata: this ~20 s git-tag probe gates the whole release
-      # chain, and queueing it behind the 4-runner kata pool adds dead minutes
-      # to the darwin critical path.
-      runs-on: ubuntu-22.04
+      # The metadata/status probe uses the same isolated nixbox compute as checks.
+      runs-on: [self-hosted, nixbox]
       outputs:
          is-release: ${{ steps.detect.outputs.is-release }}
          release-tag: ${{ steps.detect.outputs.release-tag }}
@@ -105,11 +36,9 @@ jobs:
          # the GitHub release prerelease, and skip the stable-only brew tap.
          channel: ${{ steps.detect.outputs.channel }}
       steps:
-         # Only a main-branch run needs tags fetched, so `git tag --points-at
-         # HEAD` can see the freshly-pushed `v*`. A tag-ref dispatch reads the
-         # tag straight from `github.ref_name`, and fetching `--tags` while
-         # checkout uses an explicit tag refspec makes git refuse — so scope
-         # fetch-tags to main refs.
+         # Tagged main dispatches need tags fetched so `git tag --points-at HEAD`
+         # can see the release tag. A tag-ref dispatch reads the tag straight
+         # from `github.ref_name`. Scope fetch-tags to main refs.
          - uses: actions/checkout@v4
            with:
               fetch-tags: ${{ github.ref == 'refs/heads/main' }}
@@ -125,9 +54,7 @@ jobs:
                   release_tag="${{ github.ref_name }}"
                   ;;
                 refs/heads/main)
-                  if [ "${{ github.event_name }}" != "pull_request" ]; then
-                    release_tag=$(git tag --points-at HEAD | grep -E '^v[0-9]' | head -n1 || true)
-                  fi
+                  release_tag=$(git tag --points-at HEAD | grep -E '^v[0-9]' | head -n1 || true)
                   ;;
               esac
               if [ -n "$release_tag" ]; then
@@ -145,19 +72,15 @@ jobs:
 
    check:
       name: Lint, type check & web build
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/bun-install
          - name: Verify Rust license compliance (cargo-deny 0.20.2)
            run: |
               cargo install --locked --version 0.20.2 cargo-deny
-              # `--offline` needs every workspace crate already in the registry
-              # cache. PR runs use a fresh GitHub-hosted runner (see runs-on
-              # above), where the only prior cargo work is the cargo-deny
-              # install, so nothing populates the index for our own graph and
-              # resolution fails. Non-PR events land on omp-kata, whose Cargo
-              # cache is warm, which is why main stayed green. Fetch first.
+              # Offline policy checks require the workspace registry graph.
               cargo fetch --locked
               cargo deny --locked --offline check licenses sources
          - name: Type check workspace
@@ -165,17 +88,12 @@ jobs:
          - name: Build collab web
            run: bun run collab:web:build
 
-   # Rust validation (tests, clippy, rustfmt) runs on non-PR events only.
-   # Native-changing PRs are rare enough that they do not warrant PR-side
-   # Rust validation or a PR-side addon build (see native_addons): Rust is
-   # validated post-merge on main (kata remote cache, warm) and again at
-   # release. A skipped required check still satisfies branch protection.
    rust_validate:
       name: Validate Rust workspace (bazel)
-      if: github.event_name != 'pull_request'
-      runs-on: omp-kata
+      runs-on: [self-hosted, nixbox, cap-js]
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/bun-install
          - id: cache
            uses: ./.github/actions/bazel-cache
@@ -209,78 +127,18 @@ jobs:
          - name: Rustfmt
            run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=rustfmt //crates/...
 
-   # Provides the native addons every downstream TS job installs. PRs never
-   # build: they fetch the latest release's Linux x64 pair from the
-   # @oh-my-pi/pi-natives-linux-x64 npm leaf instead. The workspace loader
-   # skips its version sentinel for workspace loads, so release addons load
-   # fine under a newer checkout; a PR whose TS tests depend on changed
-   # native behavior fails visibly and the native side lands via main.
-   # Main (kata, cluster remote cache) builds all Linux-hosted targets with
-   # bazel. Job name says "bazel" for continuity with required checks.
+   # Build the checkout's native addons for the manual release/platform suite.
    native_addons:
       name: Build native addons (bazel)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       steps:
          - uses: actions/checkout@v4
-
-         # ---- PR path: latest release addons from npm ----
-         - name: Fetch release native addons (npm)
-           if: github.event_name == 'pull_request'
-           shell: bash
-           run: |
-              set -euo pipefail
-              tarball="$(npm view @oh-my-pi/pi-natives-linux-x64@latest dist.tarball)"
-              echo "Fetching $tarball"
-              curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
-              mkdir -p bazel-bin/natives-linux-x64-baseline bazel-bin/natives-linux-x64-modern
-              cp "$RUNNER_TEMP/package/pi_natives.linux-x64-baseline.node" bazel-bin/natives-linux-x64-baseline/
-              cp "$RUNNER_TEMP/package/pi_natives.linux-x64-modern.node" bazel-bin/natives-linux-x64-modern/
-         # A corrupt download must fail here, not as a confusing dlopen error
-         # in every downstream test shard.
-         - name: Smoke release addons
-           if: github.event_name == 'pull_request'
-           shell: bash
-           run: |
-              set -euo pipefail
-              # NOTE: `bun -e 'require("./x.node")'` swallows dlopen failures
-              # (exit 0 on a bogus addon); a script file enforces them in
-              # both bun and node. Verified against a corrupt .node fixture.
-              cat > "$RUNNER_TEMP/smoke-addons.js" <<'EOF'
-              for (const f of process.argv.slice(2)) {
-               const m = require(f);
-               if (!m || Object.keys(m).length === 0) {
-               	console.error(`addon failed to load: ${f}`);
-               	process.exit(1);
-               }
-              }
-              EOF
-              loader=node
-              if command -v bun >/dev/null 2>&1; then loader=bun; fi
-              "$loader" "$RUNNER_TEMP/smoke-addons.js" \
-                "$PWD/bazel-bin/natives-linux-x64-baseline/pi_natives.linux-x64-baseline.node" \
-                "$PWD/bazel-bin/natives-linux-x64-modern/pi_natives.linux-x64-modern.node"
-         # Make the policy visible on the rare native-touching PR instead of
-         # leaving a reviewer to wonder which addons the tests exercised.
-         # Best-effort: a diff-API failure must not fail the job over a notice.
-         - name: Note native changes tested against release addons
-           if: github.event_name == 'pull_request'
-           shell: bash
-           env:
-              GH_TOKEN: ${{ github.token }}
-           run: |
-              if gh pr diff ${{ github.event.pull_request.number }} --name-only 2>/dev/null \
-                 | grep -qE '^(crates/|bazel/|Cargo\.(toml|lock)|MODULE\.bazel(\.lock)?|BUILD\.bazel|\.bazelrc|\.bazelignore|\.bazelversion|rust-toolchain\.toml|rustfmt\.toml)'; then
-                echo "::notice title=Native sources changed::PR CI tests against the latest release addons by design; native changes are validated post-merge on main and at release."
-              fi
-
-         # ---- main path: bazel build of all Linux-hosted targets ----
+         - uses: ./.github/actions/nix-dev-env
          - id: cache
-           if: github.event_name != 'pull_request'
            uses: ./.github/actions/bazel-cache
            with:
               scope: linux
          - name: Build native addons once
-           if: github.event_name != 'pull_request'
            run: |
               set -eo pipefail
               if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
@@ -308,7 +166,6 @@ jobs:
          # thousands of actions is the failure mode that made CI slow — make
          # it visible in the run summary instead of discovering it weeks in.
          - name: Report bazel cache stats
-           if: github.event_name != 'pull_request'
            shell: bash
            run: |
               # Bazel runs with --color=yes (config=ci); strip ANSI before
@@ -327,12 +184,13 @@ jobs:
 
    test_workspace:
       name: Test TS workspace fast
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 20
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
@@ -350,12 +208,13 @@ jobs:
 
    test_coding_agent_singleton:
       name: Test coding-agent singleton/global-state (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 20
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
@@ -368,12 +227,13 @@ jobs:
 
    test_ts_native:
       name: Test TS native/integration packages
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
@@ -386,12 +246,13 @@ jobs:
 
    test_coding_agent_ui:
       name: Test coding-agent UI/TUI (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
@@ -404,12 +265,13 @@ jobs:
 
    test_coding_agent_runtime:
       name: Test coding-agent runtime/session (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
@@ -424,12 +286,13 @@ jobs:
 
    test_coding_agent_native:
       name: Test coding-agent native/unit (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
@@ -442,12 +305,13 @@ jobs:
 
    test_smoke:
       name: Test CLI smoke (TS)
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 15
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
@@ -458,11 +322,12 @@ jobs:
 
    install_methods:
       name: Install method smoke tests
-      runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
+      runs-on: [self-hosted, nixbox, cap-js]
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
@@ -490,9 +355,10 @@ jobs:
          needs.test_smoke.result == 'success' && needs.check.result == 'success' &&
          needs.install_methods.result == 'success' }}
       needs: [release_metadata, check, rust_validate, native_addons, test_workspace, test_coding_agent_singleton, test_ts_native, test_coding_agent_ui, test_coding_agent_runtime, test_coding_agent_native, test_smoke, install_methods]
-      runs-on: ubuntu-22.04
+      runs-on: [self-hosted, nixbox, cap-js]
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/bun-install
          # Generated-config drift gate: bazel/clippy.bazelrc is maintained by
          # scripts/release.ts (like the lockfiles); a stale file only blocks

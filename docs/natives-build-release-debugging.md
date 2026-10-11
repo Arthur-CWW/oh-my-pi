@@ -138,54 +138,45 @@ build --tls_certificate=infra/bazel-remote/ca.crt
 
 ## CI
 
-### Split Rust validation and addon production
+### CI architecture and workflow contracts
 
-`.github/workflows/ci.yml` separates `rust_validate` from `native_addons`; TypeScript jobs depend only on `native_addons`.
+Automated CI runs on self-hosted `nixbox` runners (`ci-linux.yml` and `nix.yml`), guarded to same-repository execution (`github.event.pull_request.head.repo.full_name == github.repository` on PRs). `ci-linux.yml` runs on push to `main`, same-repo `pull_request`, and `workflow_dispatch`. `nix.yml` runs automatically on path-matched push to `main` and same-repo `pull_request` (no `workflow_dispatch`).
 
-**Pull requests never build or validate Rust.** Native-affecting PRs are rare enough that they don't warrant a PR-side bazel build: `rust_validate` is skipped entirely (`if: github.event_name != 'pull_request'`), and `native_addons` fetches the latest release's Linux x64 addon pair from the `@oh-my-pi/pi-natives-linux-x64` npm leaf, smoke-loads both, and uploads them as the `native-addons` workflow artifact. The loader skips its version sentinel for workspace loads, so release-versioned addons load fine under a newer checkout. A PR whose TypeScript tests depend on changed native behavior fails visibly (and CI emits a notice on any native-touching PR); the Rust side is validated post-merge on main and again at release.
+- **`ci-linux.yml` (Linux CI + CI gate):**
+  - Runs 11 real jobs across lint/typecheck, Rust validation, native addons, TS test suites, and install smoke tests, culminating in a required `gate` job that checks all 11 jobs succeeded.
+  - **Native addons are always built from this checkout:** The `native_addons` job builds all six Linux-buildable native targets via Bazel in serial (to prevent concurrent rustc link memory spikes from exhausting runner memory), then builds aggregate `//:natives-linux-all` as a consistency check. The resulting `.node` files are uploaded as the `native-addons` workflow artifact. Downstream TS test and install jobs download this artifact via `.github/actions/native-artifacts` without invoking Bazel.
+  - **There is no release PR fallback:** Addons are never fetched from published release leaves during PR runs.
+  - **`rust_validate` (Bazel):** Runs the full Rust test suite (`bazelisk test //crates/...`), Clippy under three distinct policies (`clippy-strict` on workspace-lint opted-in crates, `clippy` for default crates, and `clippy-ported` for `pi-builtins`), and `rustfmt` formatting check.
+  - **`check`:** Runs `cargo deny --locked --offline check licenses sources` (after locked fetch), workspace typecheck (`bun run ci:check:full`), and collab web build (`bun run collab:web:build`).
 
-On non-PR events both jobs run on `omp-kata` pods against the cluster remote cache. `rust_validate` runs:
+- **`nix.yml` (OMP Nix):**
+  - Evaluates flake checks (`nix flake check --no-build`) and verifies `bun-lock` (`nix build --no-link .#checks.x86_64-linux.bun-lock`) on same-repo events using `[self-hosted, nixbox, cap-nix]`.
 
-```bash
-bazelisk --bazelrc="$rc" test //crates/...                 # full Rust suite
-# clippy scope mirrors `cargo clippy --workspace` (libraries only), split by
-# lint policy via a query kind filter:
-bazelisk query "kind('rust_library|rust_shared_library', //crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-voice/... + //crates/pi-walker/...)" \
-  | xargs bazelisk --bazelrc="$rc" build --config=clippy-strict --
-bazelisk query "kind('rust_library|rust_shared_library', //crates/... - (…strict set…) - //crates/vendor/brush-core/... - //crates/pi-builtins/...)" \
-  | xargs bazelisk --bazelrc="$rc" build --config=clippy --
-bazelisk --bazelrc="$rc" build --config=rustfmt //crates/...
-```
+- **Manual-only workflows (`ci.yml` & `bazel-cache-warm.yml`):**
+  - `ci.yml` is strictly manual (`workflow_dispatch`) for multi-platform releases, macOS/Windows/ARM validation, and npm OIDC publishing. It does not run automatically on push or PRs.
+  - `bazel-cache-warm.yml` is manual-only (`workflow_dispatch`) to seed GitHub-hosted Darwin disk caches when needed.
 
-- `--config=clippy` = rules_rust clippy aspect + `-Dwarnings`; `--config=clippy-strict` layers the generated `bazel/clippy.bazelrc` for crates with `[lints] workspace = true`.
-- `--config=rustfmt` = rustfmt aspect against the workspace `rustfmt.toml`.
+### Runner environment: Bun cache, temp directories, and Bazel execution
 
-`native_addons` on main builds the six Linux-hosted targets one at a time to avoid concurrent-link OOMs, then builds `//:natives-linux-all` as an aggregate consistency check. It uploads every `.node` output as the `native-addons` workflow artifact. Downstream jobs use `.github/actions/native-artifacts` to download that artifact and install the requested target set without invoking Bazel.
+- **Bun runner cache & temp semantics (`.github/actions/bun-install`):**
+  - Self-hosted `nixbox` runners supply a persistent, per-runner `BUN_INSTALL_CACHE_DIR`. It is preserved directly and never wrapped in job-local or `actions/cache` fallbacks.
+  - Under `DynamicUser` / `ProtectSystem=strict`, `$HOME` may be unwritable. Temp directories are explicitly configured: `BUN_TMPDIR=$RUNNER_TEMP` and `TMPDIR=$RUNNER_TEMP`, and missing pinned Bun binaries install into `$RUNNER_TEMP/.bun`.
 
-Bazel native jobs need no toolchain setup: bazelisk is on the GitHub images and baked into the kata runner image, while Bazel fetches Rust/zig/LLVM/xwin hermetically. The Windows ARM64 host build uses the Rust, Ninja, CMake, and Visual Studio ARM64 tools installed on `windows-11-arm`; `rust-toolchain.toml` selects the pinned nightly.
+- **Bazel cache, local fallback, and host exec compiler (`.github/actions/bazel-cache`, `.github/actions/nix-dev-env`):**
+  - When cluster remote cache credentials (`BAZEL_REMOTE_USER` and `BAZEL_REMOTE_PASSWORD`) are present, Bazel connects to the cluster remote cache (`grpcs://bazel-remote.bazel-cache.svc.cluster.local:9092`).
+  - When remote credentials are not set on self-hosted nixbox runners, Bazel configures a bounded local execution fallback (`--jobs=8`, `--local_resources=cpu=8`, `--local_resources=memory=24576`, `--spawn_strategy=local`) to account for nixbox cgroup limits and unprivileged `DynamicUser` restrictions where nested sandboxes / chroot mounts are unavailable.
+  - **Host exec toolchain compiler & execution PATH:** To prevent host-exec link actions (such as `rules_rust` process wrapper or proc-macro links) from invoking an unwrapped host compiler lacking standard C runtime files (`Scrt1.o`, `crti.o`, `-lc`), `.github/actions/nix-dev-env` extracts the pinned Nix devShell wrapped compiler from `NIX_CC` and exports `CC=<wrapped-cc>`. On self-hosted nixbox runners, `.github/actions/bazel-cache` injects `--repo_env=CC=<wrapped-cc>`, `--action_env=PATH`, and `--host_action_env=PATH` into the CI bazelrc fragment. Supplying the devShell `PATH` to target and exec action configurations allows build tools (like `cmake` and `ninja` invoked by build scripts such as `audiopus_sys`) and Bazel test wrappers (such as Rust TestRunner shell scripts like `generate-xml.sh`) to execute reliably under `--incompatible_strict_action_env` without falling back to isolated FHS defaults. Target cross-toolchains (Zig cc / xwin) and other `NIX_*` environment variables remain untouched.
+### Historical bring-up context (preserved)
 
-### Hosted cache warmer
-
-`.github/workflows/bazel-cache-warm.yml` seeds the GitHub-hosted caches that have no other reliable producer: the `release-darwin-*` bazel disk caches (built on the same macOS images as the Darwin legs of the `release_binary_hosted` matrix, so a release's bazel build is the version-bump delta instead of a ~40-min cold graph) and the shared bun store entry PR jobs restore but never save. It triggers only on pushes that can change those archives (crate/bazel/lock inputs, `bun.lock`, `.github/**`).
-
-### `bazel-cache` action (`.github/actions/bazel-cache`)
-
-Single source of truth for cache wiring, emitted as a bazelrc fragment (its `rc` output) that consumers pass via `bazelisk --bazelrc=...` or `OMP_BAZEL_RC`. Two modes are selected via `BAZEL_REMOTE_USER`/`BAZEL_REMOTE_PASSWORD`:
-
-| Runner        | Fragment contents                                                                                                                                                                                            |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| omp-kata pod  | A temporary output root, `--config=ci`, the PVC-backed repository/xwin caches, `--config=cache-rw`, the in-cluster TLS remote-cache endpoint and masked Basic-auth header, plus `--remote_download_toplevel` |
-| GitHub-hosted | `--config=ci`, `--disk_cache=$HOME/.cache/omp-bazel-disk`, and `--repository_cache=$HOME/.cache/omp-bazel-repo`                                                                                              |
-
-Hosted disk caches use `bazel-disk-v3-<scope>-<os>-<arch>-<config-hash>-<source-hash>`. The config hash covers Cargo/Bazel/toolchain settings; the source hash covers `crates/**` and root `BUILD.bazel`. Restores fall back from the exact key to the config-scoped prefix, then to a bare `<scope>-<os>-<arch>` prefix — the bare fallback is what keeps release version bumps (which rewrite `Cargo.toml`/`Cargo.lock` and thus the config hash) from rebuilding cold; bazel's content-addressed action keys make a stale archive a partial hit, never a wrong output. An inexact restore permits one refreshed exact-key save. Before a hosted build, disk-cache files untouched for 14 days are pruned; repository-cache contents are deliberately not age-pruned because extracted files retain upstream mtimes. The remote endpoint resolves only inside the cluster.
+> *Historical note:* Earlier iterations of PR CI skipped Rust/Bazel builds and fetched published release addon leaves from npm for pull requests, relying on in-cluster `omp-kata` pods and hosted GitHub runner caches. Under the current `nixbox` self-hosted CI, all native addons are built from the PR checkout itself and no release leaves are downloaded.
 
 ### Native artifact actions
 
 `.github/actions/bazel-natives` is the direct builder: `bazel-cache` → `OMP_BAZEL_RC=<rc> bun scripts/bazel-natives.ts <targets> --dest <dest>`, followed by a disk-cache save after a hosted miss. `.github/actions/native-artifacts` is the no-build consumer: download `native-addons` → run the same driver with `--source`.
 
-### Release binary builds and publishing
+### Manual release binary builds and publishing (`ci.yml`)
 
-Binary builds are build-only and run in parallel with the test fan-out. `release_binary` (Linux plus cross-built win32-x64) needs only `native_addons`, whose workflow artifact supplies its addons. `release_binary_hosted` needs only `release_metadata` and starts when a release is detected: each Darwin leg builds through `bazel-natives` with scope `release-<target_id>` (seeded near HEAD by the warm workflow), while the `windows-11-arm` leg builds its native addon through Cargo/N-API. Every leg then runs `bun run ci:release:build-binaries` and smoke-tests the executable on its target architecture. Publishing is held behind `release_gate`: `release_native_leaves` downloads all built addons and publishes the six `@oh-my-pi/pi-natives-<tag>` leaves from one Linux runner, and the GitHub release / verify / core npm chain runs beside it.
+Multi-platform release builds are triggered manually via `ci.yml` (`workflow_dispatch`). Binary builds run in parallel with the test fan-out. The `release_binary` matrix (Linux plus cross-built win32-x64) runs on GitHub-hosted runners (`ubuntu-22.04` and `ubuntu-24.04-arm`) and downloads the self-hosted `native_addons` job's workflow artifact to install prebuilt native addons without compiling them. `release_binary_hosted` starts when a release tag is detected: Darwin legs build through `bazel-natives` with scope `release-<target_id>`, while `windows-11-arm` builds its native addon through Cargo/N-API. Every leg runs `bun run ci:release:build-binaries` and smoke-tests the executable on its target architecture. Publishing is held behind `release_gate`: `release_native_leaves` downloads all built addons and publishes the six `@oh-my-pi/pi-natives-<tag>` leaves from one Linux worker, while the root package and binaries are published via npm OIDC and GitHub release assets.
 
 ## Debugging playbook
 
@@ -224,15 +215,15 @@ bazelisk build --nobuild //:natives-win32-x64-baseline
 | audiopus_sys msvc: cmake demands VS generator / rc+mt tools; `try_compile` wants `msvcrtd.lib` | cross cmake on linux/mac hosts; Debug config → `/MDd` which the lean xwin splat lacks                | `CMAKE_GENERATOR_x86_64_pc_windows_msvc=Ninja` + `@msvc_cc`'s `toolchain.cmake` (`CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc`) pinning wrappers + Release try-compile + `/MT` (static CRT, matches the addon policy) |
 | win32 link oddities generally                                                                  | —                                                                                                    | read `bazel/toolchains/msvc/NOTES.md` first: wrapper self-location, `lld-link` flavor/driver-link behavior, `LIB`, `/MD` CRT choice, xwin splat caveats                        |
 | `rust_test(crate = ...)` "can't find crate" at macro expansion                                 | rmeta-only pipelined deps break macro_rules re-export harness compiles                               | rust pipelined_compilation stays OFF (`.bazelrc` note)                                                                                                                         |
-| build script can't find cmake/ninja                                                            | `--incompatible_strict_action_env` — no host env leaks                                               | explicit `PATH` in the crate annotation (`MODULE.bazel`), not host env                                                                                                         |
-
+| build script can't find cmake/ninja                                                            | `--incompatible_strict_action_env` — no host env leaks                                               | CI supplies devShell `PATH` via `--action_env=PATH` and `--host_action_env=PATH` in `bazel-cache`, and cargo build scripts inherit the default shell PATH                    |
+| rules_rust host exec link fails (`Scrt1.o` / `-lc` not found)                                  | host cc autoconfig selected unwrapped `/nix/store/...-gcc-.../bin/gcc` without libc/crt search paths    | ensure `.github/actions/nix-dev-env` exports wrapped `CC` and `.github/actions/bazel-cache` adds `--repo_env=CC` on self-hosted runners; target toolchains remain hermetic      |
 ### Cache behavior
 
-- **omp-kata:** read-write gRPC to the in-cluster bazel-remote (`grpcs://bazel-remote.bazel-cache.svc.cluster.local:9092`, TLS via the committed `infra/bazel-remote/ca.crt`, htpasswd user `ci`). `--remote_local_fallback` plus retries make an outage degrade to local execution rather than fail the build.
-- **GitHub-hosted:** no cluster access; only the darwin release/warm jobs build with bazel here. The v3 `actions/cache` disk key separates config and source generations with prefix + bare fallbacks (see the `bazel-cache` action section above); `.github/workflows/bazel-cache-warm.yml` publishes the `release-darwin-*` archives from the same macOS images as the release consumers.
-- **msvc repos:** the ~2 GiB LLVM download is sha256-pinned and repository-cache backed; the ~1 GiB xwin CRT/SDK splat is fetched from the Microsoft CDN inside the repo rule and is **not** repo-cache backed — a cold output base re-downloads it. Microsoft advances the VS channel payload over time, so remote-cache hit rates for win32 actions degrade gracefully after an MS bump (same property the previous cross toolchain had). Win32 link actions also don't share cache entries across host OSes (linux vs mac clang binaries).
+- **nixbox local fallback:** When running on self-hosted nixbox without remote cache credentials, Bazel executes locally bounded by cgroup allocations (`--jobs=8`, `--local_resources=cpu=8`, `--local_resources=memory=24576`, `--spawn_strategy=local`).
+- **omp-kata / cluster remote cache (preserved legacy infrastructure):** Read-write gRPC to the in-cluster bazel-remote (`grpcs://bazel-remote.bazel-cache.svc.cluster.local:9092`, TLS via `infra/bazel-remote/ca.crt`, htpasswd user `ci`). `--remote_local_fallback` plus retries degrade to local execution if the remote cache is unavailable.
+- **GitHub-hosted (manual release/warm workflows only):** Used for Darwin release/warm jobs via the v3 `actions/cache` disk key separating config and source generations.
+- **msvc repos:** The ~2 GiB LLVM download is sha256-pinned and repository-cache backed; the ~1 GiB xwin CRT/SDK splat is fetched from the Microsoft CDN inside the repo rule and is **not** repo-cache backed — a cold output base re-downloads it.
 - Server-side operations (deploy, TLS/auth, egress, poisoning boundary): `infra/docs/04-arc-and-caching.md` §5.
-
 ## Target/variant model and naming conventions
 
 ## Platform tag

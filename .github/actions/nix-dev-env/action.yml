@@ -1,0 +1,47 @@
+name: Load the repository Nix development environment
+description: Reuse the pinned dev shell on nixbox without apt, sudo, or runner-specific dependency lists.
+runs:
+  using: composite
+  steps:
+    - name: Export pinned native tools and libraries
+      shell: bash
+      run: |
+        {
+          echo "BUN_TMPDIR=$RUNNER_TEMP"
+          echo "TMPDIR=$RUNNER_TEMP"
+        } >> "$GITHUB_ENV"
+        set -euo pipefail
+        environment="$RUNNER_TEMP/nix-dev-env.json"
+        nix print-dev-env --json --accept-flake-config > "$environment"
+        # Export only toolchain variables, never the complete process environment.
+        for name in PATH PKG_CONFIG_PATH LD_LIBRARY_PATH NIX_CFLAGS_COMPILE NIX_LDFLAGS CMAKE_PREFIX_PATH CMAKE_POLICY_VERSION_MINIMUM PCRE2_SYS_STATIC RUST_SRC_PATH; do
+          value=$(jq -r --arg name "$name" '.variables[$name].value // empty' "$environment")
+          if [ -n "$value" ]; then
+            if [ "$name" = PATH ]; then
+              printf '%s\n' "$value" | awk -F: '{ for (i = NF; i > 0; i--) if ($i != "") print $i }' >> "$GITHUB_PATH"
+            else
+              printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
+            fi
+          fi
+        done
+
+        # Extract pinned stdenv wrapped compiler from NIX_CC package value.
+        nix_cc=$(jq -r '.variables.NIX_CC.value // empty' "$environment")
+        if [ -z "$nix_cc" ]; then
+          echo "::error::NIX_CC is not defined in the Nix dev environment"
+          exit 1
+        fi
+
+        # Preserve intended wrapper binary (e.g. gcc, clang, or cc) derived from CC if specified, else cc
+        cc_name=$(jq -r '.variables.CC.value // empty' "$environment")
+        if [ -n "$cc_name" ] && [ -x "$nix_cc/bin/$cc_name" ]; then
+          wrapped_cc="$nix_cc/bin/$cc_name"
+        elif [ -x "$nix_cc/bin/cc" ]; then
+          wrapped_cc="$nix_cc/bin/cc"
+        else
+          echo "::error::Wrapped compiler binary not found or not executable in $nix_cc/bin"
+          exit 1
+        fi
+
+        echo "CC=$wrapped_cc" >> "$GITHUB_ENV"
+        rm "$environment"

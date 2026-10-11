@@ -1,0 +1,339 @@
+# Linux validation runs on clean nixbox jobs, including same-repository PRs.
+# Native addons are built from this checkout with Bazel; releases remain manual.
+name: Linux CI
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+  workflow_dispatch: {}
+permissions:
+  contents: read
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+jobs:
+  check:
+    name: Lint, type check & web build
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/bun-install
+      - name: Verify Rust license compliance (cargo-deny 0.20.2)
+        run: |
+          cargo install --locked --version 0.20.2 cargo-deny
+          # Fetch the workspace registry graph before offline policy checks.
+          cargo fetch --locked
+          cargo deny --locked --offline check licenses sources
+      - name: Type check workspace
+        run: bun run ci:check:full
+      - name: Build collab web
+        run: bun run collab:web:build
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+  rust_validate:
+    name: Validate Rust workspace (bazel)
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/bun-install
+      - id: cache
+        uses: ./.github/actions/bazel-cache
+        with:
+          scope: linux
+      - name: Rust tests
+        run: |
+          if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
+          bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" test //crates/...
+      - name: Clippy (workspace lint policy on opted-in crates)
+        run: |
+          bazelisk query "kind('rust_library|rust_shared_library', //crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-vcs/... + //crates/pi-voice/... + //crates/pi-walker/...)" \
+            | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy-strict --
+      - name: Clippy (default lints elsewhere)
+        run: |
+          bazelisk query "kind('rust_library|rust_shared_library', //crates/... - (//crates/pi-ast/... + //crates/pi-iso/... + //crates/pi-natives/... + //crates/pi-shell/... + //crates/pi-vcs/... + //crates/pi-voice/... + //crates/pi-walker/...) - //crates/pi-builtins/... - //crates/vendor/brush-core/...)" \
+            | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy --
+      - name: Clippy (manifest allows on ported pi-builtins)
+        run: |
+          bazelisk query "kind('rust_library|rust_shared_library', //crates/pi-builtins/...)" \
+            | xargs bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=clippy-ported --
+      - name: Rustfmt
+        run: bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build --config=rustfmt //crates/...
+  native_addons:
+    name: Build native addons (bazel)
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - id: cache
+        uses: ./.github/actions/bazel-cache
+        with:
+          scope: linux
+      - name: Build native addons once
+        run: |
+          set -eo pipefail
+          if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
+          # Each addon cdylib link peaks at several GiB of rustc RSS.
+          # Serialize the six builds within this runner's 8 CPU / 32 GiB
+          # allocation, sharing Bazel analysis and cached actions between
+          # invocations. Assemble the aggregate afterward; it also catches
+          # targets added to the filegroup but missing from this list.
+          : > "$RUNNER_TEMP/bazel-build.log"
+          for target in \
+            natives-linux-arm64 \
+            natives-linux-musl-arm64 \
+            natives-linux-musl-x64-baseline \
+            natives-linux-x64-baseline \
+            natives-linux-x64-modern \
+            natives-win32-x64-baseline; do
+            bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build "//:$target" 2>&1 | tee -a "$RUNNER_TEMP/bazel-build.log"
+          done
+          bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" build //:natives-linux-all 2>&1 | tee -a "$RUNNER_TEMP/bazel-build.log"
+      - name: Report bazel cache stats
+        shell: bash
+        run: |
+          # Bazel runs with --color=yes (config=ci); strip ANSI before
+          # matching — escapes split "INFO:" from the process count in
+          # the raw log.
+          summary=$(sed -E 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/bazel-build.log" | grep -E '[0-9]+ processes:' | tail -1 || true)
+          echo "::notice title=Bazel build summary::${summary:-no process summary found}"
+      - name: Upload native addon artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: native-addons
+          path: bazel-bin/natives-*/*.node
+          if-no-files-found: error
+          retention-days: 1
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+  test_workspace:
+    name: Test TS workspace fast
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    needs:
+      - native_addons
+    if: ${{ !cancelled() && needs.native_addons.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/setup-system-deps
+      - uses: ./.github/actions/bun-install
+      - uses: ./.github/actions/native-artifacts
+        with:
+          targets: linux-x64-baseline linux-x64-modern
+      - name: Test workspace packages and repo scripts (TS)
+        env:
+          OMP_TEST_CONCURRENCY: "4"
+        run: |
+          bun run ci:test:ts:workspace
+          # Not `test:scripts`: scripts/musl-release.test.ts fails on main
+          # (its install.sh smoke-check executes a fake binary), so running
+          # the whole group here would red this job on an unrelated break.
+          bun test scripts/ci-test-ts.test.ts scripts/release.test.ts
+  test_coding_agent_singleton:
+    name: Test coding-agent singleton/global-state (TS)
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    needs:
+      - native_addons
+    if: ${{ !cancelled() && needs.native_addons.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/setup-system-deps
+      - uses: ./.github/actions/bun-install
+      - uses: ./.github/actions/native-artifacts
+        with:
+          targets: linux-x64-baseline linux-x64-modern
+      - name: Test coding-agent singleton/global-state bucket
+        run: bun run ci:test:coding-agent:singleton
+  test_ts_native:
+    name: Test TS native/integration packages
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    needs:
+      - native_addons
+    if: ${{ !cancelled() && needs.native_addons.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/setup-system-deps
+      - uses: ./.github/actions/bun-install
+      - uses: ./.github/actions/native-artifacts
+        with:
+          targets: linux-x64-baseline linux-x64-modern
+      - name: Test native/TUI/browser-ish packages (TS)
+        env:
+          OMP_TEST_CONCURRENCY: "4"
+        run: bun run ci:test:ts:native
+  test_coding_agent_ui:
+    name: Test coding-agent UI/TUI (TS)
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    needs:
+      - native_addons
+    if: ${{ !cancelled() && needs.native_addons.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/setup-system-deps
+      - uses: ./.github/actions/bun-install
+      - uses: ./.github/actions/native-artifacts
+        with:
+          targets: linux-x64-baseline linux-x64-modern
+      - name: Test coding-agent UI/TUI bucket
+        env:
+          OMP_TEST_CONCURRENCY: "2"
+        run: bun run ci:test:coding-agent:ui
+  test_coding_agent_runtime:
+    name: Test coding-agent runtime/session (TS)
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    needs:
+      - native_addons
+    if: ${{ !cancelled() && needs.native_addons.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/setup-system-deps
+      - uses: ./.github/actions/bun-install
+      - uses: ./.github/actions/native-artifacts
+        with:
+          targets: linux-x64-baseline linux-x64-modern
+      - name: Test coding-agent runtime bucket
+        env:
+          OMP_TEST_CONCURRENCY: "4"
+        run: bun run ci:test:coding-agent:runtime
+  test_coding_agent_native:
+    name: Test coding-agent native/unit (TS)
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    needs:
+      - native_addons
+    if: ${{ !cancelled() && needs.native_addons.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/setup-system-deps
+      - uses: ./.github/actions/bun-install
+      - uses: ./.github/actions/native-artifacts
+        with:
+          targets: linux-x64-baseline linux-x64-modern
+      - name: Test coding-agent native/unit bucket
+        env:
+          OMP_TEST_CONCURRENCY: "4"
+        run: bun run ci:test:coding-agent:native
+  test_smoke:
+    name: Test CLI smoke (TS)
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    needs:
+      - native_addons
+    if: ${{ !cancelled() && needs.native_addons.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/setup-system-deps
+      - uses: ./.github/actions/bun-install
+      - uses: ./.github/actions/native-artifacts
+        with:
+          targets: linux-x64-baseline linux-x64-modern
+      - name: CLI smoke test
+        run: bun run ci:test:smoke
+  install_methods:
+    name: Install method smoke tests
+    runs-on:
+      - self-hosted
+      - nixbox
+      - cap-js
+    needs:
+      - native_addons
+    if: ${{ !cancelled() && needs.native_addons.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/nix-dev-env
+      - uses: ./.github/actions/setup-system-deps
+      - uses: ./.github/actions/bun-install
+      - uses: ./.github/actions/native-artifacts
+        with:
+          targets: linux-x64-baseline linux-x64-modern
+      - name: Install method smoke tests
+        env:
+          OMP_INSTALL_TEST_SKIP_NATIVE_BUILD: "1"
+        run: bun run ci:test:install-methods
+  gate:
+    name: CI gate
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs:
+      - check
+      - rust_validate
+      - native_addons
+      - test_workspace
+      - test_coding_agent_singleton
+      - test_ts_native
+      - test_coding_agent_ui
+      - test_coding_agent_runtime
+      - test_coding_agent_native
+      - test_smoke
+      - install_methods
+    runs-on:
+      - self-hosted
+      - nixbox
+    permissions: {}
+    steps:
+      - name: Require every Linux validation job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"

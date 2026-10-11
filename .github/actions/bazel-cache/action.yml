@@ -151,6 +151,23 @@ runs:
                echo "common --repository_cache=$HOME/.cache/omp-bazel-repo"
              } > "$rc"
            fi
+           # nixbox's service cgroup is smaller than the 128-thread host.
+           # Bazel actions remain inside that job sandbox; nested mounts/chroot
+           # are intentionally unavailable to its unprivileged DynamicUser.
+           if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ] && [ "$REMOTE" != true ]; then
+             if [ -z "${CC:-}" ] || [ ! -x "${CC:-}" ]; then
+               echo "::error::CC is missing or not executable; expected pinned wrapped compiler from nix-dev-env"
+               exit 1
+             fi
+             printf '%s\n' \
+               "common --repo_env=CC=$CC" \
+               'build --action_env=PATH' \
+               'build --host_action_env=PATH' \
+               'build --jobs=8' \
+               'build --local_resources=cpu=8' \
+               'build --local_resources=memory=24576' \
+               'build --spawn_strategy=local' >> "$rc"
+           fi
 
            {
              echo "rc=$rc"

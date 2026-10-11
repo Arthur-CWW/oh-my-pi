@@ -14,38 +14,19 @@ name: Warm bazel disk cache
 #                             without warming here every release rebuilt the
 #                             darwin addons cold (~40-50 min on
 #                             macos-15-intel — run 30357804722).
-#   warm_bun (ubuntu-22.04)-> the shared `bun-<os>-<lockhash>` store entry.
-#                             PR jobs restore it but never save (per-PR-ref
-#                             copies of the ~500 MB store once ate ~9.4 GB of
-#                             the 10 GB repo cache quota and evicted every
-#                             bazel archive).
+#   warm_bun (nixbox)      -> seeds the self-hosted runner-local persistent
+#                             Bun install cache directory (BUN_INSTALL_CACHE_DIR)
+#                             via bun-install without using actions/cache.
 #
 # The v3 key embeds a crates/** source fingerprint, so a native change on
 # main means an exact miss: the build seeds from a previous generation via
 # the prefix/bare restore keys and the refreshed archive is saved. An exact
 # hit makes every invocation a cache replay and saves nothing.
 #
-# Paths mirror the cache-key inputs (bazel-cache action) plus bun.lock — a
-# packages/** push cannot change any archive, so it does not trigger a warm.
+# Manual warmer: seeds Darwin hosted release archives and self-hosted
+# runner-local Bun store on demand.
 
 on:
-   push:
-      branches: [main]
-      paths:
-         - "crates/**"
-         - "bazel/**"
-         - "MODULE.bazel"
-         - "MODULE.bazel.lock"
-         - "BUILD.bazel"
-         - ".bazelrc"
-         - ".bazelignore"
-         - ".bazelversion"
-         - "Cargo.toml"
-         - "Cargo.lock"
-         - "rust-toolchain.toml"
-         - "rustfmt.toml"
-         - "bun.lock"
-         - ".github/**"
    workflow_dispatch:
 
 permissions:
@@ -86,12 +67,12 @@ jobs:
               targets: ${{ matrix.target }}
               cache-scope: ${{ matrix.scope }}
 
-   # Produces the shared bun store entry PR jobs restore. bun-install's save
-   # half only runs on non-PR events, and main CI jobs run on omp-kata (PVC
-   # store, no GitHub cache), so this is the sole hosted-runner producer.
+   # Seeds the persistent runner-local Bun install cache directory on self-hosted
+   # nixbox runners using bun-install without GitHub Actions cache.
    warm_bun:
       name: Seed bun store cache
-      runs-on: ubuntu-22.04
+      runs-on: [self-hosted, nixbox, cap-bun]
       steps:
          - uses: actions/checkout@v4
+         - uses: ./.github/actions/nix-dev-env
          - uses: ./.github/actions/bun-install

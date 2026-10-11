@@ -48,13 +48,12 @@ permissions:
 jobs:
   evaluate:
     name: Evaluate flake
-    runs-on: ubuntu-22.04
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, nixbox, cap-nix]
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
         with:
-          extra_nix_config: |
-            accept-flake-config = true
+          persist-credentials: false
       - name: Evaluate every supported system
         run: nix flake check --all-systems --no-build --show-trace
       - name: Verify generated Bun dependencies
